@@ -3,20 +3,26 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py,cover
 
 # Virtual environment
 .venv/
 venv/
+env/
+ENV/
+.env
 
 # Logs
 logs/
 *.log
 
-# OS / IDE
+# VS Code / IDE
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# Test / cache
+# pytest / cache
 .pytest_cache/
+.coverage
+htmlcov/
