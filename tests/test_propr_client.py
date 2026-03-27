@@ -44,6 +44,14 @@ class FakeSdkClient:
         self.calls.append(("get_trades", self.account_id))
         return [{"tradeId": "trade-1"}]
 
+    def get_margin_config(self, asset: str) -> dict[str, Any]:
+        self.calls.append(("get_margin_config", (self.account_id, asset)))
+        return {"configId": "cfg-1", "asset": asset}
+
+    def get_leverage_limits(self) -> dict[str, Any]:
+        self.calls.append(("get_leverage_limits", None))
+        return {"defaultMax": 2, "overrides": {"BTC": 5, "ETH": 5}}
+
     def create_order(self, **kwargs: Any) -> list[dict[str, Any]]:
         self.calls.append(("create_order", kwargs))
         return [{"orderId": "order-created-1"}]
@@ -100,6 +108,27 @@ def test_account_endpoints_set_sdk_account_id_before_calls(monkeypatch) -> None:
     assert client.sdk_client.calls[3] == ("get_positions", "acc-1")
     assert client.sdk_client.calls[4] == ("setup", "acc-1")
     assert client.sdk_client.calls[5] == ("get_trades", "acc-1")
+
+
+def test_get_margin_config_sets_account_and_calls_sdk(monkeypatch) -> None:
+    monkeypatch.setattr("broker.propr_client.SDKProprClient", FakeSdkClient)
+    client = ProprClient(ProprConfig(api_key="api-key-1"))
+
+    result = client.get_margin_config("acc-1", "BTC")
+
+    assert result == {"configId": "cfg-1", "asset": "BTC"}
+    assert client.sdk_client.calls[0] == ("setup", "acc-1")
+    assert client.sdk_client.calls[1] == ("get_margin_config", ("acc-1", "BTC"))
+
+
+def test_get_effective_leverage_limits_maps_to_sdk(monkeypatch) -> None:
+    monkeypatch.setattr("broker.propr_client.SDKProprClient", FakeSdkClient)
+    client = ProprClient(ProprConfig(api_key="api-key-1"))
+
+    result = client.get_effective_leverage_limits()
+
+    assert result == {"defaultMax": 2, "overrides": {"BTC": 5, "ETH": 5}}
+    assert client.sdk_client.calls[0] == ("get_leverage_limits", None)
 
 
 def test_create_order_sets_account_and_uses_sdk_signature(monkeypatch) -> None:

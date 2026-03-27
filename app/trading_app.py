@@ -3,20 +3,24 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.risk_guard import RiskGuardResult, evaluate_execution_guards
+from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
 from broker.challenge_service import get_active_challenge_context
 from broker.execution import (
     safe_replace_pending_order,
     submit_agent_order_if_allowed,
 )
 from broker.health_guard import HealthGuardResult, fetch_and_check_core_service_health
-from broker.order_service import ProprOrderService
+from broker.order_service import ProprOrderService, apply_symbol_spec_to_order
 from broker.propr_client import ProprClient
 from broker.state_sync import sync_agent_state_from_propr
 from config.strategy_config import StrategyConfig
 from models.candle import Candle
+from models.order import Order
 from models.propr_challenge import ActiveChallengeContext
 from models.runner_result import StrategyRunResult
+from models.symbol_spec import SymbolSpec
 from strategy.engine import run_agent_cycle
+from strategy.position_sizer import calculate_position_size
 from strategy.state import AgentState
 
 # TODO: Later add challenge-specific risk limits.
@@ -26,11 +30,13 @@ from strategy.state import AgentState
 # TODO: Later add looping and scheduling.
 
 
+
 def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
     for key in keys:
         if key in payload and payload[key] is not None:
             return payload[key]
     return None
+
 
 
 def _extract_external_order_id(payload: dict[str, Any] | None) -> str | None:
@@ -60,6 +66,28 @@ def _extract_external_order_id(payload: dict[str, Any] | None) -> str | None:
     return None
 
 
+
+def _apply_symbol_specific_position_size(
+    order: Order,
+    config: StrategyConfig,
+    account_balance: float,
+    desired_leverage: int,
+    symbol_spec: SymbolSpec,
+) -> Order:
+    sizing_result = calculate_position_size(
+        entry=order.entry,
+        stop_loss=order.stop_loss,
+        account_balance=account_balance,
+        risk_per_trade_pct=config.risk_per_trade_pct,
+        desired_leverage=desired_leverage,
+        symbol_spec=symbol_spec,
+    )
+    prepared_order = order
+    if sizing_result.position_size is not None:
+        prepared_order = order.copy(update={"position_size": sizing_result.position_size})
+    return apply_symbol_spec_to_order(prepared_order, symbol_spec)
+
+
 class AppCycleResult(BaseModel):
     challenge_context: ActiveChallengeContext | None
     synced_state: AgentState | None
@@ -71,6 +99,9 @@ class AppCycleResult(BaseModel):
     skipped_reason: str | None = None
     risk_guard_result: RiskGuardResult | None = None
     health_guard_result: HealthGuardResult | None = None
+    asset_guard_result: AssetGuardResult | None = None
+    symbol_spec_loaded: bool = False
+
 
 
 def run_app_cycle(
@@ -84,8 +115,12 @@ def run_app_cycle(
     max_allowed_drawdown: float | None = None,
     require_healthy_core: bool = True,
     allow_execution: bool = True,
+    desired_leverage: int = 1,
+    symbol_spec: SymbolSpec | None = None,
+    data_source: str = "live",
 ) -> AppCycleResult:
     health_guard_result: HealthGuardResult | None = None
+    symbol_spec_loaded = symbol_spec is not None
     if require_healthy_core:
         health_guard_result = fetch_and_check_core_service_health(client)
         if not health_guard_result.allow_trading:
@@ -100,6 +135,8 @@ def run_app_cycle(
                 skipped_reason=health_guard_result.reason,
                 risk_guard_result=None,
                 health_guard_result=health_guard_result,
+                asset_guard_result=None,
+                symbol_spec_loaded=symbol_spec_loaded,
             )
 
     challenge_context = get_active_challenge_context(client)
@@ -113,6 +150,8 @@ def run_app_cycle(
             skipped_reason="no active challenge",
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
         )
 
     account_id = challenge_context.account_id
@@ -123,6 +162,19 @@ def run_app_cycle(
         account_balance=account_balance,
         state=synced_state,
     )
+
+    if symbol_spec is not None and post_cycle_state.pending_order is not None:
+        resized_order = _apply_symbol_specific_position_size(
+            order=post_cycle_state.pending_order,
+            config=config,
+            account_balance=account_balance,
+            desired_leverage=desired_leverage,
+            symbol_spec=symbol_spec,
+        )
+        post_cycle_state = post_cycle_state.copy(update={"pending_order": resized_order})
+        if strategy_result.order is not None:
+            strategy_result = strategy_result.copy(update={"order": resized_order})
+
     risk_guard_result = evaluate_execution_guards(
         challenge_context,
         max_allowed_drawdown=max_allowed_drawdown,
@@ -131,6 +183,7 @@ def run_app_cycle(
     execution_response: dict | None = None
     submitted_order = False
     replaced_order = False
+    asset_guard_result: AssetGuardResult | None = None
 
     if not risk_guard_result.allow_execution:
         return AppCycleResult(
@@ -144,6 +197,8 @@ def run_app_cycle(
             skipped_reason=risk_guard_result.reason,
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
         )
 
     if not allow_execution:
@@ -158,9 +213,71 @@ def run_app_cycle(
             skipped_reason=None,
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
+        )
+
+    if post_cycle_state.pending_order is not None and data_source == "golden":
+        return AppCycleResult(
+            challenge_context=challenge_context,
+            synced_state=synced_state,
+            strategy_result=strategy_result,
+            post_cycle_state=post_cycle_state,
+            execution_response=None,
+            submitted_order=False,
+            replaced_order=False,
+            skipped_reason="submit is not allowed with golden data source",
+            risk_guard_result=risk_guard_result,
+            health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
+        )
+
+    if (
+        post_cycle_state.pending_order is not None
+        and data_source == "live"
+        and allow_execution
+        and isinstance(client, ProprClient)
+        and symbol_spec is None
+    ):
+        return AppCycleResult(
+            challenge_context=challenge_context,
+            synced_state=synced_state,
+            strategy_result=strategy_result,
+            post_cycle_state=post_cycle_state,
+            execution_response=None,
+            submitted_order=False,
+            replaced_order=False,
+            skipped_reason="missing symbol spec for live execution",
+            risk_guard_result=risk_guard_result,
+            health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
         )
 
     if post_cycle_state.pending_order is not None:
+        asset_guard_result = evaluate_asset_execution_guard(
+            client=client,
+            account_id=account_id,
+            symbol=symbol,
+            desired_leverage=desired_leverage,
+        )
+        if not asset_guard_result.allow_execution:
+            return AppCycleResult(
+                challenge_context=challenge_context,
+                synced_state=synced_state,
+                strategy_result=strategy_result,
+                post_cycle_state=post_cycle_state,
+                execution_response=None,
+                submitted_order=False,
+                replaced_order=False,
+                skipped_reason=asset_guard_result.reason,
+                risk_guard_result=risk_guard_result,
+                health_guard_result=health_guard_result,
+                asset_guard_result=asset_guard_result,
+                symbol_spec_loaded=symbol_spec_loaded,
+            )
+
         if synced_state.pending_order is not None:
             execution_response = safe_replace_pending_order(
                 order_service=order_service,
@@ -204,4 +321,9 @@ def run_app_cycle(
         skipped_reason=None,
         risk_guard_result=risk_guard_result,
         health_guard_result=health_guard_result,
+        asset_guard_result=asset_guard_result,
+        symbol_spec_loaded=symbol_spec_loaded,
     )
+
+
+

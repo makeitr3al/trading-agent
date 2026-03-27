@@ -34,6 +34,7 @@ def _is_order_filled(order: Order, candle: Candle) -> bool:
     return False
 
 
+
 def _build_trade_from_filled_order(order: Order) -> Trade:
     if order.signal_source in ("trend_long", "trend_short"):
         trade_type = TradeType.TREND
@@ -54,6 +55,7 @@ def _build_trade_from_filled_order(order: Order) -> Trade:
         is_active=True,
         break_even_activated=False,
     )
+
 
 
 def run_agent_cycle(
@@ -90,6 +92,24 @@ def run_agent_cycle(
     last_regime = regime_states[-1].regime.value if regime_states else None
     regime_changed = state.last_regime is not None and state.last_regime != last_regime
     current_price = float(closes.iloc[-1])
+
+    duplicate_trend_signal_blocked = (
+        state.trend_signal_consumed_in_regime
+        and state.last_regime is not None
+        and state.last_regime == last_regime
+        and result.decision.action == DecisionAction.PREPARE_TREND_ORDER
+    )
+    if duplicate_trend_signal_blocked:
+        result = result.copy(
+            update={
+                "decision": DecisionResult(
+                    action=DecisionAction.NO_ACTION,
+                    reason="trend signal already consumed in regime",
+                    selected_signal_type=None,
+                ),
+                "order": None,
+            }
+        )
 
     if result.order is not None:
         pending_order = result.order

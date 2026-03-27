@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
@@ -27,6 +28,9 @@ class GoldenDataProvider:
             symbol=None,
             source_name=f"golden:{scenario.name}",
             config=scenario.config,
+            account_balance=scenario.account_balance,
+            active_trade=scenario.active_trade,
+            agent_state=scenario.agent_state,
         )
 
 
@@ -46,17 +50,36 @@ def _load_strategy_scenarios_module() -> ModuleType:
 
 
 
+def _is_zero_arg_builder(name: str, value: object) -> bool:
+    if name.startswith("_") or not name.endswith("_scenario") or not callable(value):
+        return False
+
+    signature = inspect.signature(value)
+    required_parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.default is inspect._empty
+        and parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    ]
+    return not required_parameters
+
+
+
 def _discover_scenario_builders(module: ModuleType) -> dict[str, Callable[[], object]]:
     builders: dict[str, Callable[[], object]] = {}
     for name in dir(module):
-        if not name.endswith("_scenario"):
-            continue
         value = getattr(module, name)
-        if callable(value):
-            scenario = value()
-            scenario_name = getattr(scenario, "name", None)
-            if scenario_name:
-                builders[str(scenario_name)] = value
+        if not _is_zero_arg_builder(name, value):
+            continue
+
+        scenario = value()
+        scenario_name = getattr(scenario, "name", None)
+        if scenario_name:
+            builders[str(scenario_name)] = value
     return builders
 
 

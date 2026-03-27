@@ -18,22 +18,43 @@ Das bevorzugte vereinfachte Schema ist jetzt:
 - `PROPR_PROD_*` fuer bewusste PROD-Nutzung
 - `PROPR_SYMBOL` als gemeinsamer Default fuer manuelle Scripts und Runner
 - `PROPR_REQUIRE_HEALTHY_CORE=YES|NO` fuer den Core-Health-Guard
+- `PROPR_LEVERAGE` fuer die gewuenschte Leverage vor Execution
 - `DATA_SOURCE=live|golden` fuer die Candle-Datenquelle
 - `GOLDEN_SCENARIO` nur dann, wenn `DATA_SOURCE=golden`
+- `HYPERLIQUID_*` fuer echte historische Candle-Daten
 
 BETA ist der sichere Default fuer Entwicklung und Tests.
 PROD wird nur geladen, wenn zusaetzlich `PROPR_PROD_CONFIRM=YES` gesetzt ist.
+
+Ungueltige oder fehlende `PROPR_LEVERAGE`-Werte fallen sicher auf `x1` zurueck.
 
 Alte einzelne Variablennamen wie `PROPR_TEST_SYMBOL`, `WRITE_TEST_CONFIRM` oder `LIVE_APP_CYCLE_*` werden voruebergehend noch als Legacy-Fallback unterstuetzt, sind aber nicht mehr das bevorzugte Schema.
 
 ## Data Source Modes
 
 Es gibt jetzt zwei klar getrennte Datenquellen:
-- `DATA_SOURCE=live`: verwendet den aktuellen Live-Stub-Provider als Platzhalter fuer eine spaetere echte Marktdatenquelle
+- `DATA_SOURCE=live`: laedt echte historische Candles ueber Hyperliquid REST
 - `DATA_SOURCE=golden`: laedt genau ein Golden-Szenario aus den bestehenden Strategy-Golden-Tests
 
 Wenn `DATA_SOURCE=golden` gesetzt ist, muss `GOLDEN_SCENARIO` explizit angegeben werden.
 Golden-Szenarien sind nur fuer fachliche Validierung gedacht. Im Golden-Modus ist echter Submit hart gesperrt.
+
+Ein einzelnes Golden-Szenario kann zum Beispiel so gefahren werden:
+- `DATA_SOURCE=golden`
+- `GOLDEN_SCENARIO=valid trend long`
+
+Wichtig: `GOLDEN_SCENARIO` verwendet den exakten Szenario-Namen aus den Golden Fixtures. Diese Namen koennen Leerzeichen enthalten.
+
+## Hyperliquid Historical Data
+
+Echte Marktdaten kommen jetzt von Hyperliquid Historical ueber den `/info`-Endpoint mit `candleSnapshot`.
+Propr bleibt fuer Execution, Challenge-Handling und State-Sync zustaendig.
+
+Wichtige Variablen:
+- `HYPERLIQUID_COIN` ist ein Perp-Coin wie `BTC` oder `ETH`
+- `PROPR_SYMBOL` bleibt separat fuer Execution- und UI-Kontext, zum Beispiel `BTC/USDC`
+- `DATA_SOURCE=live` nutzt Hyperliquid Historical
+- spaeter kann WebSocket fuer Live-Updates ergaenzt werden
 
 ## Propr Beta Smoke Test
 
@@ -65,6 +86,7 @@ Vor dem Start:
 - `MANUAL_LIVE_CYCLE_CONFIRM=YES`
 - optional `PROPR_SYMBOL=BTC/USDC`
 - optional `DATA_SOURCE=golden` plus `GOLDEN_SCENARIO=...`
+- bei `DATA_SOURCE=live` zusaetzlich `HYPERLIQUID_COIN=BTC` oder ein anderer Perp-Coin
 
 Fuer einen echten Submit muessen beide Flags bewusst gesetzt werden:
 - `MANUAL_LIVE_CYCLE_CONFIRM=YES`
@@ -73,7 +95,7 @@ Fuer einen echten Submit muessen beide Flags bewusst gesetzt werden:
 Startbefehl:
 `python scripts/propr_live_app_cycle.py`
 
-Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Im Golden-Modus wird statt des Live-Stub-Providers genau ein bestehendes Golden-Szenario geladen. Echter Submit ist dort hart blockiert.
+Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Vor echter Execution wird zusaetzlich geprueft, ob das Basis-Asset bei Propr ueber die Margin-Config tradebar ist und ob die konfigurierte `PROPR_LEVERAGE` das effektive Propr-Limit nicht ueberschreitet. Im Golden-Modus wird statt des Live-Marktdatenpfads genau ein bestehendes Golden-Szenario geladen und fachlich lesbar ausgegeben. Echter Submit ist dort hart blockiert.
 
 ## Scheduled Runner
 
@@ -85,14 +107,60 @@ Startbefehl:
 Wichtige Runner-Variablen:
 - `RUNNER_CONFIRM=YES` aktiviert den echten Lauf
 - `RUNNER_ALLOW_SUBMIT=YES` erlaubt echte Submit-/Replace-Execution
-- `RUNNER_MODE=daily|interval`
+- `RUNNER_MODE=daily|interval|manual`
 - `RUNNER_TIME_UTC=07:00` fuer den Daily-Run in UTC
 - `RUNNER_INTERVAL_SECONDS=60` fuer den Interval-Modus
 - `DATA_SOURCE=live|golden`
 - `GOLDEN_SCENARIO=...` nur fuer Golden-Modus
+- `HYPERLIQUID_COIN=BTC` oder ein anderer Perp-Coin fuer Live-Daten
 
 Im `daily`-Modus arbeitet der Runner in UTC und fuehrt pro UTC-Kalendertag hoechstens einen Run aus, sobald die konfigurierte Zeit erreicht ist.
-Im Golden-Modus ist echter Submit hart gesperrt, auch wenn `RUNNER_ALLOW_SUBMIT=YES` gesetzt waere.
+Im `interval`-Modus fuehrt der Runner regelmaessig nach dem konfigurierten Sekundenintervall aus.
+Im `manual`-Modus fuehrt der Runner genau einen Zyklus sofort aus und beendet sich danach sauber. Das ist besonders praktisch fuer Golden-Szenarien, gezielte Dry-Runs und manuelle Verifikation.
+Im Live-Modus verwendet der Runner echte historische Hyperliquid-Candles.
+Im Golden-Modus wird genau ein Golden-Szenario fachlich zur Validierung gefahren und klar als solcher Lauf gekennzeichnet. Echter Submit ist dort hart gesperrt, auch wenn `RUNNER_ALLOW_SUBMIT=YES` gesetzt waere.
+Vor echter Execution wird zusaetzlich geprueft, ob das Asset tradebar ist und ob die konfigurierte Leverage innerhalb der effektiven Propr-Limits liegt.
+
+Beispiel fuer einen manuellen Golden-Lauf:
+- `DATA_SOURCE=golden`
+- `GOLDEN_SCENARIO=valid trend long`
+- `RUNNER_MODE=manual`
+- `RUNNER_ALLOW_SUBMIT=NO`
+
+## Multi-Market Scan
+
+Der Multi-Market-Scanner startet mehrere Maerkte nacheinander als Dry-Run ueber denselben App-Cycle.
+
+Startbefehl:
+`python scripts/multi_market_scan.py`
+
+Wichtige Variablen:
+- `SCAN_CONFIRM=YES`
+- `SCAN_SYMBOLS=BTC/USDC,ETH/USDC,SOL/USDC`
+- `SCAN_HYPERLIQUID_COINS=BTC,ETH,SOL`
+- `SCAN_ALLOW_SUBMIT=NO`
+- `DATA_SOURCE=live|golden`
+
+Wichtig dabei:
+- `SCAN_SYMBOLS` sind die Propr-/UI-Symbole
+- `SCAN_HYPERLIQUID_COINS` sind die passenden Hyperliquid-Perp-Coins
+- die Reihenfolge beider Listen muss exakt zusammenpassen
+- in diesem Schritt ist der Scanner immer ein Dry-Run
+- Multi-market submit ist noch nicht aktiv, auch wenn `SCAN_ALLOW_SUBMIT=YES` gesetzt wird
+- im Golden-Modus wird weiterhin nur fachlich validiert und kein echter Submit zugelassen
+
+## Golden Schema Compare
+
+Der Schema-Compare vergleicht echte Hyperliquid-Candles strukturell mit genau einem Golden-Szenario.
+
+Startbefehl:
+`python scripts/golden_schema_compare.py`
+
+Wichtig dabei:
+- `GOLDEN_SCENARIO` muss gesetzt sein
+- das Skript laedt echte Hyperliquid-Candles ueber den bestehenden Historical Provider
+- es vergleicht Shape, Reihenfolge, Zeitabstaende, Wertebereiche und Candle-Sanity
+- es fuehrt keine Trades und keine Submit-Logik aus
 
 ## Broker Notes
 
@@ -100,9 +168,19 @@ Die Propr-Broker-Schicht nutzt `Decimal` fuer mengen- und preisbezogene Werte un
 Jede neue Order bekommt eine eigene ULID als `intentId`.
 Sowohl `200` als auch `201` gelten fuer Create/Cancel als Erfolg.
 Positionen mit `quantity == 0` werden im State-Sync nicht als aktive Trades uebernommen.
+Symbolgerechte Quantity-Rundung ist aktiv und wird auf Basis von `quantity_decimals` angewendet.
+Preisrundung wird nur dann angewendet, wenn belastbare Preis-Praezisionsdaten als `price_decimals` verfuegbar sind. Ohne solche Daten bleibt der Preiswert unveraendert.
+Echter Live-Submit wird blockiert, wenn keine SymbolSpec geladen werden kann. Dry-Runs duerfen mit Fallback weiterlaufen.
 Vor einem Trading-Start sollte zusaetzlich `/health/services` geprueft werden, insbesondere der `core`-Status.
+Vor echter Execution sollte das Asset ueber `/accounts/{accountId}/margin-config/{asset}` als tradebar bestaetigt werden.
+Die effektiven Leverage-Limits kommen aus `/leverage-limits/effective`.
 Ein erster WebSocket-Client ist fuer Live-Updates vorbereitet.
 Relevante Echtzeit-Events sind aktuell:
 - `order.filled`
 - `position.updated`
 - `trade.created`
+
+
+
+
+

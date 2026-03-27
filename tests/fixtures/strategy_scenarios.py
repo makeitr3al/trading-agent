@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from config.strategy_config import StrategyConfig
 from models.agent_state import AgentState
 from models.candle import Candle
-from models.decision import DecisionAction, DecisionResult
-from models.order import Order, OrderType
-from models.runner_result import StrategyRunResult
-from models.signal import SignalState, SignalType
 from models.trade import Trade, TradeDirection, TradeType
 
 
@@ -20,20 +16,126 @@ class StrategyGoldenScenario:
     config: StrategyConfig
     account_balance: float = 10000.0
     active_trade: Trade | None = None
-    state: AgentState | None = None
-    trend_signal: SignalState | None = None
-    countertrend_signal: SignalState | None = None
-    strategy_result: StrategyRunResult | None = None
-    expected: dict[str, object] = field(default_factory=dict)
+    agent_state: AgentState | None = None
+    expected_trend_signal_valid: bool | None = None
+    expected_trend_signal_type: str | None = None
+    expected_countertrend_signal_valid: bool | None = None
+    expected_countertrend_signal_type: str | None = None
+    expected_decision_action: str | None = None
+    expected_order_present: bool | None = None
+    expected_break_even_activated: bool | None = None
+    expected_consumed_flag: bool | None = None
 
 
 BASE_TIME = datetime(2026, 1, 1, 0, 0, 0)
+TREND_CONTEXT_CLOSES = [
+    10.9,
+    10.7,
+    10.8,
+    10.55,
+    10.45,
+    10.25,
+    10.35,
+    10.15,
+    10.05,
+    10.15,
+    10.0,
+    9.9,
+    10.0,
+    9.85,
+    9.95,
+    9.8,
+]
+BULLISH_REVERSAL_CONTEXT_CLOSES = [
+    10.8,
+    10.65,
+    10.55,
+    10.4,
+    10.25,
+    10.15,
+    10.0,
+    9.9,
+    9.8,
+    9.7,
+    9.6,
+    9.55,
+    9.5,
+    9.45,
+    9.4,
+    9.35,
+]
+BEARISH_REVERSAL_CONTEXT_CLOSES = [
+    9.0,
+    9.1,
+    9.2,
+    9.3,
+    9.4,
+    9.5,
+    9.6,
+    9.7,
+    9.8,
+    9.9,
+    10.0,
+    10.05,
+    10.1,
+    10.15,
+    10.2,
+    10.25,
+]
+LONGER_SWING_CLOSES = [
+    100.0,
+    100.5,
+    101.0,
+    100.8,
+    101.4,
+    102.0,
+    101.7,
+    102.5,
+    103.1,
+    102.9,
+    103.4,
+    104.0,
+    103.8,
+    104.6,
+    105.1,
+    104.9,
+    105.5,
+    106.0,
+    105.7,
+    106.4,
+    107.0,
+    106.8,
+    107.3,
+    108.0,
+    107.6,
+    108.4,
+    109.0,
+    108.7,
+    109.5,
+    110.0,
+    109.8,
+    110.4,
+    111.0,
+    110.6,
+    111.3,
+    112.0,
+    111.8,
+    112.4,
+    113.0,
+    112.7,
+]
+
 
 
 def make_config(**overrides: float | int) -> StrategyConfig:
     defaults = {
-        "min_bandwidth_avg_period": 5,
-        "max_bars_since_regime_start_for_trend_signal": 6,
+        "bollinger_period": 3,
+        "bollinger_std_dev": 2.0,
+        "macd_fast_period": 2,
+        "macd_slow_period": 4,
+        "macd_signal_period": 2,
+        "min_bandwidth_avg_period": 3,
+        "max_bars_since_regime_start_for_trend_signal": 3,
         "inside_buffer_pct": 0.20,
         "outside_buffer_pct": 0.20,
         "trend_tp_rr": 2.0,
@@ -43,21 +145,23 @@ def make_config(**overrides: float | int) -> StrategyConfig:
     return StrategyConfig(**defaults)
 
 
+
 def _build_candles(
     closes: list[float],
     final_open: float | None = None,
+    default_open_offset: float = -0.1,
     high_padding: float = 0.2,
     low_padding: float = 0.2,
 ) -> list[Candle]:
     candles: list[Candle] = []
     for index, close in enumerate(closes):
-        open_price = close - 0.1
+        open_price = close + default_open_offset
         if index == len(closes) - 1 and final_open is not None:
             open_price = final_open
 
         candles.append(
             Candle(
-                timestamp=BASE_TIME + timedelta(hours=index),
+                timestamp=BASE_TIME + timedelta(days=index),
                 open=float(open_price),
                 high=float(max(open_price, close) + high_padding),
                 low=float(min(open_price, close) - low_padding),
@@ -67,227 +171,13 @@ def _build_candles(
     return candles
 
 
-def build_bullish_trend_candles(final_open: float | None = None) -> list[Candle]:
-    closes = [
-        100.0,
-        100.5,
-        101.0,
-        100.8,
-        101.4,
-        102.0,
-        101.7,
-        102.5,
-        103.1,
-        102.9,
-        103.4,
-        104.0,
-        103.8,
-        104.6,
-        105.1,
-        104.9,
-        105.5,
-        106.0,
-        105.7,
-        106.4,
-        107.0,
-        106.8,
-        107.3,
-        108.0,
-        107.6,
-        108.4,
-        109.0,
-        108.7,
-        109.5,
-        110.0,
-        109.8,
-        110.4,
-        111.0,
-        110.6,
-        111.3,
-        112.0,
-        111.8,
-        112.4,
-        113.0,
-        112.7,
-    ]
-    return _build_candles(closes, final_open=final_open)
+
+def _prepend_context(tail: list[float], context: list[float]) -> list[float]:
+    return context + tail
 
 
-def build_bearish_trend_candles(final_open: float | None = None) -> list[Candle]:
-    closes = [
-        113.0,
-        112.6,
-        112.1,
-        112.3,
-        111.7,
-        111.1,
-        111.3,
-        110.6,
-        110.0,
-        110.2,
-        109.6,
-        109.0,
-        109.2,
-        108.5,
-        107.9,
-        108.1,
-        107.4,
-        106.8,
-        107.0,
-        106.3,
-        105.7,
-        105.9,
-        105.2,
-        104.6,
-        104.8,
-        104.1,
-        103.5,
-        103.7,
-        103.0,
-        102.4,
-        102.6,
-        101.9,
-        101.3,
-        101.5,
-        100.8,
-        100.2,
-        100.4,
-        99.7,
-        99.1,
-        99.3,
-    ]
-    return _build_candles(closes, final_open=final_open)
 
-
-def build_spike_above_band_candles() -> list[Candle]:
-    closes = [
-        100.0,
-        100.4,
-        100.9,
-        101.3,
-        101.8,
-        102.2,
-        102.7,
-        103.0,
-        103.5,
-        103.9,
-        104.4,
-        104.8,
-        105.3,
-        105.7,
-        106.2,
-        106.6,
-        107.1,
-        107.5,
-        108.0,
-        108.4,
-        108.9,
-        109.3,
-        109.8,
-        110.2,
-        110.7,
-        111.1,
-        111.6,
-        112.0,
-        112.5,
-        112.9,
-        113.4,
-        113.8,
-        114.3,
-        114.7,
-        115.2,
-        115.6,
-        116.1,
-        116.5,
-        117.0,
-        119.0,
-    ]
-    return _build_candles(closes, final_open=118.2, high_padding=0.3, low_padding=0.2)
-
-
-def build_spike_below_band_candles() -> list[Candle]:
-    closes = [
-        119.0,
-        118.5,
-        118.0,
-        117.6,
-        117.1,
-        116.7,
-        116.2,
-        115.8,
-        115.3,
-        114.9,
-        114.4,
-        114.0,
-        113.5,
-        113.1,
-        112.6,
-        112.2,
-        111.7,
-        111.3,
-        110.8,
-        110.4,
-        109.9,
-        109.5,
-        109.0,
-        108.6,
-        108.1,
-        107.7,
-        107.2,
-        106.8,
-        106.3,
-        105.9,
-        105.4,
-        105.0,
-        104.5,
-        104.1,
-        103.6,
-        103.2,
-        102.7,
-        102.3,
-        101.8,
-        99.0,
-    ]
-    return _build_candles(closes, final_open=99.8, high_padding=0.2, low_padding=0.3)
-
-
-def make_order(
-    order_type: OrderType,
-    entry: float,
-    stop_loss: float,
-    take_profit: float,
-    signal_source: str,
-    position_size: float = 10.0,
-) -> Order:
-    return Order(
-        order_type=order_type,
-        entry=entry,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-        position_size=position_size,
-        signal_source=signal_source,
-    )
-
-
-def make_signal(
-    signal_type: SignalType,
-    is_valid: bool,
-    reason: str,
-    entry: float | None = None,
-    stop_loss: float | None = None,
-    take_profit: float | None = None,
-) -> SignalState:
-    return SignalState(
-        signal_type=signal_type,
-        is_valid=is_valid,
-        reason=reason,
-        entry=entry,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-    )
-
-
-def make_trade(
+def _make_trade(
     trade_type: TradeType,
     direction: TradeDirection,
     entry: float,
@@ -305,305 +195,244 @@ def make_trade(
     )
 
 
-def make_strategy_result(
-    action: DecisionAction,
-    reason: str,
-    order: Order | None = None,
-    updated_trade: Trade | None = None,
-    trend_signal: SignalState | None = None,
-    countertrend_signal: SignalState | None = None,
-    selected_signal_type: str | None = None,
-) -> StrategyRunResult:
-    return StrategyRunResult(
-        trend_signal=trend_signal,
-        countertrend_signal=countertrend_signal,
-        decision=DecisionResult(
-            action=action,
-            reason=reason,
-            selected_signal_type=selected_signal_type,
+
+def _chart_scenario(
+    name: str,
+    closes: list[float],
+    config: StrategyConfig,
+    final_open: float | None = None,
+    default_open_offset: float = -0.1,
+    **expected: bool | str | None,
+) -> StrategyGoldenScenario:
+    return StrategyGoldenScenario(
+        name=name,
+        candles=_build_candles(
+            closes,
+            final_open=final_open,
+            default_open_offset=default_open_offset,
         ),
-        order=order,
-        updated_trade=updated_trade,
+        config=config,
+        **expected,
     )
+
+
+
+def _state_scenario(
+    name: str,
+    closes: list[float],
+    config: StrategyConfig,
+    active_trade: Trade | None = None,
+    agent_state: AgentState | None = None,
+    final_open: float | None = None,
+    default_open_offset: float = -0.1,
+    **expected: bool | str | None,
+) -> StrategyGoldenScenario:
+    return StrategyGoldenScenario(
+        name=name,
+        candles=_build_candles(
+            closes,
+            final_open=final_open,
+            default_open_offset=default_open_offset,
+        ),
+        config=config,
+        active_trade=active_trade,
+        agent_state=agent_state,
+        **expected,
+    )
+
 
 
 def valid_trend_long_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        True,
-        "trend signal detected",
-        entry=114.0,
-        stop_loss=109.0,
-        take_profit=124.0,
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="valid trend long",
-        candles=candles,
+        closes=_prepend_context([10.0, 10.1, 10.0, 9.8, 9.8, 9.8, 9.9], TREND_CONTEXT_CLOSES),
         config=make_config(),
-        trend_signal=trend_signal,
-        countertrend_signal=None,
-        expected={"decision": DecisionAction.PREPARE_TREND_ORDER},
+        expected_trend_signal_valid=True,
+        expected_trend_signal_type="TREND_LONG",
+        expected_countertrend_signal_valid=False,
+        expected_decision_action="PREPARE_TREND_ORDER",
+        expected_order_present=True,
     )
+
 
 
 def invalid_trend_regime_too_old_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        False,
-        "regime too old",
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="invalid trend regime too old",
-        candles=candles,
-        config=make_config(),
-        trend_signal=trend_signal,
-        countertrend_signal=None,
+        closes=_prepend_context([9.7, 9.7, 9.7, 9.7, 9.7, 9.8, 9.8], TREND_CONTEXT_CLOSES),
+        config=make_config(max_bars_since_regime_start_for_trend_signal=1),
+        expected_trend_signal_valid=False,
+        expected_trend_signal_type="TREND_LONG",
+        expected_countertrend_signal_valid=False,
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
     )
+
 
 
 def invalid_trend_candle_not_in_direction_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles(final_open=113.2)
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        False,
-        "candle not in trend direction",
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="invalid trend candle not in direction",
-        candles=candles,
+        closes=_prepend_context([10.0, 10.1, 10.0, 9.8, 9.8, 9.8, 9.9], TREND_CONTEXT_CLOSES),
         config=make_config(),
-        trend_signal=trend_signal,
-        countertrend_signal=None,
+        final_open=10.05,
+        expected_trend_signal_valid=False,
+        expected_trend_signal_type="TREND_LONG",
+        expected_countertrend_signal_valid=False,
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
     )
+
 
 
 def valid_countertrend_short_first_bullish_regime_scenario() -> StrategyGoldenScenario:
-    candles = build_spike_above_band_candles()
-    last_close = candles[-1].close
-    countertrend_signal = make_signal(
-        SignalType.COUNTERTREND_SHORT,
-        True,
-        "countertrend signal detected",
-        entry=last_close,
-        stop_loss=121.0,
-        take_profit=114.0,
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="valid countertrend short first bullish regime bar",
-        candles=candles,
-        config=make_config(),
-        trend_signal=None,
-        countertrend_signal=countertrend_signal,
+        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 9.35, 11.0], BULLISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5),
+        expected_trend_signal_valid=False,
+        expected_countertrend_signal_valid=True,
+        expected_countertrend_signal_type="COUNTERTREND_SHORT",
+        expected_decision_action="PREPARE_COUNTERTREND_ORDER",
+        expected_order_present=True,
     )
+
 
 
 def valid_countertrend_long_first_bearish_regime_scenario() -> StrategyGoldenScenario:
-    candles = build_spike_below_band_candles()
-    last_close = candles[-1].close
-    countertrend_signal = make_signal(
-        SignalType.COUNTERTREND_LONG,
-        True,
-        "countertrend signal detected",
-        entry=last_close,
-        stop_loss=97.0,
-        take_profit=104.0,
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="valid countertrend long first bearish regime bar",
-        candles=candles,
-        config=make_config(),
-        trend_signal=None,
-        countertrend_signal=countertrend_signal,
+        closes=_prepend_context([10.4, 10.45, 10.5, 10.55, 10.6, 10.65, 9.0], BEARISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5),
+        final_open=9.1,
+        expected_trend_signal_valid=False,
+        expected_countertrend_signal_valid=True,
+        expected_countertrend_signal_type="COUNTERTREND_LONG",
+        expected_decision_action="PREPARE_COUNTERTREND_ORDER",
+        expected_order_present=True,
     )
+
 
 
 def no_countertrend_not_first_regime_bar_scenario() -> StrategyGoldenScenario:
-    candles = build_spike_above_band_candles()
-    countertrend_signal = make_signal(
-        SignalType.COUNTERTREND_SHORT,
-        False,
-        "not first regime bar",
-    )
-    return StrategyGoldenScenario(
+    return _chart_scenario(
         name="no countertrend not first regime bar",
-        candles=candles,
-        config=make_config(),
-        trend_signal=None,
-        countertrend_signal=countertrend_signal,
+        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 11.0, 11.3], BULLISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5),
+        expected_trend_signal_valid=False,
+        expected_countertrend_signal_valid=False,
+        expected_countertrend_signal_type="COUNTERTREND_SHORT",
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
     )
+
 
 
 def trend_order_should_be_prepared_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    order = make_order(
-        OrderType.BUY_STOP,
-        entry=114.0,
-        stop_loss=109.0,
-        take_profit=124.0,
-        signal_source="trend_long",
-    )
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        True,
-        "trend signal detected",
-        entry=114.0,
-        stop_loss=109.0,
-        take_profit=124.0,
-    )
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="trend order should be prepared",
-        candles=candles,
+        closes=_prepend_context([10.0, 10.1, 10.0, 9.8, 9.8, 9.8, 9.9], TREND_CONTEXT_CLOSES),
         config=make_config(),
-        state=AgentState(),
-        strategy_result=make_strategy_result(
-            action=DecisionAction.PREPARE_TREND_ORDER,
-            reason="valid trend signal",
-            order=order,
-            trend_signal=trend_signal,
-            countertrend_signal=None,
-            selected_signal_type=SignalType.TREND_LONG.value,
-        ),
+        agent_state=AgentState(),
+        expected_trend_signal_valid=True,
+        expected_trend_signal_type="TREND_LONG",
+        expected_decision_action="PREPARE_TREND_ORDER",
+        expected_order_present=True,
+        expected_consumed_flag=True,
     )
+
 
 
 def countertrend_should_override_active_trend_trade_scenario() -> StrategyGoldenScenario:
-    candles = build_spike_above_band_candles()
-    last_close = candles[-1].close
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        True,
-        "trend signal detected",
-        entry=118.0,
-        stop_loss=112.0,
-        take_profit=130.0,
-    )
-    countertrend_signal = make_signal(
-        SignalType.COUNTERTREND_SHORT,
-        True,
-        "countertrend signal detected",
-        entry=last_close,
-        stop_loss=121.0,
-        take_profit=114.0,
-    )
-    active_trade = make_trade(
-        TradeType.TREND,
-        TradeDirection.LONG,
-        entry=110.0,
-        stop_loss=105.0,
-        take_profit=120.0,
-    )
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="countertrend overrides active trend trade",
-        candles=candles,
-        config=make_config(),
-        active_trade=active_trade,
-        trend_signal=trend_signal,
-        countertrend_signal=countertrend_signal,
+        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 9.35, 11.0], BULLISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5),
+        active_trade=_make_trade(
+            TradeType.TREND,
+            TradeDirection.LONG,
+            entry=10.2,
+            stop_loss=9.7,
+            take_profit=11.2,
+        ),
+        expected_countertrend_signal_valid=True,
+        expected_countertrend_signal_type="COUNTERTREND_SHORT",
+        expected_decision_action="CLOSE_TREND_AND_PREPARE_COUNTERTREND",
+        expected_order_present=True,
     )
+
 
 
 def break_even_should_activate_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    active_trade = make_trade(
-        TradeType.TREND,
-        TradeDirection.LONG,
-        entry=100.0,
-        stop_loss=95.0,
-        take_profit=110.0,
-    )
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="break even should activate",
-        candles=candles,
-        config=make_config(),
-        active_trade=active_trade,
+        closes=LONGER_SWING_CLOSES,
+        config=StrategyConfig(),
+        active_trade=_make_trade(
+            TradeType.TREND,
+            TradeDirection.LONG,
+            entry=100.0,
+            stop_loss=95.0,
+            take_profit=110.0,
+        ),
+        expected_break_even_activated=True,
     )
+
 
 
 def countertrend_tp_should_update_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    active_trade = make_trade(
-        TradeType.COUNTERTREND,
-        TradeDirection.SHORT,
-        entry=100.0,
-        stop_loss=110.0,
-        take_profit=95.0,
-    )
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="countertrend tp should update",
-        candles=candles,
-        config=make_config(),
-        active_trade=active_trade,
+        closes=LONGER_SWING_CLOSES,
+        config=StrategyConfig(),
+        active_trade=_make_trade(
+            TradeType.COUNTERTREND,
+            TradeDirection.SHORT,
+            entry=100.0,
+            stop_loss=110.0,
+            take_profit=95.0,
+        ),
+        expected_break_even_activated=False,
     )
+
 
 
 def trend_signal_consumed_duplicate_order_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    order = make_order(
-        OrderType.BUY_STOP,
-        entry=114.0,
-        stop_loss=109.0,
-        take_profit=124.0,
-        signal_source="trend_long",
-    )
-    trend_signal = make_signal(
-        SignalType.TREND_LONG,
-        True,
-        "trend signal detected",
-        entry=114.0,
-        stop_loss=109.0,
-        take_profit=124.0,
-    )
-    state = AgentState(
-        trend_signal_consumed_in_regime=True,
-        last_regime="bullish",
-    )
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="trend signal consumed duplicate order",
-        candles=candles,
+        closes=_prepend_context([10.0, 10.1, 10.0, 9.8, 9.8, 9.8, 9.9], TREND_CONTEXT_CLOSES),
         config=make_config(),
-        state=state,
-        strategy_result=make_strategy_result(
-            action=DecisionAction.PREPARE_TREND_ORDER,
-            reason="valid trend signal",
-            order=order,
-            trend_signal=trend_signal,
-            countertrend_signal=None,
-            selected_signal_type=SignalType.TREND_LONG.value,
+        agent_state=AgentState(
+            trend_signal_consumed_in_regime=True,
+            last_regime="bullish",
         ),
+        expected_trend_signal_valid=True,
+        expected_trend_signal_type="TREND_LONG",
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
+        expected_consumed_flag=True,
     )
+
 
 
 def regime_change_should_reset_consumed_flag_scenario() -> StrategyGoldenScenario:
-    candles = build_bullish_trend_candles()
-    state = AgentState(
-        trend_signal_consumed_in_regime=True,
-        last_regime="bearish",
-    )
-    trend_signal = make_signal(SignalType.TREND_LONG, False, "regime too old")
-    return StrategyGoldenScenario(
+    return _state_scenario(
         name="regime change should reset consumed flag",
-        candles=candles,
-        config=make_config(),
-        state=state,
-        strategy_result=make_strategy_result(
-            action=DecisionAction.NO_ACTION,
-            reason="no valid signal",
-            trend_signal=trend_signal,
-            countertrend_signal=None,
+        closes=_prepend_context([9.7, 9.7, 9.7, 9.7, 9.7, 9.8, 9.8], TREND_CONTEXT_CLOSES),
+        config=make_config(max_bars_since_regime_start_for_trend_signal=1),
+        agent_state=AgentState(
+            trend_signal_consumed_in_regime=True,
+            last_regime="bearish",
         ),
+        expected_trend_signal_valid=False,
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
+        expected_consumed_flag=False,
     )
 
 
 __all__ = [
     "StrategyGoldenScenario",
-    "build_bullish_trend_candles",
-    "build_bearish_trend_candles",
-    "build_spike_above_band_candles",
-    "build_spike_below_band_candles",
-    "make_config",
-    "make_trade",
     "valid_trend_long_scenario",
     "invalid_trend_regime_too_old_scenario",
     "invalid_trend_candle_not_in_direction_scenario",
@@ -617,3 +446,4 @@ __all__ = [
     "trend_signal_consumed_duplicate_order_scenario",
     "regime_change_should_reset_consumed_flag_scenario",
 ]
+

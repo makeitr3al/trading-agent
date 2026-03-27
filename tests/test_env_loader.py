@@ -5,7 +5,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from utils.env_loader import load_propr_config_from_env
+from utils.env_loader import (
+    load_live_app_cycle_settings_from_env,
+    load_manual_test_settings_from_env,
+    load_propr_config_from_env,
+    load_runner_settings_from_env,
+)
 
 
 def _clear_propr_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,3 +133,42 @@ def test_raises_error_when_prod_key_is_missing(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(ValueError, match="Missing PROPR_PROD_API_KEY"):
         load_propr_config_from_env()
+
+
+def test_manual_test_settings_default_leverage_is_one_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PROPR_LEVERAGE", raising=False)
+
+    settings = load_manual_test_settings_from_env()
+
+    assert settings.leverage == 1
+
+
+def test_manual_test_settings_invalid_leverage_falls_back_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROPR_LEVERAGE", "abc")
+
+    settings = load_manual_test_settings_from_env()
+
+    assert settings.leverage == 1
+
+
+def test_runner_settings_invalid_leverage_falls_back_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNNER_MODE", "daily")
+    monkeypatch.setenv("RUNNER_TIME_UTC", "07:00")
+    monkeypatch.setenv("RUNNER_INTERVAL_SECONDS", "60")
+    monkeypatch.setenv("PROPR_LEVERAGE", "-5")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.leverage == 1
+
+
+def test_live_app_cycle_settings_reads_valid_leverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROPR_LEVERAGE", "4")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_live_app_cycle_settings_from_env()
+
+    assert settings.leverage == 4

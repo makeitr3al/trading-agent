@@ -8,6 +8,7 @@ from config.propr_config import ProprConfig
 SDKProprClient = None
 
 
+
 def _load_sdk_client_class() -> type:
     global SDKProprClient
     if SDKProprClient is not None:
@@ -24,6 +25,7 @@ def _load_sdk_client_class() -> type:
     return SDKProprClient
 
 
+
 def _parse_numeric_status(response: dict[str, Any]) -> int | None:
     raw_status = response.get("status") or response.get("status_code")
     if raw_status is None:
@@ -35,6 +37,7 @@ def _parse_numeric_status(response: dict[str, Any]) -> int | None:
     if text.isdigit():
         return int(text)
     return None
+
 
 
 def _accept_success_response(response: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -97,10 +100,17 @@ class ProprClient:
         self._set_account(account_id)
         return self._wrap_list_response(self.sdk_client.get_trades())
 
-    def get_leverage_limits(self) -> dict[str, Any]:
+    def get_margin_config(self, account_id: str, asset: str) -> dict[str, Any]:
+        self._set_account(account_id)
+        return self.sdk_client.get_margin_config(asset)
+
+    def get_effective_leverage_limits(self) -> dict[str, Any]:
         if hasattr(self.sdk_client, "get_leverage_limits"):
             return self.sdk_client.get_leverage_limits()
         raise AttributeError("SDK client does not expose get_leverage_limits")
+
+    def get_leverage_limits(self) -> dict[str, Any]:
+        return self.get_effective_leverage_limits()
 
     def create_order(self, account_id: str, **order_params: Any) -> dict[str, Any]:
         self._set_account(account_id)
