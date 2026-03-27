@@ -96,6 +96,12 @@ Wichtig dabei:
 - `MANUAL_ORDER_TYPES_CONFIRM=YES` muss gesetzt sein
 - das Skript ist nur fuer manuelle Beta-Verifikation gedacht
 - es fuehrt bewusst Cleanup fuer offene Test-Orders und Test-Positionen aus
+
+Aktuell bestaetigtes Beta-Verhalten:
+- dokumentiert wird `asset=BTC/USDC`, die Beta-Sandbox benoetigt fuer erfolgreiche Orders derzeit aber weiterhin einen Fallback auf `asset=BTC`
+- `BUY_STOP` und `SELL_STOP` funktionieren in Beta nicht als standalone Entry und werden mit `requires position or group` abgelehnt
+- `take_profit_limit` und `stop_market` funktionieren fuer bestehende Positionen, wenn `positionId` mitgegeben wird
+- nach einem erfolgreichen Market-Close loest das Backend zugehoerige Exit-Orders teilweise direkt selbst auf; spaetere Cancel-Versuche koennen dann mit `order already resolved by backend lifecycle` enden
 ## Propr Beta Live App Cycle
 
 Der manuelle Live App Cycle ist nur fuer die BETA-Umgebung gedacht und startet standardmaessig ohne Submit.

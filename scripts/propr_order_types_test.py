@@ -72,6 +72,11 @@ def _is_exchange_asset_not_found(exc: Exception) -> bool:
 
 
 
+def _is_order_saga_load_failed(exc: Exception) -> bool:
+    return "order_saga_load_account_and_order_failed" in _extract_error_message(exc)
+
+
+
 def _cancel_is_already_resolved(response: dict | None) -> bool:
     if response is None:
         return True
@@ -282,7 +287,15 @@ def _cancel_if_possible(order_service: ProprOrderService, account_id: str, order
     if not order_id:
         return
 
-    cancel_response = order_service.cancel_order(account_id, order_id)
+    try:
+        cancel_response = order_service.cancel_order(account_id, order_id)
+    except Exception as exc:
+        if _is_order_saga_load_failed(exc):
+            print(f"  {label} cancel result: order already resolved by backend lifecycle")
+            print(f"  {exc}")
+            return
+        raise
+
     if _cancel_is_already_resolved(cancel_response):
         print(f"  {label} cancel result: order already resolved")
         print(f"  {cancel_response}")
