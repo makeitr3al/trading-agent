@@ -27,6 +27,7 @@ def _clear_propr_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+
 def test_defaults_to_beta_when_propr_env_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_BETA_API_KEY", "beta-key")
@@ -35,6 +36,7 @@ def test_defaults_to_beta_when_propr_env_is_missing(monkeypatch: pytest.MonkeyPa
 
     assert config.environment == "beta"
     assert config.api_key == "beta-key"
+
 
 
 def test_loads_beta_config_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,6 +54,7 @@ def test_loads_beta_config_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.websocket_url == "wss://beta.example/ws"
 
 
+
 def test_loads_beta_defaults_when_beta_urls_are_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "beta")
@@ -63,6 +66,7 @@ def test_loads_beta_defaults_when_beta_urls_are_missing(monkeypatch: pytest.Monk
     assert config.websocket_url == "wss://api.beta.propr.xyz/ws"
 
 
+
 def test_raises_error_when_beta_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "beta")
@@ -71,12 +75,14 @@ def test_raises_error_when_beta_key_is_missing(monkeypatch: pytest.MonkeyPatch) 
         load_propr_config_from_env()
 
 
+
 def test_raises_error_on_invalid_propr_env(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "staging")
 
     with pytest.raises(ValueError, match="Invalid PROPR_ENV"):
         load_propr_config_from_env()
+
 
 
 def test_raises_error_when_prod_confirm_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,6 +94,7 @@ def test_raises_error_when_prod_confirm_is_missing(monkeypatch: pytest.MonkeyPat
         load_propr_config_from_env()
 
 
+
 def test_raises_error_when_prod_confirm_is_not_yes(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "prod")
@@ -96,6 +103,7 @@ def test_raises_error_when_prod_confirm_is_not_yes(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(ValueError, match="PROD environment requires PROPR_PROD_CONFIRM=YES"):
         load_propr_config_from_env()
+
 
 
 def test_loads_prod_config_when_confirm_is_yes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +122,7 @@ def test_loads_prod_config_when_confirm_is_yes(monkeypatch: pytest.MonkeyPatch) 
     assert config.websocket_url == "wss://prod.example/ws"
 
 
+
 def test_loads_prod_defaults_when_prod_urls_are_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "prod")
@@ -126,6 +135,7 @@ def test_loads_prod_defaults_when_prod_urls_are_missing(monkeypatch: pytest.Monk
     assert config.websocket_url == "wss://api.propr.xyz/ws"
 
 
+
 def test_raises_error_when_prod_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_propr_env(monkeypatch)
     monkeypatch.setenv("PROPR_ENV", "prod")
@@ -133,6 +143,7 @@ def test_raises_error_when_prod_key_is_missing(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(ValueError, match="Missing PROPR_PROD_API_KEY"):
         load_propr_config_from_env()
+
 
 
 def test_manual_test_settings_default_leverage_is_one_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,12 +154,29 @@ def test_manual_test_settings_default_leverage_is_one_when_missing(monkeypatch: 
     assert settings.leverage == 1
 
 
+
 def test_manual_test_settings_invalid_leverage_falls_back_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROPR_LEVERAGE", "abc")
 
     settings = load_manual_test_settings_from_env()
 
     assert settings.leverage == 1
+
+
+
+def test_manual_test_settings_use_new_canonical_env_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROPR_SYMBOL", "ETH/USDC")
+    monkeypatch.setenv("MANUAL_WRITE_CONFIRM", "YES")
+    monkeypatch.setenv("MANUAL_LIVE_CYCLE_CONFIRM", "YES")
+    monkeypatch.setenv("MANUAL_ALLOW_SUBMIT", "NO")
+
+    settings = load_manual_test_settings_from_env()
+
+    assert settings.symbol == "ETH/USDC"
+    assert settings.manual_write_confirm == "YES"
+    assert settings.manual_live_cycle_confirm == "YES"
+    assert settings.manual_allow_submit == "NO"
+
 
 
 def test_runner_settings_invalid_leverage_falls_back_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,6 +190,24 @@ def test_runner_settings_invalid_leverage_falls_back_to_one(monkeypatch: pytest.
     settings = load_runner_settings_from_env()
 
     assert settings.leverage == 1
+
+
+
+def test_runner_settings_use_new_canonical_env_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNNER_CONFIRM", "YES")
+    monkeypatch.setenv("RUNNER_ALLOW_SUBMIT", "NO")
+    monkeypatch.setenv("RUNNER_MODE", "manual")
+    monkeypatch.setenv("PROPR_SYMBOL", "BTC/USDC")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.confirm == "YES"
+    assert settings.allow_submit == "NO"
+    assert settings.mode == "manual"
+    assert settings.symbol == "BTC/USDC"
+
 
 
 def test_live_app_cycle_settings_reads_valid_leverage(monkeypatch: pytest.MonkeyPatch) -> None:

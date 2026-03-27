@@ -54,7 +54,11 @@ class FakeSdkClient:
 
     def create_order(self, **kwargs: Any) -> list[dict[str, Any]]:
         self.calls.append(("create_order", kwargs))
-        return [{"orderId": "order-created-1"}]
+        return [{"orderId": "order-created-legacy-1"}]
+
+    def create_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self.calls.append(("create_orders", orders))
+        return [{"orderId": "order-created-raw-1"}]
 
     def cancel_order(self, order_id: str) -> dict[str, Any] | None:
         self.calls.append(("cancel_order", order_id))
@@ -131,12 +135,13 @@ def test_get_effective_leverage_limits_maps_to_sdk(monkeypatch) -> None:
     assert client.sdk_client.calls[0] == ("get_leverage_limits", None)
 
 
-def test_create_order_sets_account_and_uses_sdk_signature(monkeypatch) -> None:
+def test_create_order_uses_raw_batch_path_with_documented_payload(monkeypatch) -> None:
     monkeypatch.setattr("broker.propr_client.SDKProprClient", FakeSdkClient)
     client = ProprClient(ProprConfig(api_key="api-key-1"))
 
     result = client.create_order(
         "acc-1",
+        intent_id="ulid-fixed",
         side="buy",
         position_side="long",
         order_type="limit",
@@ -151,11 +156,45 @@ def test_create_order_sets_account_and_uses_sdk_signature(monkeypatch) -> None:
         close_position=False,
     )
 
-    assert result == {"data": [{"orderId": "order-created-1"}]}
+    assert result == {"data": [{"orderId": "order-created-raw-1"}]}
     assert client.sdk_client.calls[0] == ("setup", "acc-1")
-    assert client.sdk_client.calls[1][0] == "create_order"
-    assert client.sdk_client.calls[1][1]["side"] == "buy"
-    assert client.sdk_client.calls[1][1]["position_side"] == "long"
+    assert client.sdk_client.calls[1][0] == "create_orders"
+    raw_order = client.sdk_client.calls[1][1][0]
+    assert raw_order["accountId"] == "acc-1"
+    assert raw_order["intentId"] == "ulid-fixed"
+    assert raw_order["asset"] == "BTC/USDC"
+    assert raw_order["type"] == "limit"
+
+
+def test_create_order_uses_raw_batch_path_when_position_id_is_present(monkeypatch) -> None:
+    monkeypatch.setattr("broker.propr_client.SDKProprClient", FakeSdkClient)
+    client = ProprClient(ProprConfig(api_key="api-key-1"))
+
+    result = client.create_order(
+        "acc-1",
+        intent_id="ulid-fixed",
+        side="sell",
+        position_side="long",
+        order_type="take_profit_limit",
+        asset="BTC/USDC",
+        base="BTC",
+        quote="USDC",
+        quantity="0.001",
+        price="120000",
+        trigger_price="119000",
+        time_in_force="GTC",
+        reduce_only=True,
+        close_position=False,
+        position_id="position-123",
+    )
+
+    assert result == {"data": [{"orderId": "order-created-raw-1"}]}
+    assert client.sdk_client.calls[0] == ("setup", "acc-1")
+    assert client.sdk_client.calls[1][0] == "create_orders"
+    raw_order = client.sdk_client.calls[1][1][0]
+    assert raw_order["positionId"] == "position-123"
+    assert raw_order["type"] == "take_profit_limit"
+    assert raw_order["reduceOnly"] is True
 
 
 def test_cancel_order_sets_account_and_uses_sdk_cancel(monkeypatch) -> None:

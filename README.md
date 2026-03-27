@@ -10,7 +10,7 @@ V1 startet ohne Broker-Anbindung.
 
 ## Environment Setup
 
-Erstelle zuerst eine lokale `.env` auf Basis von `.env.example`.
+Erstelle zuerst eine lokale .env auf Basis von .env.example. Verwende dabei nur noch die kanonischen Variablennamen aus der Beispiel-Datei.
 
 Das bevorzugte vereinfachte Schema ist jetzt:
 - `PROPR_ENV=beta|prod`
@@ -27,8 +27,6 @@ BETA ist der sichere Default fuer Entwicklung und Tests.
 PROD wird nur geladen, wenn zusaetzlich `PROPR_PROD_CONFIRM=YES` gesetzt ist.
 
 Ungueltige oder fehlende `PROPR_LEVERAGE`-Werte fallen sicher auf `x1` zurueck.
-
-Alte einzelne Variablennamen wie `PROPR_TEST_SYMBOL`, `WRITE_TEST_CONFIRM` oder `LIVE_APP_CYCLE_*` werden voruebergehend noch als Legacy-Fallback unterstuetzt, sind aber nicht mehr das bevorzugte Schema.
 
 ## Data Source Modes
 
@@ -59,7 +57,7 @@ Wichtige Variablen:
 ## Propr Beta Smoke Test
 
 Den read-only Smoke Test startest du mit:
-`python scripts/propr_smoke_test.py`
+`.\.venv\Scripts\python.exe scripts/propr_smoke_test.py`
 
 Der Smoke Test verwendet nur lesende Endpunkte und laeuft standardmaessig gegen die Propr Beta Umgebung. PROD wird nur geladen, wenn die explizite Confirm-Variable gesetzt ist.
 
@@ -73,10 +71,31 @@ Vor dem Start:
 - optional `PROPR_SYMBOL=BTC/USDC`
 
 Startbefehl:
-`python scripts/propr_submit_cancel_test.py`
+`.\.venv\Scripts\python.exe scripts/propr_submit_cancel_test.py`
 
 Das Skript prueft zuerst den Core-Health-Status, laedt danach die aktive Challenge, baut eine minimale Pending Order mit Decimal-Werten, loggt die verwendete `intentId` und fuehrt genau einen Submit plus direkt anschliessenden Cancel aus. Es fuehrt keinen PROD-Write aus und blockiert, wenn `MANUAL_WRITE_CONFIRM` nicht explizit auf `YES` gesetzt ist.
 
+## Propr Beta Order Types Test
+
+Wenn du die unterschiedlichen Order-Typen in der Beta-Umgebung manuell pruefen willst, starte:
+`.\.venv\Scripts\python.exe scripts/propr_order_types_test.py`
+
+Das Skript:
+- prueft zuerst den Core-Health-Status
+- laedt die aktive Challenge
+- holt einen Referenzpreis ueber Hyperliquid Historical
+- testet `BUY_LIMIT` und `SELL_LIMIT` als frei stehende Pending-Orders
+- behandelt `BUY_STOP` und `SELL_STOP` aktuell als bekannte Beta-Einschraenkung fuer standalone conditional entries
+- oeffnet danach zusaetzlich testweise eine kleine Market-Long-Position
+- erstellt dafuer eine `take_profit_limit`-Exit-Order und eine `stop_market`-Exit-Order
+- schliesst den offenen Trade anschliessend wieder per Market-Close
+- fuehrt fuer verbleibende Exit-Orders direkt ein Cleanup per Cancel aus
+
+Wichtig dabei:
+- nur fuer `PROPR_ENV=beta`
+- `MANUAL_ORDER_TYPES_CONFIRM=YES` muss gesetzt sein
+- das Skript ist nur fuer manuelle Beta-Verifikation gedacht
+- es fuehrt bewusst Cleanup fuer offene Test-Orders und Test-Positionen aus
 ## Propr Beta Live App Cycle
 
 Der manuelle Live App Cycle ist nur fuer die BETA-Umgebung gedacht und startet standardmaessig ohne Submit.
@@ -93,7 +112,7 @@ Fuer einen echten Submit muessen beide Flags bewusst gesetzt werden:
 - `MANUAL_ALLOW_SUBMIT=YES`
 
 Startbefehl:
-`python scripts/propr_live_app_cycle.py`
+`.\.venv\Scripts\python.exe scripts/propr_live_app_cycle.py`
 
 Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Vor echter Execution wird zusaetzlich geprueft, ob das Basis-Asset bei Propr ueber die Margin-Config tradebar ist und ob die konfigurierte `PROPR_LEVERAGE` das effektive Propr-Limit nicht ueberschreitet. Im Golden-Modus wird statt des Live-Marktdatenpfads genau ein bestehendes Golden-Szenario geladen und fachlich lesbar ausgegeben. Echter Submit ist dort hart blockiert.
 
@@ -102,7 +121,7 @@ Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, syn
 Der generische Scheduled Runner startet manuell und verwendet eine konfigurierbare Datenquelle.
 
 Startbefehl:
-`python scripts/scheduled_runner.py`
+`.\.venv\Scripts\python.exe scripts/scheduled_runner.py`
 
 Wichtige Runner-Variablen:
 - `RUNNER_CONFIRM=YES` aktiviert den echten Lauf
@@ -132,7 +151,7 @@ Beispiel fuer einen manuellen Golden-Lauf:
 Der Multi-Market-Scanner startet mehrere Maerkte nacheinander als Dry-Run ueber denselben App-Cycle.
 
 Startbefehl:
-`python scripts/multi_market_scan.py`
+`.\.venv\Scripts\python.exe scripts/multi_market_scan.py`
 
 Wichtige Variablen:
 - `SCAN_CONFIRM=YES`
@@ -154,13 +173,21 @@ Wichtig dabei:
 Der Schema-Compare vergleicht echte Hyperliquid-Candles strukturell mit genau einem Golden-Szenario.
 
 Startbefehl:
-`python scripts/golden_schema_compare.py`
+`.\.venv\Scripts\python.exe scripts/golden_schema_compare.py`
 
 Wichtig dabei:
 - `GOLDEN_SCENARIO` muss gesetzt sein
 - das Skript laedt echte Hyperliquid-Candles ueber den bestehenden Historical Provider
 - es vergleicht Shape, Reihenfolge, Zeitabstaende, Wertebereiche und Candle-Sanity
 - es fuehrt keine Trades und keine Submit-Logik aus
+
+## Run All Golden Scenarios
+
+Wenn du alle Golden-Szenarien in einem Dry-Run nacheinander fachlich pruefen willst, starte:
+`.\.venv\Scripts\python.exe scripts/run_all_golden_scenarios.py`
+
+Das Skript fuehrt alle bekannten Golden-Szenarien nacheinander aus, bewertet die erwarteten Outcomes und gibt eine kompakte PASS/FAIL-Zusammenfassung aus.
+Es ist bewusst nur ein Dry-Run und fuehrt keine Trades und keine Submit-Logik aus.
 
 ## Broker Notes
 
@@ -179,6 +206,15 @@ Relevante Echtzeit-Events sind aktuell:
 - `order.filled`
 - `position.updated`
 - `trade.created`
+
+
+
+
+
+
+
+
+
 
 
 

@@ -18,12 +18,16 @@ HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"
 DEFAULT_SYMBOL = "BTC/USDC"
 DEFAULT_LEVERAGE = 1
 
-# TODO: Remove legacy environment fallbacks after the new schema has fully replaced them.
-
 
 class WriteTestSettings(BaseModel):
     environment: str
     write_test_confirm: str
+    test_symbol: str = DEFAULT_SYMBOL
+
+
+class OrderTypesTestSettings(BaseModel):
+    environment: str
+    confirm: str
     test_symbol: str = DEFAULT_SYMBOL
 
 
@@ -42,6 +46,7 @@ class ManualTestSettings(BaseModel):
     symbol: str = DEFAULT_SYMBOL
     require_healthy_core: bool = True
     manual_write_confirm: str = "NO"
+    manual_order_types_confirm: str = "NO"
     manual_live_cycle_confirm: str = "NO"
     manual_allow_submit: str = "NO"
     leverage: int = DEFAULT_LEVERAGE
@@ -78,20 +83,6 @@ class MultiMarketScanSettings(BaseModel):
 
 def _get_env(name: str) -> str:
     return (os.getenv(name) or "").strip()
-
-
-
-def _get_env_with_fallback(primary: str, *fallbacks: str, default: str = "") -> str:
-    primary_value = _get_env(primary)
-    if primary_value:
-        return primary_value
-
-    for fallback in fallbacks:
-        fallback_value = _get_env(fallback)
-        if fallback_value:
-            return fallback_value
-
-    return default
 
 
 
@@ -218,32 +209,22 @@ def load_data_source_settings_from_env() -> DataSourceSettings:
 
 
 def load_manual_test_settings_from_env() -> ManualTestSettings:
-    symbol = _get_env_with_fallback("PROPR_SYMBOL", "PROPR_TEST_SYMBOL", default=DEFAULT_SYMBOL)
+    symbol = _get_env("PROPR_SYMBOL") or DEFAULT_SYMBOL
     require_healthy_core = _parse_yes_no(
-        _get_env_with_fallback("PROPR_REQUIRE_HEALTHY_CORE", default="YES"),
+        _get_env("PROPR_REQUIRE_HEALTHY_CORE") or "YES",
         "PROPR_REQUIRE_HEALTHY_CORE",
     )
-    manual_write_confirm = _get_env_with_fallback(
-        "MANUAL_WRITE_CONFIRM",
-        "WRITE_TEST_CONFIRM",
-        default="NO",
-    )
-    manual_live_cycle_confirm = _get_env_with_fallback(
-        "MANUAL_LIVE_CYCLE_CONFIRM",
-        "LIVE_APP_CYCLE_CONFIRM",
-        default="NO",
-    )
-    manual_allow_submit = _get_env_with_fallback(
-        "MANUAL_ALLOW_SUBMIT",
-        "LIVE_APP_CYCLE_ALLOW_SUBMIT",
-        default="NO",
-    )
-    leverage = _parse_leverage_or_default(_get_env_with_fallback("PROPR_LEVERAGE", default="1"))
+    manual_write_confirm = _get_env("MANUAL_WRITE_CONFIRM") or "NO"
+    manual_order_types_confirm = _get_env("MANUAL_ORDER_TYPES_CONFIRM") or "NO"
+    manual_live_cycle_confirm = _get_env("MANUAL_LIVE_CYCLE_CONFIRM") or "NO"
+    manual_allow_submit = _get_env("MANUAL_ALLOW_SUBMIT") or "NO"
+    leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
     return ManualTestSettings(
         symbol=symbol,
         require_healthy_core=require_healthy_core,
         manual_write_confirm=manual_write_confirm,
+        manual_order_types_confirm=manual_order_types_confirm,
         manual_live_cycle_confirm=manual_live_cycle_confirm,
         manual_allow_submit=manual_allow_submit,
         leverage=leverage,
@@ -254,37 +235,25 @@ def load_manual_test_settings_from_env() -> ManualTestSettings:
 def load_runner_settings_from_env() -> RunnerSettings:
     data_source_settings = load_data_source_settings_from_env()
     environment = _get_env("PROPR_ENV") or "beta"
-    confirm = _get_env_with_fallback("RUNNER_CONFIRM", "APP_RUNNER_CONFIRM", default="NO")
-    allow_submit = _get_env_with_fallback(
-        "RUNNER_ALLOW_SUBMIT",
-        "APP_RUNNER_ALLOW_SUBMIT",
-        default="NO",
-    )
-    mode = _get_env_with_fallback("RUNNER_MODE", "APP_RUNNER_MODE", default="daily").lower()
+    confirm = _get_env("RUNNER_CONFIRM") or "NO"
+    allow_submit = _get_env("RUNNER_ALLOW_SUBMIT") or "NO"
+    mode = (_get_env("RUNNER_MODE") or "daily").lower()
     if mode not in {"daily", "interval", "manual"}:
         raise ValueError("Invalid RUNNER_MODE")
 
     time_utc: str | None = None
     interval_seconds: int | None = None
     if mode == "daily":
-        time_utc = _validate_time_utc(
-            _get_env_with_fallback("RUNNER_TIME_UTC", "APP_RUNNER_TIME_UTC", default="07:00")
-        )
+        time_utc = _validate_time_utc(_get_env("RUNNER_TIME_UTC") or "07:00")
     elif mode == "interval":
-        interval_seconds = _validate_interval_seconds(
-            _get_env_with_fallback(
-                "RUNNER_INTERVAL_SECONDS",
-                "APP_RUNNER_INTERVAL_SECONDS",
-                default="60",
-            )
-        )
+        interval_seconds = _validate_interval_seconds(_get_env("RUNNER_INTERVAL_SECONDS") or "60")
 
-    symbol = _get_env_with_fallback("PROPR_SYMBOL", "PROPR_TEST_SYMBOL", default=DEFAULT_SYMBOL)
+    symbol = _get_env("PROPR_SYMBOL") or DEFAULT_SYMBOL
     require_healthy_core = _parse_yes_no(
-        _get_env_with_fallback("PROPR_REQUIRE_HEALTHY_CORE", default="YES"),
+        _get_env("PROPR_REQUIRE_HEALTHY_CORE") or "YES",
         "PROPR_REQUIRE_HEALTHY_CORE",
     )
-    leverage = _parse_leverage_or_default(_get_env_with_fallback("PROPR_LEVERAGE", default="1"))
+    leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
     return RunnerSettings(
         environment=environment,
@@ -314,10 +283,10 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
 
     allow_submit = _parse_yes_no(_get_env("SCAN_ALLOW_SUBMIT") or "NO", "SCAN_ALLOW_SUBMIT")
     require_healthy_core = _parse_yes_no(
-        _get_env_with_fallback("PROPR_REQUIRE_HEALTHY_CORE", default="YES"),
+        _get_env("PROPR_REQUIRE_HEALTHY_CORE") or "YES",
         "PROPR_REQUIRE_HEALTHY_CORE",
     )
-    leverage = _parse_leverage_or_default(_get_env_with_fallback("PROPR_LEVERAGE", default="1"))
+    leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
     return MultiMarketScanSettings(
         confirm=confirm,
@@ -336,6 +305,17 @@ def load_write_test_settings_from_env() -> WriteTestSettings:
     return WriteTestSettings(
         environment=environment,
         write_test_confirm=manual_settings.manual_write_confirm,
+        test_symbol=manual_settings.symbol,
+    )
+
+
+
+def load_order_types_test_settings_from_env() -> OrderTypesTestSettings:
+    manual_settings = load_manual_test_settings_from_env()
+    environment = _get_env("PROPR_ENV") or "beta"
+    return OrderTypesTestSettings(
+        environment=environment,
+        confirm=manual_settings.manual_order_types_confirm,
         test_symbol=manual_settings.symbol,
     )
 

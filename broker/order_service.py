@@ -8,9 +8,8 @@ from broker.symbol_service import round_price_to_symbol_spec, round_quantity_to_
 from models.order import Order, OrderType
 from models.symbol_spec import SymbolSpec
 
-# TODO: The SDK create_order call currently has no direct stop-loss / take-profit fields.
-# TODO: Later map stop loss / take profit to proper child-order or bracket-order support if the SDK adds it.
-
+# TODO: The SDK create_order call currently has no direct stop-loss / take-profit child-order support.
+# TODO: Later map stop loss / take profit to proper bracket-order handling if the SDK adds it.
 
 
 def _require_non_empty(value: str, field_name: str) -> str:
@@ -28,7 +27,7 @@ def _parse_symbol(symbol: str) -> tuple[str, str, str]:
 
     base = parts[0].strip().upper()
     quote = parts[1].strip().upper()
-    asset = base
+    asset = f"{base}/{quote}"
     return asset, base, quote
 
 
@@ -82,6 +81,65 @@ def apply_symbol_spec_to_order(order: Order, symbol_spec: SymbolSpec | None) -> 
 
 
 
+def build_manual_order_submission_preview(
+    symbol: str,
+    side: str,
+    position_side: str,
+    order_type: str,
+    quantity: float | int | str | Decimal,
+    price: float | int | str | Decimal | None = None,
+    trigger_price: float | int | str | Decimal | None = None,
+    reduce_only: bool = False,
+    close_position: bool = False,
+    time_in_force: str | None = None,
+    internal_stop_loss: float | int | str | Decimal | None = None,
+    internal_take_profit: float | int | str | Decimal | None = None,
+    position_id: str | None = None,
+    order_group_id: str | None = None,
+) -> dict[str, Any]:
+    asset, base, quote = _parse_symbol(symbol)
+    normalized_side = _require_non_empty(side, "side").lower()
+    normalized_position_side = _require_non_empty(position_side, "position_side").lower()
+    normalized_order_type = _require_non_empty(order_type, "order_type").lower()
+
+    quantity_decimal = _to_decimal(quantity)
+    if quantity_decimal <= Decimal("0"):
+        raise ValueError("quantity must be positive")
+
+    params: dict[str, Any] = {
+        "asset": asset,
+        "base": base,
+        "quote": quote,
+        "side": normalized_side,
+        "position_side": normalized_position_side,
+        "order_type": normalized_order_type,
+        "quantity": _serialize_decimal(quantity_decimal),
+        "time_in_force": time_in_force or ("IOC" if normalized_order_type == "market" else "GTC"),
+        "reduce_only": reduce_only,
+        "close_position": close_position,
+        "intent_id": generate_intent_id(),
+        # Beta fallback: the public docs do not currently document these create-order fields,
+        # but the sandbox may require one of them for conditional exit orders.
+        "position_id": position_id,
+        "order_group_id": order_group_id,
+    }
+    if price is not None:
+        params["price"] = _serialize_decimal(price)
+    else:
+        params["price"] = None
+    if trigger_price is not None:
+        params["trigger_price"] = _serialize_decimal(trigger_price)
+    else:
+        params["trigger_price"] = None
+    if internal_stop_loss is not None:
+        params["internal_stop_loss"] = _serialize_decimal(internal_stop_loss)
+    if internal_take_profit is not None:
+        params["internal_take_profit"] = _serialize_decimal(internal_take_profit)
+
+    return params
+
+
+
 def build_order_submission_preview(
     order: Order,
     symbol: str,
@@ -89,34 +147,28 @@ def build_order_submission_preview(
     close_position: bool = False,
     symbol_spec: SymbolSpec | None = None,
 ) -> dict[str, Any]:
-    asset, base, quote = _parse_symbol(symbol)
     prepared_order = apply_symbol_spec_to_order(order, symbol_spec)
 
     if prepared_order.position_size is None:
         raise ValueError("position_size is required")
-
-    position_size = _to_decimal(prepared_order.position_size)
-    if position_size <= Decimal("0"):
+    if _to_decimal(prepared_order.position_size) <= Decimal("0"):
         raise ValueError("position_size must be positive")
 
-    params: dict[str, Any] = {
-        "asset": asset,
-        "base": base,
-        "quote": quote,
-        "quantity": _serialize_decimal(position_size),
-        "time_in_force": "GTC",
-        "reduce_only": reduce_only,
-        "close_position": close_position,
-        "intent_id": generate_intent_id(),
-        "internal_stop_loss": _serialize_decimal(prepared_order.stop_loss),
-        "internal_take_profit": _serialize_decimal(prepared_order.take_profit),
-    }
+    params = build_manual_order_submission_preview(
+        symbol=symbol,
+        side="buy" if prepared_order.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP} else "sell",
+        position_side="long" if prepared_order.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP} else "short",
+        order_type="limit",
+        quantity=prepared_order.position_size,
+        reduce_only=reduce_only,
+        close_position=close_position,
+        internal_stop_loss=prepared_order.stop_loss,
+        internal_take_profit=prepared_order.take_profit,
+    )
 
     if prepared_order.order_type == OrderType.BUY_LIMIT:
         params.update(
             {
-                "side": "buy",
-                "position_side": "long",
                 "order_type": "limit",
                 "price": _serialize_decimal(prepared_order.entry),
                 "trigger_price": None,
@@ -125,8 +177,6 @@ def build_order_submission_preview(
     elif prepared_order.order_type == OrderType.SELL_LIMIT:
         params.update(
             {
-                "side": "sell",
-                "position_side": "short",
                 "order_type": "limit",
                 "price": _serialize_decimal(prepared_order.entry),
                 "trigger_price": None,
@@ -136,8 +186,6 @@ def build_order_submission_preview(
         entry = _serialize_decimal(prepared_order.entry)
         params.update(
             {
-                "side": "buy",
-                "position_side": "long",
                 "order_type": "stop_limit",
                 "price": entry,
                 "trigger_price": entry,
@@ -147,8 +195,6 @@ def build_order_submission_preview(
         entry = _serialize_decimal(prepared_order.entry)
         params.update(
             {
-                "side": "sell",
-                "position_side": "short",
                 "order_type": "stop_limit",
                 "price": entry,
                 "trigger_price": entry,
@@ -165,7 +211,7 @@ def build_sdk_create_order_params(submission_preview: dict[str, Any]) -> dict[st
     return {
         key: value
         for key, value in submission_preview.items()
-        if key not in {"intent_id", "internal_stop_loss", "internal_take_profit"}
+        if key not in {"internal_stop_loss", "internal_take_profit"}
     }
 
 
@@ -226,6 +272,19 @@ class ProprOrderService:
     def __init__(self, client: ProprClient) -> None:
         self.client = client
 
+    def submit_order_preview(
+        self,
+        account_id: str,
+        submission_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        order_params = build_sdk_create_order_params(submission_preview)
+        response = self.client.create_order(normalized_account_id, **order_params)
+        ensured = _ensure_success_response(response, "create")
+        if ensured is None:
+            raise ValueError("Create order returned no response")
+        return ensured
+
     def submit_pending_order(
         self,
         account_id: str,
@@ -244,12 +303,7 @@ class ProprOrderService:
             close_position=close_position,
             symbol_spec=symbol_spec,
         )
-        order_params = build_sdk_create_order_params(preview)
-        response = self.client.create_order(normalized_account_id, **order_params)
-        ensured = _ensure_success_response(response, "create")
-        if ensured is None:
-            raise ValueError("Create order returned no response")
-        return ensured
+        return self.submit_order_preview(normalized_account_id, preview)
 
     def cancel_order(
         self,
@@ -265,6 +319,7 @@ class ProprOrderService:
 __all__ = [
     "generate_intent_id",
     "apply_symbol_spec_to_order",
+    "build_manual_order_submission_preview",
     "build_order_submission_preview",
     "build_sdk_create_order_params",
     "map_internal_order_to_propr_payload",

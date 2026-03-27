@@ -52,6 +52,37 @@ def _accept_success_response(response: dict[str, Any] | None) -> dict[str, Any] 
     return response
 
 
+
+def _to_sdk_order_payload(order_params: dict[str, Any], account_id: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "accountId": account_id,
+    }
+    field_map = {
+        "intent_id": "intentId",
+        "side": "side",
+        "position_side": "positionSide",
+        "order_type": "type",
+        "asset": "asset",
+        "base": "base",
+        "quote": "quote",
+        "quantity": "quantity",
+        "price": "price",
+        "trigger_price": "triggerPrice",
+        "time_in_force": "timeInForce",
+        "reduce_only": "reduceOnly",
+        "close_position": "closePosition",
+        "position_id": "positionId",
+        "order_group_id": "orderGroupId",
+    }
+    for source_key, target_key in field_map.items():
+        value = order_params.get(source_key)
+        if value is not None:
+            payload[target_key] = value
+    payload.setdefault("exchange", "hyperliquid")
+    payload.setdefault("productType", "perp")
+    return payload
+
+
 class ProprClient:
     def __init__(self, config: ProprConfig) -> None:
         self.config = config
@@ -114,7 +145,8 @@ class ProprClient:
 
     def create_order(self, account_id: str, **order_params: Any) -> dict[str, Any]:
         self._set_account(account_id)
-        response = self._wrap_list_response(self.sdk_client.create_order(**order_params))
+        raw_payload = _to_sdk_order_payload(order_params, account_id=account_id)
+        response = self._wrap_list_response(self.sdk_client.create_orders([raw_payload]))
         return _accept_success_response(response) or response
 
     def cancel_order(self, account_id: str, order_id: str) -> dict[str, Any] | None:
