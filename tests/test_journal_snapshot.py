@@ -76,6 +76,7 @@ def test_build_journal_snapshot_uses_operator_config_data_path(tmp_path: Path, m
     journal_path = data_path / 'trading_journal_beta.jsonl'
     journal_path.write_text(json.dumps({'entry_type': 'cycle', 'entry_timestamp': '2026-03-28T10:00:00+00:00', 'decision_action': 'NO_ACTION'}) + '\n', encoding='utf-8')
 
+    monkeypatch.delenv('TRADING_JOURNAL_PATH', raising=False)
     monkeypatch.setenv('TRADING_AGENT_DATA_PATH', str(data_path))
     monkeypatch.setenv('TRADING_AGENT_OPERATOR_CONFIG_PATH', str(operator_config_path))
 

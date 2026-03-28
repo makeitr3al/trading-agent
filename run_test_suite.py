@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,13 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_STATUS_PATH = PROJECT_ROOT / "artifacts" / "test_suite_status.json"
 DEFAULT_LOG_PATH = PROJECT_ROOT / "artifacts" / "test_suite_last.log"
+SANITIZED_PYTEST_ENV_KEYS = (
+    "TRADING_JOURNAL_PATH",
+    "RUNNER_STATUS_PATH",
+    "TRADING_AGENT_RUNTIME_CONFIG_PATH",
+    "TRADING_AGENT_DOTENV_PATH",
+    "TRADING_AGENT_USE_DOTENV_FALLBACK",
+)
 
 
 SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -111,6 +119,14 @@ def _resolved_command(step: dict[str, Any], pytest_args: list[str]) -> list[str]
     if step["kind"] == "pytest":
         return [sys.executable, "-m", "pytest", *step["command"], *pytest_args]
     return [sys.executable, *step["command"]]
+
+
+def _step_env(step_kind: str) -> dict[str, str]:
+    env = dict(os.environ)
+    if step_kind == "pytest":
+        for key in SANITIZED_PYTEST_ENV_KEYS:
+            env.pop(key, None)
+    return env
 
 
 def _describe_suite(suite_name: str, pytest_args: list[str]) -> dict[str, Any]:
@@ -215,6 +231,7 @@ def main() -> int:
             process = subprocess.run(
                 command,
                 cwd=PROJECT_ROOT,
+                env=_step_env(step["kind"]),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 text=True,
