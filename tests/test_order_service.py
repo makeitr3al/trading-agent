@@ -21,11 +21,17 @@ from models.order import Order, OrderType
 from models.trade import Trade, TradeDirection, TradeType
 
 
+class FakeConfig:
+    def __init__(self, environment: str = "beta") -> None:
+        self.environment = environment
+
+
 class FakeProprClient:
-    def __init__(self, create_status: int = 200, cancel_status: int = 200) -> None:
+    def __init__(self, create_status: int = 200, cancel_status: int = 200, environment: str = "beta") -> None:
         self.calls: list[tuple[str, str, object]] = []
         self.create_status = create_status
         self.cancel_status = cancel_status
+        self.config = FakeConfig(environment)
 
     def create_order(self, account_id: str, **order_params: object) -> dict:
         self.calls.append(("create_order", account_id, order_params))
@@ -440,3 +446,56 @@ def test_manual_preview_raises_value_error_for_non_positive_quantity(monkeypatch
             order_type="market",
             quantity="0",
         )
+
+
+def test_submit_order_preview_retries_with_beta_base_asset_on_exchange_asset_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BetaFallbackClient(FakeProprClient):
+        def create_order(self, account_id: str, **order_params: object) -> dict:
+            self.calls.append(("create_order", account_id, order_params))
+            if len(self.calls) == 1:
+                raise ValueError("[404] 13450: exchange_asset_not_found")
+            return {"status": 200, "data": [{"orderId": "urn:prp-order:beta-fallback"}]}
+
+    client = BetaFallbackClient(environment="beta")
+    service = ProprOrderService(client)
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+
+    preview = build_manual_order_submission_preview(
+        symbol="BTC/USDC",
+        side="buy",
+        position_side="long",
+        order_type="limit",
+        quantity="0.001",
+        price="100000",
+    )
+    response = service.submit_order_preview("account-1", preview)
+
+    assert len(client.calls) == 2
+    assert client.calls[0][2]["asset"] == "BTC/USDC"
+    assert client.calls[1][2]["asset"] == "BTC"
+    assert response["data"][0]["orderId"] == "urn:prp-order:beta-fallback"
+
+
+def test_submit_order_preview_does_not_retry_outside_beta(monkeypatch: pytest.MonkeyPatch) -> None:
+    class NoFallbackClient(FakeProprClient):
+        def create_order(self, account_id: str, **order_params: object) -> dict:
+            self.calls.append(("create_order", account_id, order_params))
+            raise ValueError("[404] 13450: exchange_asset_not_found")
+
+    client = NoFallbackClient(environment="prod")
+    service = ProprOrderService(client)
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+
+    preview = build_manual_order_submission_preview(
+        symbol="BTC/USDC",
+        side="buy",
+        position_side="long",
+        order_type="limit",
+        quantity="0.001",
+        price="100000",
+    )
+
+    with pytest.raises(ValueError, match="exchange_asset_not_found"):
+        service.submit_order_preview("account-1", preview)
+
+    assert len(client.calls) == 1

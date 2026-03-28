@@ -17,6 +17,8 @@ PROD_WS_URL = "wss://api.propr.xyz/ws"
 HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"
 DEFAULT_SYMBOL = "BTC/USDC"
 DEFAULT_LEVERAGE = 1
+DEFAULT_TRADING_JOURNAL_PATH = "artifacts/trading_journal_beta.jsonl"
+LEGACY_TRADING_JOURNAL_PATH = "artifacts/trading_journal.jsonl"
 
 
 class WriteTestSettings(BaseModel):
@@ -40,6 +42,7 @@ class LiveAppCycleSettings(BaseModel):
     data_source: str = "live"
     golden_scenario: str | None = None
     leverage: int = DEFAULT_LEVERAGE
+    journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
 
 
 class ManualTestSettings(BaseModel):
@@ -64,6 +67,7 @@ class RunnerSettings(BaseModel):
     data_source: str = "live"
     golden_scenario: str | None = None
     leverage: int = DEFAULT_LEVERAGE
+    journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
 
 
 class DataSourceSettings(BaseModel):
@@ -78,6 +82,7 @@ class MultiMarketScanSettings(BaseModel):
     allow_submit: bool = False
     require_healthy_core: bool = True
     leverage: int = DEFAULT_LEVERAGE
+    journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
 
 
 
@@ -109,6 +114,34 @@ def _parse_leverage_or_default(value: str) -> int:
     if parsed < 1:
         return DEFAULT_LEVERAGE
     return parsed
+
+
+
+def _resolve_journal_path() -> str:
+    configured_path = _get_env("TRADING_JOURNAL_PATH")
+    if configured_path and configured_path != LEGACY_TRADING_JOURNAL_PATH:
+        return configured_path
+
+    environment = (_get_env("PROPR_ENV") or "beta").strip().lower()
+    if not environment:
+        environment = "beta"
+    return f"artifacts/trading_journal_{environment}.jsonl"
+
+
+
+def _parse_scan_markets(value: str) -> list[tuple[str, str]]:
+    markets: list[tuple[str, str]] = []
+    for item in _parse_csv_list(value):
+        delimiter = ":" if ":" in item else "=" if "=" in item else None
+        if delimiter is None:
+            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
+        symbol, coin = item.split(delimiter, 1)
+        normalized_symbol = symbol.strip()
+        normalized_coin = coin.strip()
+        if not normalized_symbol or not normalized_coin:
+            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
+        markets.append((normalized_symbol, normalized_coin))
+    return markets
 
 
 
@@ -267,6 +300,7 @@ def load_runner_settings_from_env() -> RunnerSettings:
         data_source=data_source_settings.data_source,
         golden_scenario=data_source_settings.golden_scenario,
         leverage=leverage,
+        journal_path=_resolve_journal_path(),
     )
 
 
@@ -276,10 +310,16 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
     if confirm != "YES":
         raise ValueError("Multi-market scan requires SCAN_CONFIRM=YES")
 
-    symbols = _parse_csv_list(_get_env("SCAN_SYMBOLS"))
-    hyperliquid_coins = _parse_csv_list(_get_env("SCAN_HYPERLIQUID_COINS"))
-    if len(symbols) != len(hyperliquid_coins):
-        raise ValueError("SCAN_SYMBOLS and SCAN_HYPERLIQUID_COINS length mismatch")
+    combined_markets = _get_env("SCAN_MARKETS")
+    if combined_markets:
+        market_pairs = _parse_scan_markets(combined_markets)
+        symbols = [symbol for symbol, _ in market_pairs]
+        hyperliquid_coins = [coin for _, coin in market_pairs]
+    else:
+        symbols = _parse_csv_list(_get_env("SCAN_SYMBOLS"))
+        hyperliquid_coins = _parse_csv_list(_get_env("SCAN_HYPERLIQUID_COINS"))
+        if len(symbols) != len(hyperliquid_coins):
+            raise ValueError("SCAN_SYMBOLS and SCAN_HYPERLIQUID_COINS length mismatch")
 
     allow_submit = _parse_yes_no(_get_env("SCAN_ALLOW_SUBMIT") or "NO", "SCAN_ALLOW_SUBMIT")
     require_healthy_core = _parse_yes_no(
@@ -295,6 +335,7 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
         allow_submit=allow_submit,
         require_healthy_core=require_healthy_core,
         leverage=leverage,
+        journal_path=_resolve_journal_path(),
     )
 
 
@@ -334,4 +375,5 @@ def load_live_app_cycle_settings_from_env() -> LiveAppCycleSettings:
         data_source=data_source_settings.data_source,
         golden_scenario=data_source_settings.golden_scenario,
         leverage=manual_settings.leverage,
+        journal_path=_resolve_journal_path(),
     )

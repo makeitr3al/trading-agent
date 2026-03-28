@@ -80,6 +80,8 @@ def test_detect_trend_signal_valid_trend_long_signal() -> None:
     assert signal.entry == 10.0
     assert signal.stop_loss == 8.5
     assert signal.take_profit == 13.0
+    assert signal.signal_strength is not None
+    assert signal.signal_strength > 0
 
 
 def test_detect_trend_signal_invalid_because_neutral_regime() -> None:

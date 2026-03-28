@@ -97,6 +97,8 @@ def _print_result_summary(result: Any) -> None:
     print(f"  submitted_order: {getattr(result, 'submitted_order', False)}")
     print(f"  replaced_order: {getattr(result, 'replaced_order', False)}")
     print(f"  symbol_spec_loaded: {getattr(result, 'symbol_spec_loaded', False)}")
+    print(f"  journal_entries: {len(getattr(result, 'journal_entries', []))}")
+    print(f"  journal_path: {getattr(result, 'journal_path', None)}")
 
 
 def _print_golden_expectations(scenario_name: str) -> None:
@@ -149,6 +151,7 @@ def _run_single_cycle(
         desired_leverage=runner_settings.leverage,
         symbol_spec=symbol_spec,
         data_source=runner_settings.data_source,
+        journal_path=runner_settings.journal_path,
     )
     _print_result_summary(result)
     if result.skipped_reason == "missing symbol spec for live execution":

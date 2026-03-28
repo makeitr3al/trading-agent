@@ -17,3 +17,4 @@ class SignalState(BaseModel):
     entry: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    signal_strength: float | None = None

@@ -65,7 +65,6 @@ closeDeepOutsideBands = regimeBullish ? (hasBollingerData and close >= bbUpper +
 neutralCloseDeepOutsideShort = hasBollingerData and close >= bbUpper + neutralRequiredOutsideDistanceShort
 neutralCloseDeepOutsideLong = hasBollingerData and close <= bbLower - neutralRequiredOutsideDistanceLong
 countertrendCloseDeepOutside = regimeNeutral ? (neutralCloseDeepOutsideShort or neutralCloseDeepOutsideLong) : closeDeepOutsideBands
-countertrendHasSufficientBandwidth = regimeNeutral ? (countertrendSignalType == "COUNTERTREND_SHORT" ? (hasBollingerData and not na(avgUpperHalfBandwidth) and upperHalfBandwidth >= minBandwidthRatio * avgUpperHalfBandwidth) : (hasBollingerData and not na(avgLowerHalfBandwidth) and lowerHalfBandwidth >= minBandwidthRatio * avgLowerHalfBandwidth)) : hasSufficientBandwidth
 closeInOuterBandSweetSpot = regimeBullish ? (hasBollingerData and close >= bbUpper - outsideBandSweetSpot) : regimeBearish ? (hasBollingerData and close <= bbLower + outsideBandSweetSpot) : false
 closeOutsideTrigger = closeDeepOutsideBands or closeInOuterBandSweetSpot
 outsideTriggerReason = closeDeepOutsideBands ? "outside buffer" : closeInOuterBandSweetSpot ? "sweet spot" : "n/a"
@@ -73,6 +72,7 @@ outsideTriggerReason = closeDeepOutsideBands ? "outside buffer" : closeInOuterBa
 trendSignalType = regimeBullish ? "TREND_LONG" : regimeBearish ? "TREND_SHORT" : "TREND_LONG"
 neutralCountertrendSignalType = neutralCloseDeepOutsideShort ? "COUNTERTREND_SHORT" : neutralCloseDeepOutsideLong ? "COUNTERTREND_LONG" : hasBollingerData and close >= bbMiddle ? "COUNTERTREND_SHORT" : "COUNTERTREND_LONG"
 countertrendSignalType = regimeBullish ? "COUNTERTREND_SHORT" : regimeBearish ? "COUNTERTREND_LONG" : neutralCountertrendSignalType
+countertrendHasSufficientBandwidth = regimeNeutral ? (countertrendSignalType == "COUNTERTREND_SHORT" ? (hasBollingerData and not na(avgUpperHalfBandwidth) and upperHalfBandwidth >= minBandwidthRatio * avgUpperHalfBandwidth) : (hasBollingerData and not na(avgLowerHalfBandwidth) and lowerHalfBandwidth >= minBandwidthRatio * avgLowerHalfBandwidth)) : hasSufficientBandwidth
 
 string trendReason = ""
 bool trendValid = false

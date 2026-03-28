@@ -20,8 +20,14 @@ from models.runner_result import StrategyRunResult
 from models.trade import Trade, TradeDirection, TradeType
 
 
+class FakeConfig:
+    def __init__(self, environment: str = "prod") -> None:
+        self.environment = environment
+
+
 class FakeClient:
-    pass
+    def __init__(self, environment: str = "prod") -> None:
+        self.config = FakeConfig(environment)
 
 
 class FakeOrderService:
@@ -926,3 +932,82 @@ def test_golden_mode_blocks_active_trade_exit_order_updates(monkeypatch: pytest.
 
 
 
+
+
+def test_blocks_new_entry_when_three_open_order_trade_slots_already_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    order = _make_order()
+    synced_state = AgentState(
+        active_trade=_make_trade(),
+        account_open_entry_orders_count=1,
+        account_open_positions_count=2,
+    )
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="live",
+    )
+
+    assert result.execution_response is None
+    assert result.submitted_order is False
+    assert result.replaced_order is False
+    assert result.skipped_reason == "max open orders/trades reached (3/3)"
+
+
+def test_beta_blocks_standalone_stop_entry_execution_but_keeps_journalable_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    order = _make_order()
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
+
+    result = run_app_cycle(
+        client=FakeClient(environment="beta"),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+    )
+
+    assert result.submitted_order is False
+    assert result.replaced_order is False
+    assert result.skipped_reason == "beta does not support standalone stop entries"
+    assert result.post_cycle_state is not None
+    assert result.post_cycle_state.pending_order is not None
+
+
+def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    order = _make_order()
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
+    monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
+    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+
+    result = run_app_cycle(
+        client=FakeClient(environment="prod"),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+    )
+
+    assert result.skipped_reason is None
+    assert result.submitted_order is True

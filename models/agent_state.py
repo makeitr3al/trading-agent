@@ -17,3 +17,5 @@ class AgentState(BaseModel):
     countertrend_long_signal_consumed_in_regime: bool = False
     countertrend_short_signal_consumed_in_regime: bool = False
     last_cycle_timestamp: str | None = None
+    account_open_entry_orders_count: int = 0
+    account_open_positions_count: int = 0

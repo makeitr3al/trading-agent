@@ -44,11 +44,13 @@ Das bevorzugte vereinfachte Schema ist jetzt:
 - `DATA_SOURCE=live|golden` fuer die Candle-Datenquelle
 - `GOLDEN_SCENARIO` nur dann, wenn `DATA_SOURCE=golden`
 - `HYPERLIQUID_*` fuer echte historische Candle-Daten
+- `TRADING_JOURNAL_PATH` optional fuer einen expliziten Journal-Pfad
 
 BETA ist der sichere Default fuer Entwicklung und Tests.
 PROD wird nur geladen, wenn zusaetzlich `PROPR_PROD_CONFIRM=YES` gesetzt ist.
 
 Ungueltige oder fehlende `PROPR_LEVERAGE`-Werte fallen sicher auf `x1` zurueck.
+Wenn `TRADING_JOURNAL_PATH` nicht gesetzt ist, wird automatisch pro Umgebung getrennt geschrieben, also standardmaessig nach `artifacts/trading_journal_beta.jsonl` oder `artifacts/trading_journal_prod.jsonl`.
 
 ## Data Source Modes
 
@@ -121,7 +123,8 @@ Wichtig dabei:
 
 Aktuell bestaetigtes Beta-Verhalten:
 - dokumentiert wird `asset=BTC/USDC`, die Beta-Sandbox benoetigt fuer erfolgreiche Orders derzeit aber weiterhin einen Fallback auf `asset=BTC`
-- `BUY_STOP` und `SELL_STOP` funktionieren in Beta nicht als standalone Entry und werden mit `requires position or group` abgelehnt
+- `limit` verhaelt sich wie eine echte Limit-Order: ein marketable Buy-Limit oberhalb des Marktes wird direkt zum besseren verfuegbaren Preis ausgefuehrt und nicht wie ein Stop behandelt
+- `BUY_STOP` und `SELL_STOP` sind eigene Conditional-Typen und funktionieren in Beta nicht als standalone Entry; sie werden mit `requires position or group` bzw. `conditional_order_requires_position_or_group` abgelehnt
 - `take_profit_limit` und `stop_market` funktionieren fuer bestehende Positionen, wenn `positionId` mitgegeben wird
 - nach einem erfolgreichen Market-Close loest das Backend zugehoerige Exit-Orders teilweise direkt selbst auf; spaetere Cancel-Versuche koennen dann mit `order already resolved by backend lifecycle` enden
 ## Propr Beta Live App Cycle
@@ -142,7 +145,7 @@ Fuer einen echten Submit muessen beide Flags bewusst gesetzt werden:
 Startbefehl:
 `.\.venv\Scripts\python.exe scripts/propr_live_app_cycle.py`
 
-Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Vor echter Execution wird zusaetzlich geprueft, ob das Basis-Asset bei Propr ueber die Margin-Config tradebar ist und ob die konfigurierte `PROPR_LEVERAGE` das effektive Propr-Limit nicht ueberschreitet. Im Golden-Modus wird statt des Live-Marktdatenpfads genau ein bestehendes Golden-Szenario geladen und fachlich lesbar ausgegeben. Echter Submit ist dort hart blockiert.
+Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Vor echter Execution wird zusaetzlich geprueft, ob das Basis-Asset bei Propr ueber die Margin-Config tradebar ist und ob die konfigurierte `PROPR_LEVERAGE` das effektive Propr-Limit nicht ueberschreitet. Im Golden-Modus wird statt des Live-Marktdatenpfads genau ein bestehendes Golden-Szenario geladen und fachlich lesbar ausgegeben. Echter Submit ist dort hart blockiert. In Beta werden standalone Trend-Stop-Entries (`BUY_STOP` / `SELL_STOP`) aktuell nicht submitted, sondern sauber als bekannte Plattform-Limitation erkannt und nur gejournalt.
 
 ## Scheduled Runner
 
@@ -176,25 +179,48 @@ Beispiel fuer einen manuellen Golden-Lauf:
 
 ## Multi-Market Scan
 
-Der Multi-Market-Scanner startet mehrere Maerkte nacheinander als Dry-Run ueber denselben App-Cycle.
+Der Multi-Market-Scanner startet mehrere Maerkte nacheinander ueber denselben App-Cycle und kann im Live-Modus auch echte Beta-Execution ausloesen.
 
 Startbefehl:
 `.\.venv\Scripts\python.exe scripts/multi_market_scan.py`
 
 Wichtige Variablen:
 - `SCAN_CONFIRM=YES`
-- `SCAN_SYMBOLS=BTC/USDC,ETH/USDC,SOL/USDC`
-- `SCAN_HYPERLIQUID_COINS=BTC,ETH,SOL`
-- `SCAN_ALLOW_SUBMIT=NO`
+- `SCAN_MARKETS=BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL`
+- optional weiterhin `SCAN_SYMBOLS=...` plus `SCAN_HYPERLIQUID_COINS=...` als Legacy-Alternative
+- `SCAN_ALLOW_SUBMIT=NO|YES`
 - `DATA_SOURCE=live|golden`
 
 Wichtig dabei:
-- `SCAN_SYMBOLS` sind die Propr-/UI-Symbole
-- `SCAN_HYPERLIQUID_COINS` sind die passenden Hyperliquid-Perp-Coins
-- die Reihenfolge beider Listen muss exakt zusammenpassen
-- in diesem Schritt ist der Scanner immer ein Dry-Run
-- Multi-market submit ist noch nicht aktiv, auch wenn `SCAN_ALLOW_SUBMIT=YES` gesetzt wird
-- im Golden-Modus wird weiterhin nur fachlich validiert und kein echter Submit zugelassen
+- `SCAN_MARKETS` ist das kanonische Format und verwendet `SYMBOL:COIN`-Paare
+- `SCAN_SYMBOLS` und `SCAN_HYPERLIQUID_COINS` bleiben nur als Legacy-Fallback erhalten
+- echter Submit ist nur im Live-Modus moeglich; im Golden-Modus bleibt er hart blockiert
+- der Scanner beruecksichtigt kontoweit maximal 3 offene Entry-Orders oder Positionen
+- wenn mehr ausfuehrbare Markt-Kandidaten vorhanden sind als freie Slots, priorisiert der Scanner nach `signal_strength`; wenn genug Slots frei sind, werden alle validen Markt-Kandidaten verwendet
+- `PROPR_SYMBOL` gilt nur fuer Single-Market-Skripte, nicht fuer die Markt-Auswahl des Multi-Market-Scans
+- Beta-Einschraenkungen fuer standalone Stop-Entries gelten auch im Multi-Market-Scan
+
+## Trading Journal
+
+Jeder App-Cycle kann fortlaufend in ein JSONL-Journal schreiben. Das Journal enthaelt pro Cycle mindestens:
+- Datum und Timestamp des Eintrags
+- Umgebung (`beta` oder `prod`)
+- empfangene Signale
+- verwendete Signale
+- nicht verwendete Signale inklusive Grund
+
+Zusaetzlich werden pro vorbereiteter Order oder pro gefuelltem bzw. geschlossenen Trade eigene Eintraege geschrieben, unter anderem mit:
+- Symbol
+- Richtung
+- Fill-Zeitpunkt, sofern vorhanden
+- Position-Size
+- PnL nach Close, sofern vorhanden
+
+Standardmaessig wird pro Umgebung getrennt geschrieben:
+- `artifacts/trading_journal_beta.jsonl`
+- `artifacts/trading_journal_prod.jsonl`
+
+Mit `TRADING_JOURNAL_PATH` kannst du den Zielpfad bei Bedarf explizit ueberschreiben.
 
 ## Golden Schema Compare
 
@@ -217,8 +243,9 @@ Wenn du fuer alle Golden-Szenarien echte historische Referenzfaelle aus Hyperliq
 Das Skript:
 - laedt echte historische Hyperliquid-Candles ueber den bestehenden Historical Provider
 - replayt rollierende Marktfenster durch die echte Strategy-/Agent-Pipeline
+- verwendet pro Kandidat ein Analysefenster mit Warmup-Historie vor dem eigentlichen Triggerfenster
 - sucht pro Golden-Szenario bis zu 2 echte Marktbeispiele fuer die manuelle Review
-- exportiert die Review-Daten zusaetzlich als JSON und als flache CSV-Tabelle mit getrennten Zeit-, Actual-, Expected- und Match-Spalten
+- exportiert die Review-Daten zusaetzlich als JSON und als flache CSV-Tabelle mit getrennten Zeit-, Actual-, Expected-, Analysefenster- und Match-Spalten
 - fuehrt keine Trades und keine Submit-Logik aus
 
 ## Run All Golden Scenarios

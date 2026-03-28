@@ -1,7 +1,9 @@
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.journal import append_journal_entries, build_journal_entries
 from app.risk_guard import RiskGuardResult, evaluate_execution_guards
 from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
 from broker.challenge_service import get_active_challenge_context
@@ -17,7 +19,8 @@ from broker.propr_client import ProprClient
 from broker.state_sync import sync_agent_state_from_propr
 from config.strategy_config import StrategyConfig
 from models.candle import Candle
-from models.order import Order
+from models.journal import JournalEntry
+from models.order import Order, OrderType
 from models.propr_challenge import ActiveChallengeContext
 from models.runner_result import StrategyRunResult
 from models.symbol_spec import SymbolSpec
@@ -31,6 +34,24 @@ from strategy.state import AgentState
 # TODO: Later add trade close/modify calls to Propr.
 # TODO: Later add looping and scheduling.
 
+
+MAX_OPEN_ORDER_TRADE_SLOTS = 3
+
+
+def _beta_blocks_standalone_entry_order(order: Order | None, environment: str | None) -> bool:
+    if (environment or "").strip().lower() != "beta" or order is None:
+        return False
+    return order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
+
+
+def _count_open_order_trade_slots(state: AgentState | None) -> int:
+    if state is None:
+        return 0
+
+    return (
+        int(getattr(state, "account_open_entry_orders_count", 0) or 0)
+        + int(getattr(state, "account_open_positions_count", 0) or 0)
+    )
 
 
 def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
@@ -112,6 +133,71 @@ class AppCycleResult(BaseModel):
     health_guard_result: HealthGuardResult | None = None
     asset_guard_result: AssetGuardResult | None = None
     symbol_spec_loaded: bool = False
+    journal_entries: list[JournalEntry] = Field(default_factory=list)
+    journal_path: str | None = None
+
+
+def _build_app_cycle_result(
+    symbol: str,
+    environment: str | None,
+    candles: list[Candle],
+    journal_path: str | Path | None,
+    challenge_context: ActiveChallengeContext | None,
+    synced_state: AgentState | None,
+    strategy_result: StrategyRunResult | None,
+    post_cycle_state: AgentState | None,
+    execution_response: dict | None = None,
+    submitted_order: bool = False,
+    replaced_order: bool = False,
+    closed_trade: bool = False,
+    managed_exit_orders: bool = False,
+    skipped_reason: str | None = None,
+    risk_guard_result: RiskGuardResult | None = None,
+    health_guard_result: HealthGuardResult | None = None,
+    asset_guard_result: AssetGuardResult | None = None,
+    symbol_spec_loaded: bool = False,
+) -> AppCycleResult:
+    result = AppCycleResult(
+        challenge_context=challenge_context,
+        synced_state=synced_state,
+        strategy_result=strategy_result,
+        post_cycle_state=post_cycle_state,
+        execution_response=execution_response,
+        submitted_order=submitted_order,
+        replaced_order=replaced_order,
+        closed_trade=closed_trade,
+        managed_exit_orders=managed_exit_orders,
+        skipped_reason=skipped_reason,
+        risk_guard_result=risk_guard_result,
+        health_guard_result=health_guard_result,
+        asset_guard_result=asset_guard_result,
+        symbol_spec_loaded=symbol_spec_loaded,
+        journal_path=str(journal_path) if journal_path is not None else None,
+    )
+
+    if strategy_result is None or not candles:
+        return result
+
+    cycle_timestamp = candles[-1].timestamp.isoformat()
+    journal_entries = build_journal_entries(
+        symbol=symbol,
+        environment=environment,
+        cycle_timestamp=cycle_timestamp,
+        strategy_result=strategy_result,
+        synced_active_trade=synced_state.active_trade if synced_state is not None else None,
+        pending_order=post_cycle_state.pending_order if post_cycle_state is not None else None,
+        submitted_order=submitted_order,
+        replaced_order=replaced_order,
+        closed_trade=closed_trade,
+        skipped_reason=skipped_reason,
+        exit_price=float(candles[-1].close),
+    )
+    result = result.copy(update={"journal_entries": journal_entries})
+
+    if journal_path is not None and journal_entries:
+        append_journal_entries(journal_path, journal_entries)
+
+    return result
 
 
 
@@ -129,14 +215,20 @@ def run_app_cycle(
     desired_leverage: int = 1,
     symbol_spec: SymbolSpec | None = None,
     data_source: str = "live",
+    journal_path: str | Path | None = None,
 ) -> AppCycleResult:
     health_guard_result: HealthGuardResult | None = None
+    environment = getattr(getattr(client, "config", None), "environment", None)
     config = config.copy(update={"outside_band_sweet_spot": _derive_outside_band_sweet_spot(symbol_spec)})
     symbol_spec_loaded = symbol_spec is not None
     if require_healthy_core:
         health_guard_result = fetch_and_check_core_service_health(client)
         if not health_guard_result.allow_trading:
-            return AppCycleResult(
+            return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
                 challenge_context=None,
                 synced_state=None,
                 strategy_result=None,
@@ -156,7 +248,11 @@ def run_app_cycle(
     challenge_context = get_active_challenge_context(client)
     if challenge_context is None:
         risk_guard_result = evaluate_execution_guards(None, max_allowed_drawdown=max_allowed_drawdown)
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=None,
             synced_state=None,
             strategy_result=None,
@@ -169,7 +265,12 @@ def run_app_cycle(
         )
 
     account_id = challenge_context.account_id
-    synced_state = sync_agent_state_from_propr(client, account_id, previous_state)
+    try:
+        synced_state = sync_agent_state_from_propr(client, account_id, previous_state, symbol=symbol)
+    except TypeError as exc:
+        if "unexpected keyword argument 'symbol'" not in str(exc):
+            raise
+        synced_state = sync_agent_state_from_propr(client, account_id, previous_state)
     strategy_result, post_cycle_state = run_agent_cycle(
         candles=candles,
         config=config,
@@ -202,7 +303,11 @@ def run_app_cycle(
     asset_guard_result: AssetGuardResult | None = None
 
     if not risk_guard_result.allow_execution:
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -220,7 +325,11 @@ def run_app_cycle(
         )
 
     if not allow_execution:
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -247,7 +356,11 @@ def run_app_cycle(
     )
 
     if (pending_order_requested or close_requested or exit_order_update_requested) and data_source == "golden":
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -271,7 +384,11 @@ def run_app_cycle(
         and isinstance(client, ProprClient)
         and symbol_spec is None
     ):
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -297,7 +414,11 @@ def run_app_cycle(
             close_active_trade=True,
         )
         closed_trade = execution_response is not None
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -341,7 +462,11 @@ def run_app_cycle(
                     "take_profit_order_id": (take_profit_payload or {}).get("order_id"),
                 }
             )
-        return AppCycleResult(
+        return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
             challenge_context=challenge_context,
             synced_state=synced_state,
             strategy_result=strategy_result,
@@ -359,6 +484,52 @@ def run_app_cycle(
         )
 
     if pending_order_requested:
+        open_order_trade_slots = _count_open_order_trade_slots(synced_state)
+        new_entry_requested = synced_state.pending_order is None
+        if new_entry_requested and open_order_trade_slots >= MAX_OPEN_ORDER_TRADE_SLOTS:
+            return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
+                challenge_context=challenge_context,
+                synced_state=synced_state,
+                strategy_result=strategy_result,
+                post_cycle_state=post_cycle_state,
+                execution_response=None,
+                submitted_order=False,
+                replaced_order=False,
+                closed_trade=False,
+                managed_exit_orders=False,
+                skipped_reason=f"max open orders/trades reached ({open_order_trade_slots}/{MAX_OPEN_ORDER_TRADE_SLOTS})",
+                risk_guard_result=risk_guard_result,
+                health_guard_result=health_guard_result,
+                asset_guard_result=None,
+                symbol_spec_loaded=symbol_spec_loaded,
+            )
+
+        if _beta_blocks_standalone_entry_order(post_cycle_state.pending_order, environment):
+            return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
+                challenge_context=challenge_context,
+                synced_state=synced_state,
+                strategy_result=strategy_result,
+                post_cycle_state=post_cycle_state,
+                execution_response=None,
+                submitted_order=False,
+                replaced_order=False,
+                closed_trade=False,
+                managed_exit_orders=False,
+                skipped_reason="beta does not support standalone stop entries",
+                risk_guard_result=risk_guard_result,
+                health_guard_result=health_guard_result,
+                asset_guard_result=None,
+                symbol_spec_loaded=symbol_spec_loaded,
+            )
+
         asset_guard_result = evaluate_asset_execution_guard(
             client=client,
             account_id=account_id,
@@ -366,7 +537,11 @@ def run_app_cycle(
             desired_leverage=desired_leverage,
         )
         if not asset_guard_result.allow_execution:
-            return AppCycleResult(
+            return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
                 challenge_context=challenge_context,
                 synced_state=synced_state,
                 strategy_result=strategy_result,
@@ -415,7 +590,11 @@ def run_app_cycle(
                     }
                 )
 
-    return AppCycleResult(
+    return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
         challenge_context=challenge_context,
         synced_state=synced_state,
         strategy_result=strategy_result,

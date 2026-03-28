@@ -82,6 +82,8 @@ def test_detect_countertrend_signal_valid_countertrend_short_signal() -> None:
     assert signal.stop_loss is not None
     assert signal.take_profit == 8.0
     assert signal.stop_loss > signal.entry
+    assert signal.signal_strength is not None
+    assert signal.signal_strength > 0
 
 
 def test_detect_countertrend_signal_valid_countertrend_long_signal() -> None:
@@ -99,6 +101,8 @@ def test_detect_countertrend_signal_valid_countertrend_long_signal() -> None:
     assert signal.stop_loss is not None
     assert signal.take_profit == 8.0
     assert signal.stop_loss < signal.entry
+    assert signal.signal_strength is not None
+    assert signal.signal_strength > 0
 
 
 def test_detect_countertrend_signal_invalid_when_only_in_sweet_spot() -> None:

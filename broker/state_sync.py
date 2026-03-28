@@ -98,6 +98,37 @@ def _truthy_flag(value: Any) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
+def _normalize_symbol(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    return text or None
+
+
+def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
+    direct_symbol = _normalize_symbol(
+        _get_first(payload, ["symbol", "asset", "market", "instrument"])
+    )
+    if direct_symbol is not None:
+        return direct_symbol
+
+    base = _normalize_symbol(_get_first(payload, ["base"]))
+    quote = _normalize_symbol(_get_first(payload, ["quote"]))
+    if base and quote:
+        return f"{base}/{quote}"
+
+    return _normalize_symbol(_get_first(payload, ["coin"]))
+
+
+def _payload_matches_symbol(payload: dict[str, Any], symbol: str | None) -> bool:
+    if symbol is None:
+        return True
+    payload_symbol = _extract_payload_symbol(payload)
+    if payload_symbol is None:
+        return True
+    return payload_symbol == symbol.strip().upper()
+
+
 def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
     raw_type = _raw_order_type(_get_first(order_payload, ["order_type", "type"]))
     normalized_type = _normalize_order_type(_get_first(order_payload, ["order_type", "type"]))
@@ -193,13 +224,29 @@ def build_agent_state_from_propr_data(
     orders_payload: dict | list[dict],
     positions_payload: dict | list[dict],
     previous_state: AgentState | None = None,
+    symbol: str | None = None,
 ) -> AgentState:
+    normalized_symbol = symbol.strip().upper() if isinstance(symbol, str) and symbol.strip() else None
+
+    all_valid_order_entries: list[tuple[Order, str | None]] = []
     valid_order_entries: list[tuple[Order, str | None]] = []
     stop_loss_order_ids: list[str] = []
     take_profit_order_ids: list[str] = []
     for item in _get_items(orders_payload):
         order_classification = _classify_open_order_payload(item)
         external_order_id = _extract_external_order_id(item)
+
+        if order_classification == "pending_entry":
+            mapped_order = map_propr_order_to_internal(item)
+            if mapped_order is not None and mapped_order.status == OrderStatus.PENDING:
+                all_valid_order_entries.append((mapped_order, external_order_id))
+                if _payload_matches_symbol(item, normalized_symbol):
+                    valid_order_entries.append((mapped_order, external_order_id))
+            continue
+
+        if not _payload_matches_symbol(item, normalized_symbol):
+            continue
+
         if order_classification == "stop_loss_exit":
             if external_order_id is not None:
                 stop_loss_order_ids.append(external_order_id)
@@ -209,17 +256,21 @@ def build_agent_state_from_propr_data(
                 take_profit_order_ids.append(external_order_id)
             continue
 
-        mapped_order = map_propr_order_to_internal(item)
-        if mapped_order is not None and mapped_order.status == OrderStatus.PENDING:
-            valid_order_entries.append((mapped_order, external_order_id))
-
-    mapped_positions = [
+    all_mapped_positions = [
         position
         for position in (
             map_propr_position_to_internal(item)
             for item in _get_items(positions_payload)
         )
         if position is not None
+    ]
+    mapped_positions = [
+        position
+        for item, position in (
+            (item, map_propr_position_to_internal(item))
+            for item in _get_items(positions_payload)
+        )
+        if position is not None and _payload_matches_symbol(item, normalized_symbol)
     ]
 
     if len(valid_order_entries) > 1:
@@ -247,6 +298,8 @@ def build_agent_state_from_propr_data(
             pending_order_id=pending_order_id,
             stop_loss_order_id=stop_loss_order_id,
             take_profit_order_id=take_profit_order_id,
+            account_open_entry_orders_count=len(all_valid_order_entries),
+            account_open_positions_count=len(all_mapped_positions),
         )
 
     return previous_state.copy(
@@ -256,6 +309,8 @@ def build_agent_state_from_propr_data(
             "pending_order_id": pending_order_id,
             "stop_loss_order_id": stop_loss_order_id,
             "take_profit_order_id": take_profit_order_id,
+            "account_open_entry_orders_count": len(all_valid_order_entries),
+            "account_open_positions_count": len(all_mapped_positions),
         }
     )
 
@@ -264,6 +319,7 @@ def sync_agent_state_from_propr(
     client: ProprClient,
     account_id: str,
     previous_state: AgentState | None = None,
+    symbol: str | None = None,
 ) -> AgentState:
     orders_payload = client.get_orders(account_id)
     positions_payload = client.get_positions(account_id)
@@ -271,6 +327,7 @@ def sync_agent_state_from_propr(
         orders_payload=orders_payload,
         positions_payload=positions_payload,
         previous_state=previous_state,
+        symbol=symbol,
     )
 
 

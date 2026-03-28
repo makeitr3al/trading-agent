@@ -27,6 +27,42 @@ def _half_bandwidth_for_signal_type(
     return bb_middle - bb_lower
 
 
+def _outside_distance_for_signal_type(
+    close: float,
+    signal_type: SignalType,
+    bb_upper: float,
+    bb_lower: float,
+) -> float:
+    if signal_type == SignalType.COUNTERTREND_SHORT:
+        return close - bb_upper
+    return bb_lower - close
+
+
+def _countertrend_signal_strength(
+    close: float,
+    signal_type: SignalType,
+    bb_upper: float,
+    bb_middle: float,
+    bb_lower: float,
+) -> float:
+    relevant_half_bandwidth = _half_bandwidth_for_signal_type(
+        signal_type=signal_type,
+        bb_upper=bb_upper,
+        bb_middle=bb_middle,
+        bb_lower=bb_lower,
+    )
+    if relevant_half_bandwidth <= 0:
+        return 0.0
+
+    outside_distance = _outside_distance_for_signal_type(
+        close=close,
+        signal_type=signal_type,
+        bb_upper=bb_upper,
+        bb_lower=bb_lower,
+    )
+    return round(max(0.0, outside_distance / relevant_half_bandwidth), 8)
+
+
 def _is_close_deep_outside_for_signal_type(
     close: float,
     signal_type: SignalType,
@@ -180,4 +216,11 @@ def detect_countertrend_signal(
         entry=entry,
         stop_loss=stop_loss,
         take_profit=bb_middle,
+        signal_strength=_countertrend_signal_strength(
+            close=latest_candle.close,
+            signal_type=signal_type,
+            bb_upper=bb_upper,
+            bb_middle=bb_middle,
+            bb_lower=bb_lower,
+        ),
     )

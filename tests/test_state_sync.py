@@ -437,3 +437,89 @@ def test_open_relevant_order_statuses_are_recognized_as_pending() -> None:
     assert pending_order.status == OrderStatus.PENDING
 
 
+
+
+def test_build_agent_state_from_propr_data_filters_to_requested_symbol_and_tracks_account_totals() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "orderId": "btc-order",
+                    "side": "buy",
+                    "type": "stop_limit",
+                    "price": 110,
+                    "stopLoss": 100,
+                    "takeProfit": 130,
+                    "status": "open",
+                },
+                {
+                    "symbol": "ETH/USDC",
+                    "orderId": "eth-order",
+                    "side": "sell",
+                    "type": "limit",
+                    "price": 120,
+                    "stopLoss": 130,
+                    "takeProfit": 100,
+                    "status": "open",
+                },
+            ]
+        },
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "ETH/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "eth-position",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+    )
+
+    assert state.pending_order is not None
+    assert state.pending_order_id == "btc-order"
+    assert state.active_trade is None
+    assert state.account_open_entry_orders_count == 2
+    assert state.account_open_positions_count == 1
+
+
+def test_sync_agent_state_from_propr_allows_multiple_account_positions_when_symbol_filter_is_used() -> None:
+    client = FakeProprClient(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "btc-position",
+                },
+                {
+                    "symbol": "ETH/USDC",
+                    "status": "open",
+                    "positionSide": "short",
+                    "entry": 100,
+                    "stopLoss": 105,
+                    "takeProfit": 90,
+                    "quantity": "2",
+                    "positionId": "eth-position",
+                },
+            ]
+        },
+    )
+
+    state = sync_agent_state_from_propr(client, "account-1", symbol="BTC/USDC")
+
+    assert state.active_trade is not None
+    assert state.active_trade.position_id == "btc-position"
+    assert state.account_open_positions_count == 2

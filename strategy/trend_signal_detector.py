@@ -17,6 +17,35 @@ from strategy.signal_rules import (
 # TODO: Later add handling for last neutral phase, fake countertrend, and neutralization.
 
 
+def _trend_signal_strength(
+    candle_open: float,
+    candle_close: float,
+    regime: RegimeType,
+    bb_upper: float,
+    bb_middle: float,
+    bb_lower: float,
+) -> float:
+    relevant_half_bandwidth = get_relevant_half_bandwidth(
+        regime=regime,
+        bb_upper=bb_upper,
+        bb_middle=bb_middle,
+        bb_lower=bb_lower,
+    )
+    if relevant_half_bandwidth <= 0:
+        return 0.0
+
+    if regime == RegimeType.BULLISH:
+        directional_body = candle_close - candle_open
+        directional_position = candle_close - bb_middle
+    else:
+        directional_body = candle_open - candle_close
+        directional_position = bb_middle - candle_close
+
+    normalized_body = max(0.0, directional_body / relevant_half_bandwidth)
+    normalized_position = max(0.0, directional_position / relevant_half_bandwidth)
+    return round(normalized_body + normalized_position, 8)
+
+
 def detect_trend_signal(
     candles: list[Candle],
     bollinger_df: pd.DataFrame,
@@ -142,4 +171,12 @@ def detect_trend_signal(
         entry=entry,
         stop_loss=stop_loss,
         take_profit=take_profit,
+        signal_strength=_trend_signal_strength(
+            candle_open=latest_candle.open,
+            candle_close=latest_candle.close,
+            regime=regime,
+            bb_upper=bb_upper,
+            bb_middle=bb_middle,
+            bb_lower=bb_lower,
+        ),
     )

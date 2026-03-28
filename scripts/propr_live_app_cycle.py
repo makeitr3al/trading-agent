@@ -186,6 +186,7 @@ def main() -> None:
             desired_leverage=settings.leverage,
             symbol_spec=symbol_spec,
             data_source=settings.data_source,
+            journal_path=settings.journal_path,
         )
 
         _print_section("Challenge Context", result.challenge_context)
@@ -200,6 +201,8 @@ def main() -> None:
         _print_section("Asset Guard Result", result.asset_guard_result)
         print(f"SymbolSpec loaded in app cycle: {result.symbol_spec_loaded}")
         print(f"Execution allowed: {effective_allow_execution}")
+        print(f"Journal entries: {len(result.journal_entries)}")
+        print(f"Journal path: {result.journal_path}")
         _print_section("Execution response", result.execution_response)
         if result.skipped_reason:
             print(f"Skipped reason: {result.skipped_reason}")

@@ -72,8 +72,12 @@ def _make_candidate() -> HistoricalReferenceCandidate:
         score=7,
         coin="BTC",
         window_size_bars=20,
+        analysis_window_size_bars=220,
+        warmup_bars=200,
         start_timestamp="2026-01-01T00:00:00+00:00",
         end_timestamp="2026-01-20T00:00:00+00:00",
+        analysis_start_timestamp="2025-06-15T00:00:00+00:00",
+        analysis_end_timestamp="2026-01-20T00:00:00+00:00",
         trigger_timestamp="2026-01-20T00:00:00+00:00",
         decision_action="PREPARE_TREND_ORDER",
         selected_signal_type="TREND_LONG",
@@ -205,7 +209,9 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     csv_rows = flatten_candidates_for_csv(candidates)
     assert csv_rows[0]["candidate_rank"] == "1"
     assert csv_rows[0]["window_start_date"] == "2026-01-01"
+    assert csv_rows[0]["analysis_start_date"] == "2025-06-15"
     assert csv_rows[0]["trigger_date"] == "2026-01-20"
+    assert csv_rows[0]["warmup_bars"] == "200"
     assert csv_rows[0]["actual_break_even_activated"] == "n/a"
     assert csv_rows[0]["expected_countertrend_signal_type"] == "n/a"
     assert csv_rows[0]["match_countertrend_signal_type"] == "n/a"
@@ -221,9 +227,11 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     csv_output_path = export_candidates_csv(candidates, tmp_path / "cases.csv")
     csv_content = csv_output_path.read_text(encoding="utf-8")
     assert "scenario_name,candidate_rank,score,coin,window_size_bars" in csv_content
+    assert "analysis_window_size_bars" in csv_content
+    assert "warmup_bars" in csv_content
     assert "actual_inside_margin" in csv_content
     assert "actual_bb_upper" in csv_content
-    assert "scenario,1,7,BTC,20" in csv_content
+    assert "scenario,1,7,BTC,20,220,200" in csv_content
 
 
 def test_chronological_windows_keep_original_order() -> None:
@@ -233,8 +241,12 @@ def test_chronological_windows_keep_original_order() -> None:
         _make_candle(3, 1.1, 1.3, 1.0, 1.2),
     ]
 
-    windows = build_replay_windows(candles, 2)
+    windows = build_replay_windows(candles, 2, warmup_bars=1)
 
     assert len(windows) == 2
-    assert windows[0][0].timestamp < windows[0][1].timestamp
-    assert windows[1][0].timestamp < windows[1][1].timestamp
+    assert windows[0].trigger_candles[0].timestamp < windows[0].trigger_candles[1].timestamp
+    assert windows[1].analysis_candles[0].timestamp < windows[1].analysis_candles[1].timestamp
+    assert windows[0].warmup_bars == 0
+    assert windows[1].warmup_bars == 1
+    assert len(windows[1].analysis_candles) == 3
+    assert len(windows[1].trigger_candles) == 2

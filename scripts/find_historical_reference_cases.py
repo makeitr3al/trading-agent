@@ -34,6 +34,7 @@ from utils.env_loader import load_hyperliquid_config_from_env
 ARTIFACTS_JSON_PATH = PROJECT_ROOT / "artifacts" / "historical_reference_cases.json"
 ARTIFACTS_CSV_PATH = PROJECT_ROOT / "artifacts" / "historical_reference_cases.csv"
 CSV_NA = "n/a"
+DEFAULT_WARMUP_BARS = 200
 
 # TODO: Later add scenario filters, e.g. by name prefix or tags.
 # TODO: Later add richer market-shape diagnostics for close manual review.
@@ -45,8 +46,12 @@ class HistoricalReferenceCandidate:
     score: int
     coin: str
     window_size_bars: int
+    analysis_window_size_bars: int
+    warmup_bars: int
     start_timestamp: str
     end_timestamp: str
+    analysis_start_timestamp: str
+    analysis_end_timestamp: str
     trigger_timestamp: str
     decision_action: str
     selected_signal_type: str | None
@@ -101,19 +106,51 @@ class HistoricalReferenceCandidate:
     match_comment: str | None = None
 
 
+@dataclass(frozen=True)
+class ReplayWindow:
+    analysis_candles: list[Candle]
+    trigger_candles: list[Candle]
+    warmup_bars: int
+
+
 def load_all_golden_scenarios() -> list[Any]:
     module = _load_strategy_scenarios_module()
     builders = _discover_scenario_builders(module)
     return [builders[name]() for name in sorted(builders)]
 
 
-def build_replay_windows(candles: list[Candle], window_size: int) -> list[list[Candle]]:
+def build_replay_windows(
+    candles: list[Candle],
+    window_size: int,
+    warmup_bars: int = DEFAULT_WARMUP_BARS,
+) -> list[ReplayWindow]:
     if not candles or window_size <= 0 or len(candles) < window_size:
         return []
-    return [
-        candles[start_index : start_index + window_size]
-        for start_index in range(0, len(candles) - window_size + 1)
-    ]
+
+    resolved_warmup_bars = max(0, warmup_bars)
+    replay_windows: list[ReplayWindow] = []
+    for end_index in range(window_size - 1, len(candles)):
+        trigger_start_index = end_index - window_size + 1
+        analysis_start_index = max(0, trigger_start_index - resolved_warmup_bars)
+        analysis_candles = candles[analysis_start_index : end_index + 1]
+        trigger_candles = candles[trigger_start_index : end_index + 1]
+        replay_windows.append(
+            ReplayWindow(
+                analysis_candles=analysis_candles,
+                trigger_candles=trigger_candles,
+                warmup_bars=trigger_start_index - analysis_start_index,
+            )
+        )
+    return replay_windows
+
+
+def _resolve_replay_warmup_bars(config: Any) -> int:
+    indicator_minimum = max(
+        int(config.bollinger_period),
+        int(config.min_bandwidth_avg_period),
+        int(config.macd_slow_period + config.macd_signal_period),
+    )
+    return max(DEFAULT_WARMUP_BARS, indicator_minimum)
 
 
 def _uses_agent_cycle(scenario: Any) -> bool:
@@ -400,12 +437,14 @@ def _score_scenario_match_with_comment(
 def _build_candidate(
     scenario: Any,
     coin: str,
-    candles: list[Candle],
+    replay_window: ReplayWindow,
     strategy_result: Any,
     post_state: AgentState | None,
     score: int,
     match_comment: str | None,
 ) -> HistoricalReferenceCandidate:
+    analysis_candles = replay_window.analysis_candles
+    trigger_candles = replay_window.trigger_candles
     trend_signal = getattr(strategy_result, "trend_signal", None)
     countertrend_signal = getattr(strategy_result, "countertrend_signal", None)
     updated_trade = getattr(strategy_result, "updated_trade", None)
@@ -417,16 +456,20 @@ def _build_candidate(
     countertrend_signal_valid = countertrend_signal.is_valid if countertrend_signal is not None else None
     countertrend_signal_type = countertrend_signal.signal_type.value if countertrend_signal is not None else None
     break_even_activated = updated_trade.break_even_activated if updated_trade is not None else None
-    diagnostics = _calculate_window_diagnostics(candles, scenario.config)
+    diagnostics = _calculate_window_diagnostics(analysis_candles, scenario.config)
 
     return HistoricalReferenceCandidate(
         scenario_name=scenario.name,
         score=score,
         coin=coin,
-        window_size_bars=len(candles),
-        start_timestamp=candles[0].timestamp.isoformat(),
-        end_timestamp=candles[-1].timestamp.isoformat(),
-        trigger_timestamp=candles[-1].timestamp.isoformat(),
+        window_size_bars=len(trigger_candles),
+        analysis_window_size_bars=len(analysis_candles),
+        warmup_bars=replay_window.warmup_bars,
+        start_timestamp=trigger_candles[0].timestamp.isoformat(),
+        end_timestamp=trigger_candles[-1].timestamp.isoformat(),
+        analysis_start_timestamp=analysis_candles[0].timestamp.isoformat(),
+        analysis_end_timestamp=analysis_candles[-1].timestamp.isoformat(),
+        trigger_timestamp=trigger_candles[-1].timestamp.isoformat(),
         decision_action=decision_action,
         selected_signal_type=strategy_result.decision.selected_signal_type,
         trend_signal_valid=trend_signal_valid,
@@ -516,10 +559,16 @@ def flatten_candidates_for_csv(
                 "score": candidate.score,
                 "coin": candidate.coin,
                 "window_size_bars": candidate.window_size_bars,
+                "analysis_window_size_bars": candidate.analysis_window_size_bars,
+                "warmup_bars": candidate.warmup_bars,
                 "window_start_timestamp": candidate.start_timestamp,
                 "window_start_date": candidate.start_timestamp.split("T", 1)[0],
                 "window_end_timestamp": candidate.end_timestamp,
                 "window_end_date": candidate.end_timestamp.split("T", 1)[0],
+                "analysis_start_timestamp": candidate.analysis_start_timestamp,
+                "analysis_start_date": candidate.analysis_start_timestamp.split("T", 1)[0],
+                "analysis_end_timestamp": candidate.analysis_end_timestamp,
+                "analysis_end_date": candidate.analysis_end_timestamp.split("T", 1)[0],
                 "trigger_timestamp": candidate.trigger_timestamp,
                 "trigger_date": candidate.trigger_timestamp.split("T", 1)[0],
                 "actual_decision_action": candidate.decision_action,
@@ -594,7 +643,9 @@ def export_candidates_csv(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "scenario_name", "candidate_rank", "score", "coin", "window_size_bars",
+        "analysis_window_size_bars", "warmup_bars",
         "window_start_timestamp", "window_start_date", "window_end_timestamp", "window_end_date",
+        "analysis_start_timestamp", "analysis_start_date", "analysis_end_timestamp", "analysis_end_date",
         "trigger_timestamp", "trigger_date", "actual_decision_action", "actual_selected_signal_type",
         "actual_trend_signal_valid", "actual_trend_signal_type", "actual_trend_reason",
         "actual_countertrend_signal_valid", "actual_countertrend_signal_type", "actual_countertrend_reason",
@@ -656,15 +707,17 @@ def main() -> None:
         print(f"interval: {hyperliquid_config.interval}")
         print(f"lookback_bars: {hyperliquid_config.lookback_bars}")
         print(f"Golden scenarios: {len(scenarios)}")
+        print(f"default_warmup_bars: {DEFAULT_WARMUP_BARS}")
 
         live_batch = HyperliquidHistoricalProvider(hyperliquid_config).fetch_candles()
         candidates_by_scenario: dict[str, list[HistoricalReferenceCandidate]] = {scenario.name: [] for scenario in scenarios}
 
         for scenario in scenarios:
             window_size = len(scenario.candles)
-            windows = build_replay_windows(live_batch.candles, window_size)
-            for window in windows:
-                strategy_result, post_state = _evaluate_window(scenario, window)
+            replay_warmup_bars = _resolve_replay_warmup_bars(scenario.config)
+            windows = build_replay_windows(live_batch.candles, window_size, warmup_bars=replay_warmup_bars)
+            for replay_window in windows:
+                strategy_result, post_state = _evaluate_window(scenario, replay_window.analysis_candles)
                 score, match_comment = _score_scenario_match_with_comment(
                     scenario=scenario,
                     strategy_result=strategy_result,
@@ -676,7 +729,7 @@ def main() -> None:
                 candidate = _build_candidate(
                     scenario=scenario,
                     coin=hyperliquid_config.coin,
-                    candles=window,
+                    replay_window=replay_window,
                     strategy_result=strategy_result,
                     post_state=post_state,
                     score=score,

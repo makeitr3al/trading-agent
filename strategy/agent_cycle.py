@@ -35,7 +35,7 @@ def _is_order_filled(order: Order, candle: Candle) -> bool:
     return False
 
 
-def _build_trade_from_filled_order(order: Order) -> Trade:
+def _build_trade_from_filled_order(order: Order, fill_timestamp: str | None = None) -> Trade:
     if order.signal_source in ("trend_long", "trend_short"):
         trade_type = TradeType.TREND
     else:
@@ -52,8 +52,10 @@ def _build_trade_from_filled_order(order: Order) -> Trade:
         entry=order.entry,
         stop_loss=order.stop_loss,
         take_profit=order.take_profit,
+        quantity=order.position_size,
         is_active=True,
         break_even_activated=False,
+        opened_at=fill_timestamp,
     )
 
 
@@ -86,7 +88,7 @@ def run_agent_cycle(
     working_active_trade = state.active_trade
 
     if old_pending_order is not None and _is_order_filled(old_pending_order, latest_candle):
-        filled_trade = _build_trade_from_filled_order(old_pending_order)
+        filled_trade = _build_trade_from_filled_order(old_pending_order, latest_candle.timestamp.isoformat())
         working_active_trade = filled_trade
         old_pending_order = None
 
@@ -246,5 +248,7 @@ def run_agent_cycle(
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),
         }
     )
+
+    result = result.copy(update={"filled_trade": filled_trade})
 
     return result, new_state

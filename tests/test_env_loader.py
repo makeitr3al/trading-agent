@@ -8,6 +8,7 @@ import pytest
 from utils.env_loader import (
     load_live_app_cycle_settings_from_env,
     load_manual_test_settings_from_env,
+    load_multi_market_scan_settings_from_env,
     load_propr_config_from_env,
     load_runner_settings_from_env,
 )
@@ -218,3 +219,62 @@ def test_live_app_cycle_settings_reads_valid_leverage(monkeypatch: pytest.Monkey
     settings = load_live_app_cycle_settings_from_env()
 
     assert settings.leverage == 4
+
+
+def test_live_app_cycle_settings_reads_journal_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRADING_JOURNAL_PATH", "artifacts/custom-journal.jsonl")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_live_app_cycle_settings_from_env()
+
+    assert settings.journal_path == "artifacts/custom-journal.jsonl"
+
+
+
+def test_multi_market_scan_settings_can_parse_combined_market_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCAN_CONFIRM", "YES")
+    monkeypatch.setenv("SCAN_MARKETS", "BTC/USDC:BTC,ETH/USDC:ETH")
+    monkeypatch.delenv("SCAN_SYMBOLS", raising=False)
+    monkeypatch.delenv("SCAN_HYPERLIQUID_COINS", raising=False)
+    monkeypatch.setenv("TRADING_JOURNAL_PATH", "artifacts/scan-journal.jsonl")
+
+    settings = load_multi_market_scan_settings_from_env()
+
+    assert settings.symbols == ["BTC/USDC", "ETH/USDC"]
+    assert settings.hyperliquid_coins == ["BTC", "ETH"]
+    assert settings.journal_path == "artifacts/scan-journal.jsonl"
+
+
+def test_live_app_cycle_settings_default_journal_path_uses_beta_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TRADING_JOURNAL_PATH", raising=False)
+    monkeypatch.delenv("PROPR_ENV", raising=False)
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_live_app_cycle_settings_from_env()
+
+    assert settings.journal_path == "artifacts/trading_journal_beta.jsonl"
+
+
+def test_runner_settings_default_journal_path_uses_prod_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TRADING_JOURNAL_PATH", raising=False)
+    monkeypatch.setenv("PROPR_ENV", "prod")
+    monkeypatch.setenv("RUNNER_MODE", "manual")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.journal_path == "artifacts/trading_journal_prod.jsonl"
+
+
+def test_live_app_cycle_settings_legacy_generic_journal_path_maps_to_environment_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRADING_JOURNAL_PATH", "artifacts/trading_journal.jsonl")
+    monkeypatch.setenv("PROPR_ENV", "beta")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_live_app_cycle_settings_from_env()
+
+    assert settings.journal_path == "artifacts/trading_journal_beta.jsonl"
