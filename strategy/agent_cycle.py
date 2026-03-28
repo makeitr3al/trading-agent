@@ -7,6 +7,7 @@ from models.candle import Candle
 from models.decision import DecisionAction, DecisionResult
 from models.order import Order, OrderType
 from models.runner_result import StrategyRunResult
+from models.signal import SignalState, SignalType
 from models.trade import Trade, TradeDirection, TradeType
 from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
@@ -34,7 +35,6 @@ def _is_order_filled(order: Order, candle: Candle) -> bool:
     return False
 
 
-
 def _build_trade_from_filled_order(order: Order) -> Trade:
     if order.signal_source in ("trend_long", "trend_short"):
         trade_type = TradeType.TREND
@@ -56,6 +56,22 @@ def _build_trade_from_filled_order(order: Order) -> Trade:
         break_even_activated=False,
     )
 
+
+def _is_countertrend_signal_consumed_in_regime(
+    state: AgentState,
+    last_regime: str | None,
+    signal: SignalState | None,
+) -> bool:
+    if signal is None or not signal.is_valid or last_regime is None or state.last_regime != last_regime:
+        return False
+
+    if signal.signal_type == SignalType.COUNTERTREND_LONG:
+        return state.countertrend_long_signal_consumed_in_regime
+
+    if signal.signal_type == SignalType.COUNTERTREND_SHORT:
+        return state.countertrend_short_signal_consumed_in_regime
+
+    return False
 
 
 def run_agent_cycle(
@@ -100,6 +116,14 @@ def run_agent_cycle(
         and result.decision.action == DecisionAction.PREPARE_TREND_ORDER
     )
     if duplicate_trend_signal_blocked:
+        invalid_trend_signal = None
+        if result.trend_signal is not None:
+            invalid_trend_signal = result.trend_signal.copy(
+                update={
+                    "is_valid": False,
+                    "reason": "trend regime consumed",
+                }
+            )
         result = result.copy(
             update={
                 "decision": DecisionResult(
@@ -108,6 +132,35 @@ def run_agent_cycle(
                     selected_signal_type=None,
                 ),
                 "order": None,
+                "trend_signal": invalid_trend_signal,
+            }
+        )
+
+    duplicate_countertrend_signal_blocked = _is_countertrend_signal_consumed_in_regime(
+        state=state,
+        last_regime=last_regime,
+        signal=result.countertrend_signal,
+    )
+    if duplicate_countertrend_signal_blocked:
+        invalid_countertrend_signal = None
+        if result.countertrend_signal is not None:
+            invalid_countertrend_signal = result.countertrend_signal.copy(
+                update={
+                    "is_valid": False,
+                    "reason": "countertrend regime direction consumed",
+                }
+            )
+        result = result.copy(
+            update={
+                "decision": DecisionResult(
+                    action=DecisionAction.NO_ACTION,
+                    reason="countertrend signal already consumed in regime direction",
+                    selected_signal_type=None,
+                ),
+                "order": None,
+                "countertrend_signal": invalid_countertrend_signal,
+                "updated_trade": None,
+                "close_active_trade": False,
             }
         )
 
@@ -140,6 +193,7 @@ def run_agent_cycle(
                 current_price=current_price,
                 account_balance=account_balance,
                 risk_per_trade_pct=config.risk_per_trade_pct,
+                buy_spread=config.buy_spread,
             )
         else:
             pending_order = None
@@ -149,16 +203,37 @@ def run_agent_cycle(
     trend_signal_consumed_in_regime = (
         False if regime_changed else state.trend_signal_consumed_in_regime
     )
-    if result.decision.action.value == "PREPARE_TREND_ORDER":
+    countertrend_long_signal_consumed_in_regime = (
+        False if regime_changed else state.countertrend_long_signal_consumed_in_regime
+    )
+    countertrend_short_signal_consumed_in_regime = (
+        False if regime_changed else state.countertrend_short_signal_consumed_in_regime
+    )
+    if result.decision.action in {
+        DecisionAction.PREPARE_TREND_ORDER,
+        DecisionAction.CLOSE_TREND_TRADE,
+        DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
+    }:
         trend_signal_consumed_in_regime = True
+    if result.countertrend_signal is not None and result.countertrend_signal.is_valid:
+        if result.countertrend_signal.signal_type == SignalType.COUNTERTREND_LONG:
+            countertrend_long_signal_consumed_in_regime = True
+        elif result.countertrend_signal.signal_type == SignalType.COUNTERTREND_SHORT:
+            countertrend_short_signal_consumed_in_regime = True
+
+    active_trade = (
+        None
+        if result.close_active_trade
+        else result.updated_trade
+        if result.updated_trade is not None
+        else filled_trade
+        if filled_trade is not None
+        else state.active_trade
+    )
 
     new_state = state.copy(
         update={
-            "active_trade": result.updated_trade
-            if result.updated_trade is not None
-            else filled_trade
-            if filled_trade is not None
-            else state.active_trade,
+            "active_trade": active_trade,
             "pending_order": pending_order,
             "last_decision_action": result.decision.action.value,
             "last_signal_type": result.decision.selected_signal_type
@@ -166,6 +241,8 @@ def run_agent_cycle(
             else None,
             "last_regime": last_regime,
             "trend_signal_consumed_in_regime": trend_signal_consumed_in_regime,
+            "countertrend_long_signal_consumed_in_regime": countertrend_long_signal_consumed_in_regime,
+            "countertrend_short_signal_consumed_in_regime": countertrend_short_signal_consumed_in_regime,
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),
         }
     )

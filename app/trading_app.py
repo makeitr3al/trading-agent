@@ -6,7 +6,9 @@ from app.risk_guard import RiskGuardResult, evaluate_execution_guards
 from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
 from broker.challenge_service import get_active_challenge_context
 from broker.execution import (
+    manage_active_trade_exit_orders,
     safe_replace_pending_order,
+    submit_active_trade_close_if_allowed,
     submit_agent_order_if_allowed,
 )
 from broker.health_guard import HealthGuardResult, fetch_and_check_core_service_health
@@ -88,6 +90,13 @@ def _apply_symbol_specific_position_size(
     return apply_symbol_spec_to_order(prepared_order, symbol_spec)
 
 
+
+def _derive_outside_band_sweet_spot(symbol_spec: SymbolSpec | None) -> float:
+    if symbol_spec is None or symbol_spec.price_decimals is None:
+        return 0.0
+    return 2 * (10 ** (-symbol_spec.price_decimals))
+
+
 class AppCycleResult(BaseModel):
     challenge_context: ActiveChallengeContext | None
     synced_state: AgentState | None
@@ -96,6 +105,8 @@ class AppCycleResult(BaseModel):
     execution_response: dict | None = None
     submitted_order: bool = False
     replaced_order: bool = False
+    closed_trade: bool = False
+    managed_exit_orders: bool = False
     skipped_reason: str | None = None
     risk_guard_result: RiskGuardResult | None = None
     health_guard_result: HealthGuardResult | None = None
@@ -120,6 +131,7 @@ def run_app_cycle(
     data_source: str = "live",
 ) -> AppCycleResult:
     health_guard_result: HealthGuardResult | None = None
+    config = config.copy(update={"outside_band_sweet_spot": _derive_outside_band_sweet_spot(symbol_spec)})
     symbol_spec_loaded = symbol_spec is not None
     if require_healthy_core:
         health_guard_result = fetch_and_check_core_service_health(client)
@@ -132,6 +144,8 @@ def run_app_cycle(
                 execution_response=None,
                 submitted_order=False,
                 replaced_order=False,
+                closed_trade=False,
+                managed_exit_orders=False,
                 skipped_reason=health_guard_result.reason,
                 risk_guard_result=None,
                 health_guard_result=health_guard_result,
@@ -183,6 +197,8 @@ def run_app_cycle(
     execution_response: dict | None = None
     submitted_order = False
     replaced_order = False
+    closed_trade = False
+    managed_exit_orders = False
     asset_guard_result: AssetGuardResult | None = None
 
     if not risk_guard_result.allow_execution:
@@ -194,6 +210,8 @@ def run_app_cycle(
             execution_response=None,
             submitted_order=False,
             replaced_order=False,
+            closed_trade=False,
+            managed_exit_orders=False,
             skipped_reason=risk_guard_result.reason,
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
@@ -210,6 +228,8 @@ def run_app_cycle(
             execution_response=None,
             submitted_order=False,
             replaced_order=False,
+            closed_trade=False,
+            managed_exit_orders=False,
             skipped_reason=None,
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
@@ -217,7 +237,16 @@ def run_app_cycle(
             symbol_spec_loaded=symbol_spec_loaded,
         )
 
-    if post_cycle_state.pending_order is not None and data_source == "golden":
+    close_requested = strategy_result.close_active_trade and synced_state.active_trade is not None
+    pending_order_requested = post_cycle_state.pending_order is not None
+    exit_order_update_requested = (
+        synced_state.active_trade is not None
+        and post_cycle_state.active_trade is not None
+        and strategy_result.updated_trade is not None
+        and not strategy_result.close_active_trade
+    )
+
+    if (pending_order_requested or close_requested or exit_order_update_requested) and data_source == "golden":
         return AppCycleResult(
             challenge_context=challenge_context,
             synced_state=synced_state,
@@ -226,6 +255,8 @@ def run_app_cycle(
             execution_response=None,
             submitted_order=False,
             replaced_order=False,
+            closed_trade=False,
+            managed_exit_orders=False,
             skipped_reason="submit is not allowed with golden data source",
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
@@ -234,7 +265,7 @@ def run_app_cycle(
         )
 
     if (
-        post_cycle_state.pending_order is not None
+        pending_order_requested
         and data_source == "live"
         and allow_execution
         and isinstance(client, ProprClient)
@@ -248,6 +279,8 @@ def run_app_cycle(
             execution_response=None,
             submitted_order=False,
             replaced_order=False,
+            closed_trade=False,
+            managed_exit_orders=False,
             skipped_reason="missing symbol spec for live execution",
             risk_guard_result=risk_guard_result,
             health_guard_result=health_guard_result,
@@ -255,7 +288,77 @@ def run_app_cycle(
             symbol_spec_loaded=symbol_spec_loaded,
         )
 
-    if post_cycle_state.pending_order is not None:
+    if close_requested:
+        execution_response = submit_active_trade_close_if_allowed(
+            order_service=order_service,
+            account_id=account_id,
+            symbol=symbol,
+            state=synced_state,
+            close_active_trade=True,
+        )
+        closed_trade = execution_response is not None
+        return AppCycleResult(
+            challenge_context=challenge_context,
+            synced_state=synced_state,
+            strategy_result=strategy_result,
+            post_cycle_state=post_cycle_state,
+            execution_response=execution_response,
+            submitted_order=False,
+            replaced_order=False,
+            closed_trade=closed_trade,
+            managed_exit_orders=False,
+            skipped_reason=None,
+            risk_guard_result=risk_guard_result,
+            health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
+        )
+
+    if exit_order_update_requested:
+        execution_response = manage_active_trade_exit_orders(
+            order_service=order_service,
+            account_id=account_id,
+            symbol=symbol,
+            state=synced_state,
+            updated_trade=post_cycle_state.active_trade,
+            buy_spread=config.buy_spread,
+        )
+        managed_exit_orders = execution_response is not None
+        if execution_response is not None:
+            stop_loss_payload = (
+                execution_response.get("stop_loss")
+                if isinstance(execution_response, dict)
+                else None
+            )
+            take_profit_payload = (
+                execution_response.get("take_profit")
+                if isinstance(execution_response, dict)
+                else None
+            )
+            post_cycle_state = post_cycle_state.copy(
+                update={
+                    "stop_loss_order_id": (stop_loss_payload or {}).get("order_id"),
+                    "take_profit_order_id": (take_profit_payload or {}).get("order_id"),
+                }
+            )
+        return AppCycleResult(
+            challenge_context=challenge_context,
+            synced_state=synced_state,
+            strategy_result=strategy_result,
+            post_cycle_state=post_cycle_state,
+            execution_response=execution_response,
+            submitted_order=False,
+            replaced_order=False,
+            closed_trade=False,
+            managed_exit_orders=managed_exit_orders,
+            skipped_reason=None,
+            risk_guard_result=risk_guard_result,
+            health_guard_result=health_guard_result,
+            asset_guard_result=None,
+            symbol_spec_loaded=symbol_spec_loaded,
+        )
+
+    if pending_order_requested:
         asset_guard_result = evaluate_asset_execution_guard(
             client=client,
             account_id=account_id,
@@ -271,6 +374,8 @@ def run_app_cycle(
                 execution_response=None,
                 submitted_order=False,
                 replaced_order=False,
+                closed_trade=False,
+                managed_exit_orders=False,
                 skipped_reason=asset_guard_result.reason,
                 risk_guard_result=risk_guard_result,
                 health_guard_result=health_guard_result,
@@ -318,12 +423,11 @@ def run_app_cycle(
         execution_response=execution_response,
         submitted_order=submitted_order,
         replaced_order=replaced_order,
+        closed_trade=closed_trade,
+        managed_exit_orders=managed_exit_orders,
         skipped_reason=None,
         risk_guard_result=risk_guard_result,
         health_guard_result=health_guard_result,
         asset_guard_result=asset_guard_result,
         symbol_spec_loaded=symbol_spec_loaded,
     )
-
-
-

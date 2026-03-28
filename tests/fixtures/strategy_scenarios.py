@@ -25,6 +25,8 @@ class StrategyGoldenScenario:
     expected_order_present: bool | None = None
     expected_break_even_activated: bool | None = None
     expected_consumed_flag: bool | None = None
+    expected_close_active_trade: bool | None = None
+    expected_updated_stop_loss: float | None = None
 
 
 BASE_TIME = datetime(2026, 1, 1, 0, 0, 0)
@@ -126,7 +128,6 @@ LONGER_SWING_CLOSES = [
 ]
 
 
-
 def make_config(**overrides: float | int) -> StrategyConfig:
     defaults = {
         "bollinger_period": 3,
@@ -138,12 +139,12 @@ def make_config(**overrides: float | int) -> StrategyConfig:
         "max_bars_since_regime_start_for_trend_signal": 3,
         "inside_buffer_pct": 0.20,
         "outside_buffer_pct": 0.20,
+        "outside_band_sweet_spot": 0.0,
         "trend_tp_rr": 2.0,
         "risk_per_trade_pct": 0.01,
     }
     defaults.update(overrides)
     return StrategyConfig(**defaults)
-
 
 
 def _build_candles(
@@ -171,10 +172,8 @@ def _build_candles(
     return candles
 
 
-
 def _prepend_context(tail: list[float], context: list[float]) -> list[float]:
     return context + tail
-
 
 
 def _make_trade(
@@ -195,14 +194,13 @@ def _make_trade(
     )
 
 
-
 def _chart_scenario(
     name: str,
     closes: list[float],
     config: StrategyConfig,
     final_open: float | None = None,
     default_open_offset: float = -0.1,
-    **expected: bool | str | None,
+    **expected: bool | str | float | None,
 ) -> StrategyGoldenScenario:
     return StrategyGoldenScenario(
         name=name,
@@ -216,7 +214,6 @@ def _chart_scenario(
     )
 
 
-
 def _state_scenario(
     name: str,
     closes: list[float],
@@ -225,7 +222,7 @@ def _state_scenario(
     agent_state: AgentState | None = None,
     final_open: float | None = None,
     default_open_offset: float = -0.1,
-    **expected: bool | str | None,
+    **expected: bool | str | float | None,
 ) -> StrategyGoldenScenario:
     return StrategyGoldenScenario(
         name=name,
@@ -241,7 +238,6 @@ def _state_scenario(
     )
 
 
-
 def valid_trend_long_scenario() -> StrategyGoldenScenario:
     return _chart_scenario(
         name="valid trend long",
@@ -255,7 +251,6 @@ def valid_trend_long_scenario() -> StrategyGoldenScenario:
     )
 
 
-
 def invalid_trend_regime_too_old_scenario() -> StrategyGoldenScenario:
     return _chart_scenario(
         name="invalid trend regime too old",
@@ -267,7 +262,6 @@ def invalid_trend_regime_too_old_scenario() -> StrategyGoldenScenario:
         expected_decision_action="NO_ACTION",
         expected_order_present=False,
     )
-
 
 
 def invalid_trend_candle_not_in_direction_scenario() -> StrategyGoldenScenario:
@@ -284,7 +278,6 @@ def invalid_trend_candle_not_in_direction_scenario() -> StrategyGoldenScenario:
     )
 
 
-
 def valid_countertrend_short_first_bullish_regime_scenario() -> StrategyGoldenScenario:
     return _chart_scenario(
         name="valid countertrend short first bullish regime bar",
@@ -297,6 +290,26 @@ def valid_countertrend_short_first_bullish_regime_scenario() -> StrategyGoldenSc
         expected_order_present=True,
     )
 
+
+def sweet_spot_should_manage_active_trend_without_countertrend_signal_scenario() -> StrategyGoldenScenario:
+    return _state_scenario(
+        name="sweet spot manages active trend without countertrend signal",
+        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 9.35, 9.4], BULLISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5, outside_band_sweet_spot=0.2),
+        active_trade=_make_trade(
+            TradeType.TREND,
+            TradeDirection.LONG,
+            entry=9.2,
+            stop_loss=9.0,
+            take_profit=9.9,
+        ),
+        expected_countertrend_signal_valid=False,
+        expected_countertrend_signal_type="COUNTERTREND_SHORT",
+        expected_decision_action="ADJUST_TREND_STOP_TO_LAST_CLOSE",
+        expected_order_present=False,
+        expected_close_active_trade=False,
+        expected_updated_stop_loss=9.4,
+    )
 
 
 def valid_countertrend_long_first_bearish_regime_scenario() -> StrategyGoldenScenario:
@@ -313,7 +326,6 @@ def valid_countertrend_long_first_bearish_regime_scenario() -> StrategyGoldenSce
     )
 
 
-
 def no_countertrend_not_first_regime_bar_scenario() -> StrategyGoldenScenario:
     return _chart_scenario(
         name="no countertrend not first regime bar",
@@ -325,7 +337,6 @@ def no_countertrend_not_first_regime_bar_scenario() -> StrategyGoldenScenario:
         expected_decision_action="NO_ACTION",
         expected_order_present=False,
     )
-
 
 
 def trend_order_should_be_prepared_scenario() -> StrategyGoldenScenario:
@@ -342,10 +353,9 @@ def trend_order_should_be_prepared_scenario() -> StrategyGoldenScenario:
     )
 
 
-
 def countertrend_should_override_active_trend_trade_scenario() -> StrategyGoldenScenario:
     return _state_scenario(
-        name="countertrend overrides active trend trade",
+        name="countertrend overrides active trend trade by locking stop",
         closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 9.35, 11.0], BULLISH_REVERSAL_CONTEXT_CLOSES),
         config=make_config(bollinger_std_dev=0.5),
         active_trade=_make_trade(
@@ -357,10 +367,32 @@ def countertrend_should_override_active_trend_trade_scenario() -> StrategyGolden
         ),
         expected_countertrend_signal_valid=True,
         expected_countertrend_signal_type="COUNTERTREND_SHORT",
-        expected_decision_action="CLOSE_TREND_AND_PREPARE_COUNTERTREND",
-        expected_order_present=True,
+        expected_decision_action="ADJUST_TREND_STOP_TO_LAST_CLOSE",
+        expected_order_present=False,
+        expected_close_active_trade=False,
+        expected_updated_stop_loss=11.0,
     )
 
+
+def countertrend_should_close_active_trend_trade_scenario() -> StrategyGoldenScenario:
+    return _state_scenario(
+        name="countertrend closes active trend trade",
+        closes=_prepend_context([10.4, 10.45, 10.5, 10.55, 10.6, 10.65, 9.0], BEARISH_REVERSAL_CONTEXT_CLOSES),
+        config=make_config(bollinger_std_dev=0.5),
+        final_open=9.1,
+        active_trade=_make_trade(
+            TradeType.TREND,
+            TradeDirection.SHORT,
+            entry=8.8,
+            stop_loss=9.4,
+            take_profit=8.0,
+        ),
+        expected_countertrend_signal_valid=True,
+        expected_countertrend_signal_type="COUNTERTREND_LONG",
+        expected_decision_action="CLOSE_TREND_TRADE",
+        expected_order_present=False,
+        expected_close_active_trade=True,
+    )
 
 
 def break_even_should_activate_scenario() -> StrategyGoldenScenario:
@@ -379,7 +411,6 @@ def break_even_should_activate_scenario() -> StrategyGoldenScenario:
     )
 
 
-
 def countertrend_tp_should_update_scenario() -> StrategyGoldenScenario:
     return _state_scenario(
         name="countertrend tp should update",
@@ -396,7 +427,6 @@ def countertrend_tp_should_update_scenario() -> StrategyGoldenScenario:
     )
 
 
-
 def trend_signal_consumed_duplicate_order_scenario() -> StrategyGoldenScenario:
     return _state_scenario(
         name="trend signal consumed duplicate order",
@@ -406,13 +436,12 @@ def trend_signal_consumed_duplicate_order_scenario() -> StrategyGoldenScenario:
             trend_signal_consumed_in_regime=True,
             last_regime="bullish",
         ),
-        expected_trend_signal_valid=True,
+        expected_trend_signal_valid=False,
         expected_trend_signal_type="TREND_LONG",
         expected_decision_action="NO_ACTION",
         expected_order_present=False,
         expected_consumed_flag=True,
     )
-
 
 
 def regime_change_should_reset_consumed_flag_scenario() -> StrategyGoldenScenario:
@@ -437,13 +466,17 @@ __all__ = [
     "invalid_trend_regime_too_old_scenario",
     "invalid_trend_candle_not_in_direction_scenario",
     "valid_countertrend_short_first_bullish_regime_scenario",
+    "sweet_spot_should_manage_active_trend_without_countertrend_signal_scenario",
     "valid_countertrend_long_first_bearish_regime_scenario",
     "no_countertrend_not_first_regime_bar_scenario",
     "trend_order_should_be_prepared_scenario",
     "countertrend_should_override_active_trend_trade_scenario",
+    "countertrend_should_close_active_trend_trade_scenario",
     "break_even_should_activate_scenario",
     "countertrend_tp_should_update_scenario",
     "trend_signal_consumed_duplicate_order_scenario",
     "regime_change_should_reset_consumed_flag_scenario",
 ]
+
+
 

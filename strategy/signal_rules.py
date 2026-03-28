@@ -14,6 +14,22 @@ def get_relevant_half_bandwidth(
     return bb_upper - bb_middle
 
 
+def is_close_in_relevant_band_half(
+    close: float,
+    regime: RegimeType,
+    bb_upper: float,
+    bb_middle: float,
+    bb_lower: float,
+) -> bool:
+    if regime == RegimeType.NEUTRAL:
+        return False
+
+    if regime == RegimeType.BULLISH:
+        return bb_middle <= close <= bb_upper
+
+    return bb_lower <= close <= bb_middle
+
+
 def is_close_deep_inside_bands(
     close: float,
     regime: RegimeType,
@@ -26,7 +42,13 @@ def is_close_deep_inside_bands(
     if regime == RegimeType.NEUTRAL:
         return False
 
-    if not bb_lower <= close <= bb_upper:
+    if not is_close_in_relevant_band_half(
+        close=close,
+        regime=regime,
+        bb_upper=bb_upper,
+        bb_middle=bb_middle,
+        bb_lower=bb_lower,
+    ):
         return False
 
     relevant_half_bandwidth = get_relevant_half_bandwidth(
@@ -67,6 +89,23 @@ def is_close_deep_outside_bands(
         return close >= bb_upper + required_distance
 
     return close <= bb_lower - required_distance
+
+
+def is_close_in_outer_band_sweet_spot(
+    close: float,
+    regime: RegimeType,
+    bb_upper: float,
+    bb_lower: float,
+    sweet_spot: float,
+) -> bool:
+    if regime == RegimeType.NEUTRAL:
+        return False
+
+    tolerance = max(0.0, float(sweet_spot))
+    if regime == RegimeType.BULLISH:
+        return close >= bb_upper - tolerance
+
+    return close <= bb_lower + tolerance
 
 
 def is_candle_in_trend_direction(

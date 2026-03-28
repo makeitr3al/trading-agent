@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -197,3 +198,142 @@ def test_run_strategy_cycle_can_return_an_order_when_a_valid_signal_exists(monke
     assert result.order.stop_loss == 100.0
     assert result.order.take_profit == 130.0
     assert result.order.position_size == pytest.approx(10.0)
+
+
+def test_run_strategy_cycle_can_exit_active_trend_on_sweet_spot_without_valid_countertrend_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = StrategyConfig()
+    candles = _make_default_candles()
+    invalid_countertrend_signal = SignalState(
+        signal_type=SignalType.COUNTERTREND_SHORT,
+        is_valid=False,
+        reason="close not outside bands",
+    )
+    active_trade = Trade(
+        trade_type=TradeType.TREND,
+        direction=TradeDirection.LONG,
+        entry=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+    )
+
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_trend_signal",
+        lambda candles, bollinger_df, regime_states, config: None,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_countertrend_signal",
+        lambda candles, bollinger_df, regime_states, config: invalid_countertrend_signal,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner._should_trigger_active_trend_exit",
+        lambda active_trade, latest_close, latest_bb_upper, latest_bb_middle, latest_bb_lower, config: True,
+    )
+
+    result = run_strategy_cycle(
+        candles=candles,
+        config=config,
+        account_balance=10000.0,
+        active_trade=active_trade,
+    )
+
+    assert result.countertrend_signal is not None
+    assert result.countertrend_signal.is_valid is False
+    assert result.decision.action.value == "ADJUST_TREND_STOP_TO_LAST_CLOSE"
+    assert result.decision.selected_signal_type is None
+    assert result.updated_trade is not None
+    assert result.updated_trade.stop_loss == pytest.approx(candles[-1].close)
+    assert result.close_active_trade is False
+
+
+def test_run_strategy_cycle_closes_active_countertrend_trade_when_middle_band_is_touched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = StrategyConfig(buy_spread=1.5)
+    candles = _make_default_candles()
+    active_trade = Trade(
+        trade_type=TradeType.COUNTERTREND,
+        direction=TradeDirection.LONG,
+        entry=100.0,
+        stop_loss=90.0,
+        take_profit=101.5,
+    )
+
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_trend_signal",
+        lambda candles, bollinger_df, regime_states, config: None,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_countertrend_signal",
+        lambda candles, bollinger_df, regime_states, config: None,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner._should_close_active_countertrend_trade",
+        lambda active_trade, latest_high, latest_low, latest_bb_middle: True,
+    )
+
+    result = run_strategy_cycle(
+        candles=candles,
+        config=config,
+        account_balance=10000.0,
+        active_trade=active_trade,
+    )
+
+    assert result.decision.action.value == "CLOSE_COUNTERTREND_TRADE"
+    assert result.updated_trade is None
+    assert result.close_active_trade is True
+
+
+def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend_trade_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = StrategyConfig()
+    candles = _make_default_candles()
+    active_trade = Trade(
+        trade_type=TradeType.COUNTERTREND,
+        direction=TradeDirection.SHORT,
+        entry=100.0,
+        stop_loss=110.0,
+        take_profit=95.0,
+    )
+    captured: dict[str, float] = {}
+
+    bollinger_df = pd.DataFrame(
+        {
+            "bb_upper": [110.0] * len(candles),
+            "bb_middle": [100.0] * (len(candles) - 2) + [97.0, 101.0],
+            "bb_lower": [90.0] * len(candles),
+        }
+    )
+
+    monkeypatch.setattr(
+        "strategy.strategy_runner.compute_bollinger_bands",
+        lambda closes, period, std_dev: bollinger_df,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_trend_signal",
+        lambda candles, bollinger_df, regime_states, config: None,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner.detect_countertrend_signal",
+        lambda candles, bollinger_df, regime_states, config: None,
+    )
+    monkeypatch.setattr(
+        "strategy.strategy_runner.update_active_trade",
+        lambda active_trade, latest_bb_middle, latest_close, buy_spread=0.0: (
+            captured.update({"latest_bb_middle": latest_bb_middle})
+            or active_trade.copy(update={"take_profit": latest_bb_middle})
+        ),
+    )
+
+    result = run_strategy_cycle(
+        candles=candles,
+        config=config,
+        account_balance=10000.0,
+        active_trade=active_trade,
+    )
+
+    assert captured["latest_bb_middle"] == pytest.approx(97.0)
+    assert result.updated_trade is not None
+    assert result.updated_trade.take_profit == pytest.approx(97.0)

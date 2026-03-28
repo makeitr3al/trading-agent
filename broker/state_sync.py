@@ -83,6 +83,38 @@ def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
     return text or None
 
 
+def _raw_order_type(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower().replace("-", "_")
+    return normalized or None
+
+
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
+    raw_type = _raw_order_type(_get_first(order_payload, ["order_type", "type"]))
+    normalized_type = _normalize_order_type(_get_first(order_payload, ["order_type", "type"]))
+    reduce_only = _truthy_flag(_get_first(order_payload, ["reduceOnly", "reduce_only"]))
+    position_id = _get_first(order_payload, ["positionId", "position_id"])
+
+    if raw_type in {"take_profit_limit", "take_profit_market"}:
+        return "take_profit_exit"
+    if raw_type in {"stop_market", "stop_limit"} and (reduce_only or position_id is not None):
+        return "stop_loss_exit"
+    if normalized_type == "limit" and (reduce_only or position_id is not None):
+        return "take_profit_exit"
+    if normalized_type == "stop" and (reduce_only or position_id is not None):
+        return "stop_loss_exit"
+    return "pending_entry"
+
+
 def map_propr_order_to_internal(order_payload: dict) -> Order | None:
     side = _normalize_side(_get_first(order_payload, ["side", "direction", "positionSide"]))
     order_type = _normalize_order_type(_get_first(order_payload, ["order_type", "type"]))
@@ -149,6 +181,8 @@ def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
         entry=float(entry),
         stop_loss=float(stop_loss),
         take_profit=float(take_profit),
+        quantity=float(quantity) if quantity is not None else None,
+        position_id=_get_first(position_payload, ["positionId", "position_id", "id"]),
         is_active=True,
         break_even_activated=False,
         opened_at=_get_first(position_payload, ["opened_at", "openedAt"]),
@@ -161,10 +195,23 @@ def build_agent_state_from_propr_data(
     previous_state: AgentState | None = None,
 ) -> AgentState:
     valid_order_entries: list[tuple[Order, str | None]] = []
+    stop_loss_order_ids: list[str] = []
+    take_profit_order_ids: list[str] = []
     for item in _get_items(orders_payload):
+        order_classification = _classify_open_order_payload(item)
+        external_order_id = _extract_external_order_id(item)
+        if order_classification == "stop_loss_exit":
+            if external_order_id is not None:
+                stop_loss_order_ids.append(external_order_id)
+            continue
+        if order_classification == "take_profit_exit":
+            if external_order_id is not None:
+                take_profit_order_ids.append(external_order_id)
+            continue
+
         mapped_order = map_propr_order_to_internal(item)
         if mapped_order is not None and mapped_order.status == OrderStatus.PENDING:
-            valid_order_entries.append((mapped_order, _extract_external_order_id(item)))
+            valid_order_entries.append((mapped_order, external_order_id))
 
     mapped_positions = [
         position
@@ -179,9 +226,15 @@ def build_agent_state_from_propr_data(
         raise ValueError("Multiple valid open orders found in Propr state")
     if len(mapped_positions) > 1:
         raise ValueError("Multiple valid open positions found in Propr state")
+    if len(stop_loss_order_ids) > 1:
+        raise ValueError("Multiple active stop-loss exit orders found in Propr state")
+    if len(take_profit_order_ids) > 1:
+        raise ValueError("Multiple active take-profit exit orders found in Propr state")
 
     pending_order: Order | None = None
     pending_order_id: str | None = None
+    stop_loss_order_id: str | None = stop_loss_order_ids[0] if stop_loss_order_ids else None
+    take_profit_order_id: str | None = take_profit_order_ids[0] if take_profit_order_ids else None
     if valid_order_entries:
         pending_order, pending_order_id = valid_order_entries[0]
 
@@ -192,6 +245,8 @@ def build_agent_state_from_propr_data(
             active_trade=active_trade,
             pending_order=pending_order,
             pending_order_id=pending_order_id,
+            stop_loss_order_id=stop_loss_order_id,
+            take_profit_order_id=take_profit_order_id,
         )
 
     return previous_state.copy(
@@ -199,6 +254,8 @@ def build_agent_state_from_propr_data(
             "active_trade": active_trade,
             "pending_order": pending_order,
             "pending_order_id": pending_order_id,
+            "stop_loss_order_id": stop_loss_order_id,
+            "take_profit_order_id": take_profit_order_id,
         }
     )
 

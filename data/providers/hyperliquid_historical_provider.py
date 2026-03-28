@@ -66,23 +66,45 @@ class HyperliquidHistoricalProvider:
             interval=self.config.interval,
             lookback_bars=self.config.lookback_bars,
         )
-        url = f"{self.config.base_url.rstrip('/')}{self.config.info_path}"
-        payload = {
-            "type": "candleSnapshot",
-            "req": {
-                "coin": self.config.coin,
-                "interval": self.config.interval,
-                "startTime": start_ms,
-                "endTime": end_ms,
-            },
-        }
-        response = self.http_client.post(url, json=payload)
+        response = self._post_info(
+            {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": self.config.coin,
+                    "interval": self.config.interval,
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                },
+            }
+        )
         candles = self._parse_candles(response)
         return DataBatch(
             candles=candles,
             symbol=self.config.coin,
             source_name="hyperliquid_historical",
         )
+
+    def fetch_l2_book(self) -> dict[str, Any]:
+        response = self._post_info(
+            {
+                "type": "l2Book",
+                "coin": self.config.coin,
+            }
+        )
+        if not isinstance(response, dict):
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+        return response
+
+    def fetch_current_spread(self) -> float:
+        best_bid, best_ask = self._parse_best_bid_ask(self.fetch_l2_book())
+        spread = best_ask - best_bid
+        if spread < 0:
+            raise ValueError("Hyperliquid l2Book response produced a negative spread")
+        return spread
+
+    def _post_info(self, payload: dict[str, Any]) -> Any:
+        url = f"{self.config.base_url.rstrip('/')}{self.config.info_path}"
+        return self.http_client.post(url, json=payload)
 
     def _parse_candles(self, payload: Any) -> list[Candle]:
         if not isinstance(payload, list) or not payload:
@@ -113,6 +135,31 @@ class HyperliquidHistoricalProvider:
             )
 
         return sorted(candles, key=lambda candle: candle.timestamp)
+
+    def _parse_best_bid_ask(self, payload: Any) -> tuple[float, float]:
+        if not isinstance(payload, dict):
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+
+        levels = payload.get("levels")
+        if not isinstance(levels, list) or len(levels) < 2:
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+
+        best_bid = self._extract_price_from_book_side(levels[0])
+        best_ask = self._extract_price_from_book_side(levels[1])
+        return best_bid, best_ask
+
+    def _extract_price_from_book_side(self, side_levels: Any) -> float:
+        if not isinstance(side_levels, list) or not side_levels:
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+
+        best_level = side_levels[0]
+        if not isinstance(best_level, dict):
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+
+        price = self._get_first_present(best_level, "px", "price", "p")
+        if price is None:
+            raise ValueError("Hyperliquid l2Book response is empty or invalid")
+        return float(price)
 
     @staticmethod
     def _get_first_present(payload: dict[str, Any], *keys: str) -> Any:

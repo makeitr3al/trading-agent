@@ -68,6 +68,55 @@ def test_build_order_from_decision_prepare_trend_long_order() -> None:
     assert order.position_size == pytest.approx(10.0)
 
 
+def test_build_order_from_decision_applies_buy_spread_to_long_levels() -> None:
+    trend_signal = _make_signal(
+        SignalType.TREND_LONG,
+        entry=110.0,
+        stop_loss=100.0,
+        take_profit=130.0,
+    )
+
+    order = build_order_from_decision(
+        decision=_make_decision(DecisionAction.PREPARE_TREND_ORDER),
+        trend_signal=trend_signal,
+        countertrend_signal=None,
+        current_price=105.0,
+        account_balance=10000.0,
+        risk_per_trade_pct=0.01,
+        buy_spread=1.5,
+    )
+
+    assert order is not None
+    assert order.entry == pytest.approx(111.5)
+    assert order.stop_loss == pytest.approx(101.5)
+    assert order.take_profit == pytest.approx(131.5)
+    assert order.position_size == pytest.approx(10.0)
+
+
+def test_build_order_from_decision_does_not_apply_buy_spread_to_short_levels() -> None:
+    trend_signal = _make_signal(
+        SignalType.TREND_SHORT,
+        entry=90.0,
+        stop_loss=100.0,
+        take_profit=70.0,
+    )
+
+    order = build_order_from_decision(
+        decision=_make_decision(DecisionAction.PREPARE_TREND_ORDER),
+        trend_signal=trend_signal,
+        countertrend_signal=None,
+        current_price=95.0,
+        account_balance=10000.0,
+        risk_per_trade_pct=0.01,
+        buy_spread=1.5,
+    )
+
+    assert order is not None
+    assert order.entry == pytest.approx(90.0)
+    assert order.stop_loss == pytest.approx(100.0)
+    assert order.take_profit == pytest.approx(70.0)
+
+
 def test_build_order_from_decision_prepare_trend_short_order() -> None:
     trend_signal = _make_signal(
         SignalType.TREND_SHORT,
@@ -174,6 +223,31 @@ def test_build_order_from_decision_prepare_countertrend_long_as_buy_limit() -> N
 
     assert order is not None
     assert order.order_type == OrderType.BUY_LIMIT
+
+
+def test_build_order_from_decision_applies_buy_spread_to_countertrend_long_levels() -> None:
+    countertrend_signal = _make_signal(
+        SignalType.COUNTERTREND_LONG,
+        entry=90.0,
+        stop_loss=80.0,
+        take_profit=100.0,
+    )
+
+    order = build_order_from_decision(
+        decision=_make_decision(DecisionAction.PREPARE_COUNTERTREND_ORDER),
+        trend_signal=None,
+        countertrend_signal=countertrend_signal,
+        current_price=91.0,
+        account_balance=10000.0,
+        risk_per_trade_pct=0.01,
+        buy_spread=1.5,
+    )
+
+    assert order is not None
+    assert order.order_type == OrderType.BUY_LIMIT
+    assert order.entry == pytest.approx(91.5)
+    assert order.stop_loss == pytest.approx(81.5)
+    assert order.take_profit == pytest.approx(101.5)
 
 
 def test_build_order_from_decision_close_trend_and_prepare_countertrend_uses_countertrend_logic() -> None:

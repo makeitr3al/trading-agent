@@ -15,4 +15,6 @@ class StrategyConfig(BaseModel):
     trend_tp_rr: float = 2.0
     break_even_rr: float = 1.0
     risk_per_trade_pct: float = 0.01
+    buy_spread: float = 0.0
+    outside_band_sweet_spot: float = 0.0
     trading_times: list[str] = ["07:00"]

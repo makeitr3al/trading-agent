@@ -107,6 +107,7 @@ def _make_result(
     updated_trade: Trade | None = None,
     trend_signal: SignalState | None = None,
     countertrend_signal: SignalState | None = None,
+    close_active_trade: bool = False,
 ) -> StrategyRunResult:
     if trend_signal is None:
         trend_signal = SignalState(
@@ -124,12 +125,16 @@ def _make_result(
             in (
                 DecisionAction.PREPARE_COUNTERTREND_ORDER,
                 DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND,
+                DecisionAction.CLOSE_TREND_TRADE,
+                DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
             ),
             reason="countertrend signal detected"
             if decision.action
             in (
                 DecisionAction.PREPARE_COUNTERTREND_ORDER,
                 DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND,
+                DecisionAction.CLOSE_TREND_TRADE,
+                DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
             )
             else "test",
             entry=110.0,
@@ -142,6 +147,7 @@ def _make_result(
         decision=decision,
         order=order,
         updated_trade=updated_trade,
+        close_active_trade=close_active_trade,
     )
 
 
@@ -302,6 +308,121 @@ def test_run_agent_cycle_deletes_old_countertrend_pending_order_when_no_new_orde
     )
 
     assert new_state.pending_order is None
+
+
+def test_run_agent_cycle_deletes_unfilled_countertrend_pending_order_when_signal_is_no_longer_valid_next_day(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].copy(update={"high": 109.0, "low": 108.5})
+    state = AgentState(
+        pending_order=_make_pending_order(
+            OrderType.SELL_LIMIT,
+            "countertrend_short",
+            entry=110.0,
+            stop_loss=120.0,
+            take_profit=100.0,
+        )
+    )
+    invalid_countertrend_signal = SignalState(
+        signal_type=SignalType.COUNTERTREND_SHORT,
+        is_valid=False,
+        reason="close not outside bands",
+        entry=110.0,
+        stop_loss=120.0,
+        take_profit=100.0,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(DecisionAction.NO_ACTION),
+        countertrend_signal=invalid_countertrend_signal,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=state,
+    )
+
+    assert new_state.active_trade is None
+    assert new_state.pending_order is None
+
+
+def test_run_agent_cycle_blocks_duplicate_countertrend_short_signal_in_same_regime(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    state = AgentState(
+        last_regime="bullish",
+        countertrend_short_signal_consumed_in_regime=True,
+    )
+    valid_countertrend_signal = SignalState(
+        signal_type=SignalType.COUNTERTREND_SHORT,
+        is_valid=True,
+        reason="countertrend signal detected",
+        entry=110.0,
+        stop_loss=120.0,
+        take_profit=100.0,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.PREPARE_COUNTERTREND_ORDER,
+            selected_signal_type="COUNTERTREND_SHORT",
+        ),
+        order=_make_countertrend_order(),
+        countertrend_signal=valid_countertrend_signal,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    result, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=state,
+    )
+
+    assert result.countertrend_signal is not None
+    assert result.countertrend_signal.is_valid is False
+    assert result.countertrend_signal.reason == "countertrend regime direction consumed"
+    assert result.decision.action == DecisionAction.NO_ACTION
+    assert new_state.pending_order is None
+    assert new_state.countertrend_short_signal_consumed_in_regime is True
+
+
+def test_run_agent_cycle_resets_countertrend_consumed_flags_on_regime_change(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    state = AgentState(
+        last_regime="bearish",
+        countertrend_long_signal_consumed_in_regime=True,
+        countertrend_short_signal_consumed_in_regime=True,
+    )
+    result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=state,
+    )
+
+    assert new_state.countertrend_long_signal_consumed_in_regime is False
+    assert new_state.countertrend_short_signal_consumed_in_regime is False
 
 
 def test_run_agent_cycle_replaces_old_trend_pending_order_with_refreshed_trend_order_when_current_trend_signal_is_still_valid(
@@ -647,3 +768,58 @@ def test_run_agent_cycle_filled_order_can_still_be_updated_by_later_trade_manage
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
 
     assert new_state.active_trade == updated_trade
+
+
+def test_run_agent_cycle_clears_active_trade_when_strategy_requests_close(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    state = AgentState(active_trade=_make_trade(TradeType.TREND), last_regime="bullish")
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.CLOSE_TREND_TRADE,
+            selected_signal_type="COUNTERTREND_SHORT",
+        ),
+        close_active_trade=True,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
+
+    assert new_state.active_trade is None
+    assert new_state.trend_signal_consumed_in_regime is True
+
+
+def test_run_agent_cycle_keeps_tightened_trend_stop_when_strategy_requests_last_close_stop(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    tightened_trade = Trade(
+        trade_type=TradeType.TREND,
+        direction=TradeDirection.LONG,
+        entry=100.0,
+        stop_loss=108.0,
+        take_profit=110.0,
+    )
+    state = AgentState(active_trade=_make_trade(TradeType.TREND), last_regime="bullish")
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
+            selected_signal_type="COUNTERTREND_SHORT",
+        ),
+        updated_trade=tightened_trade,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
+
+    assert new_state.active_trade == tightened_trade
+    assert new_state.trend_signal_consumed_in_regime is True

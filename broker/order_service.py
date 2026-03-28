@@ -7,6 +7,7 @@ from broker.propr_client import ProprClient
 from broker.symbol_service import round_price_to_symbol_spec, round_quantity_to_symbol_spec
 from models.order import Order, OrderType
 from models.symbol_spec import SymbolSpec
+from models.trade import Trade, TradeDirection
 
 # TODO: The SDK create_order call currently has no direct stop-loss / take-profit child-order support.
 # TODO: Later map stop loss / take profit to proper bracket-order handling if the SDK adds it.
@@ -56,6 +57,26 @@ def _parse_numeric_status(response: dict[str, Any]) -> int | None:
     if text.isdigit():
         return int(text)
     return None
+
+
+
+def _normalize_buy_spread(buy_spread: float) -> float:
+    return max(0.0, float(buy_spread))
+
+
+
+def _apply_buy_spread_to_price(side: str, price: float | int | str | Decimal, buy_spread: float) -> Decimal:
+    decimal_price = _to_decimal(price)
+    if side.strip().lower() != "buy":
+        return decimal_price
+    return decimal_price + _to_decimal(_normalize_buy_spread(buy_spread))
+
+
+
+def _exit_order_side_and_position(active_trade: Trade) -> tuple[str, str]:
+    if active_trade.direction == TradeDirection.LONG:
+        return "sell", "long"
+    return "buy", "short"
 
 
 
@@ -207,6 +228,82 @@ def build_order_submission_preview(
 
 
 
+def build_market_close_submission_preview(
+    active_trade: Trade,
+    symbol: str,
+) -> dict[str, Any]:
+    if active_trade.quantity is None:
+        raise ValueError("active trade quantity is required for market close")
+    if _to_decimal(active_trade.quantity) <= Decimal("0"):
+        raise ValueError("active trade quantity must be positive for market close")
+
+    side, position_side = _exit_order_side_and_position(active_trade)
+    return build_manual_order_submission_preview(
+        symbol=symbol,
+        side=side,
+        position_side=position_side,
+        order_type="market",
+        quantity=active_trade.quantity,
+        reduce_only=True,
+        close_position=True,
+        position_id=active_trade.position_id,
+    )
+
+
+
+def build_stop_loss_submission_preview(
+    active_trade: Trade,
+    symbol: str,
+    buy_spread: float = 0.0,
+) -> dict[str, Any]:
+    if active_trade.quantity is None:
+        raise ValueError("active trade quantity is required for stop-loss exit")
+    if active_trade.position_id is None:
+        raise ValueError("active trade position_id is required for stop-loss exit")
+
+    side, position_side = _exit_order_side_and_position(active_trade)
+    trigger_price = _apply_buy_spread_to_price(side, active_trade.stop_loss, buy_spread)
+    return build_manual_order_submission_preview(
+        symbol=symbol,
+        side=side,
+        position_side=position_side,
+        order_type="stop_market",
+        quantity=active_trade.quantity,
+        trigger_price=trigger_price,
+        reduce_only=True,
+        close_position=False,
+        position_id=active_trade.position_id,
+    )
+
+
+
+def build_take_profit_submission_preview(
+    active_trade: Trade,
+    symbol: str,
+    buy_spread: float = 0.0,
+) -> dict[str, Any]:
+    if active_trade.quantity is None:
+        raise ValueError("active trade quantity is required for take-profit exit")
+    if active_trade.position_id is None:
+        raise ValueError("active trade position_id is required for take-profit exit")
+
+    side, position_side = _exit_order_side_and_position(active_trade)
+    take_profit_price = _apply_buy_spread_to_price(side, active_trade.take_profit, buy_spread)
+    return build_manual_order_submission_preview(
+        symbol=symbol,
+        side=side,
+        position_side=position_side,
+        order_type="take_profit_limit",
+        quantity=active_trade.quantity,
+        price=take_profit_price,
+        trigger_price=take_profit_price,
+        reduce_only=True,
+        close_position=False,
+        position_id=active_trade.position_id,
+    )
+
+
+
 def build_sdk_create_order_params(submission_preview: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -305,6 +402,38 @@ class ProprOrderService:
         )
         return self.submit_order_preview(normalized_account_id, preview)
 
+    def submit_market_close(
+        self,
+        account_id: str,
+        active_trade: Trade,
+        symbol: str,
+    ) -> dict[str, Any]:
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        preview = build_market_close_submission_preview(active_trade, symbol)
+        return self.submit_order_preview(normalized_account_id, preview)
+
+    def submit_stop_loss_exit(
+        self,
+        account_id: str,
+        active_trade: Trade,
+        symbol: str,
+        buy_spread: float = 0.0,
+    ) -> dict[str, Any]:
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        preview = build_stop_loss_submission_preview(active_trade, symbol, buy_spread=buy_spread)
+        return self.submit_order_preview(normalized_account_id, preview)
+
+    def submit_take_profit_exit(
+        self,
+        account_id: str,
+        active_trade: Trade,
+        symbol: str,
+        buy_spread: float = 0.0,
+    ) -> dict[str, Any]:
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        preview = build_take_profit_submission_preview(active_trade, symbol, buy_spread=buy_spread)
+        return self.submit_order_preview(normalized_account_id, preview)
+
     def cancel_order(
         self,
         account_id: str,
@@ -321,6 +450,9 @@ __all__ = [
     "apply_symbol_spec_to_order",
     "build_manual_order_submission_preview",
     "build_order_submission_preview",
+    "build_market_close_submission_preview",
+    "build_stop_loss_submission_preview",
+    "build_take_profit_submission_preview",
     "build_sdk_create_order_params",
     "map_internal_order_to_propr_payload",
     "extract_order_id_from_submit_response",

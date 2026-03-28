@@ -12,3 +12,4 @@ class StrategyRunResult(BaseModel):
     decision: DecisionResult
     order: Order | None
     updated_trade: Trade | None
+    close_active_trade: bool = False

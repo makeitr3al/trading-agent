@@ -9,6 +9,35 @@ from models.signal import SignalState, SignalType
 # TODO: Later add broker-specific fields.
 
 
+def _normalize_buy_spread(buy_spread: float) -> float:
+    return max(0.0, float(buy_spread))
+
+
+def _is_buy_order_type(order_type: OrderType) -> bool:
+    return order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP}
+
+
+def _apply_buy_spread_to_levels(
+    order_type: OrderType,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    buy_spread: float,
+) -> tuple[float, float, float]:
+    if not _is_buy_order_type(order_type):
+        return entry, stop_loss, take_profit
+
+    normalized_spread = _normalize_buy_spread(buy_spread)
+    if normalized_spread == 0:
+        return entry, stop_loss, take_profit
+
+    return (
+        entry + normalized_spread,
+        stop_loss + normalized_spread,
+        take_profit + normalized_spread,
+    )
+
+
 def build_order_from_decision(
     decision: DecisionResult,
     trend_signal: SignalState | None,
@@ -16,6 +45,7 @@ def build_order_from_decision(
     current_price: float,
     account_balance: float,
     risk_per_trade_pct: float,
+    buy_spread: float = 0.0,
 ) -> Order | None:
     if decision.action in (
         DecisionAction.NO_ACTION,
@@ -48,11 +78,19 @@ def build_order_from_decision(
         else:
             return None
 
-        return Order(
+        entry, stop_loss, take_profit = _apply_buy_spread_to_levels(
             order_type=order_type,
             entry=trend_signal.entry,
             stop_loss=trend_signal.stop_loss,
             take_profit=trend_signal.take_profit,
+            buy_spread=buy_spread,
+        )
+
+        return Order(
+            order_type=order_type,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             position_size=position_size,
             signal_source=trend_signal.signal_type.value.lower(),
         )
@@ -93,11 +131,19 @@ def build_order_from_decision(
         else:
             return None
 
-        return Order(
+        entry, stop_loss, take_profit = _apply_buy_spread_to_levels(
             order_type=order_type,
             entry=countertrend_signal.entry,
             stop_loss=countertrend_signal.stop_loss,
             take_profit=countertrend_signal.take_profit,
+            buy_spread=buy_spread,
+        )
+
+        return Order(
+            order_type=order_type,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             position_size=position_size,
             signal_source=countertrend_signal.signal_type.value.lower(),
         )

@@ -15,6 +15,7 @@ from config.hyperliquid_config import HyperliquidConfig
 from config.strategy_config import StrategyConfig
 from data.providers import get_data_provider
 from data.providers.golden_data_provider import _load_golden_scenario
+from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from utils.env_loader import (
     load_data_source_settings_from_env,
     load_hyperliquid_config_from_env,
@@ -36,8 +37,7 @@ def _guard_to_dict(value: Any) -> dict[str, Any] | None:
     return None
 
 
-
-def _print_market_summary(symbol: str, coin: str, result: Any) -> dict[str, Any]:
+def _print_market_summary(symbol: str, coin: str, result: Any, live_buy_spread: float) -> dict[str, Any]:
     strategy_result = getattr(result, "strategy_result", None)
     post_cycle_state = getattr(result, "post_cycle_state", None)
 
@@ -65,6 +65,7 @@ def _print_market_summary(symbol: str, coin: str, result: Any) -> dict[str, Any]
 
     print(f"Market: {symbol} ({coin})")
     print(f"  skipped_reason: {getattr(result, 'skipped_reason', None)}")
+    print(f"  live_buy_spread: {live_buy_spread}")
     print(f"  health_guard: {_guard_to_dict(getattr(result, 'health_guard_result', None))}")
     print(f"  risk_guard: {_guard_to_dict(getattr(result, 'risk_guard_result', None))}")
     print(f"  decision_action: {decision_action}")
@@ -87,7 +88,6 @@ def _print_market_summary(symbol: str, coin: str, result: Any) -> dict[str, Any]
     }
 
 
-
 def _build_live_hyperliquid_config(base_config: HyperliquidConfig, coin: str) -> HyperliquidConfig:
     return HyperliquidConfig(
         base_url=base_config.base_url,
@@ -98,7 +98,6 @@ def _build_live_hyperliquid_config(base_config: HyperliquidConfig, coin: str) ->
     )
 
 
-
 def _print_golden_expectations(scenario_name: str) -> None:
     scenario = _load_golden_scenario(scenario_name)
     print("Golden Expectations:")
@@ -107,6 +106,13 @@ def _print_golden_expectations(scenario_name: str) -> None:
     print(f"  expected_trend_signal_valid: {scenario.expected_trend_signal_valid}")
     print(f"  expected_countertrend_signal_valid: {scenario.expected_countertrend_signal_valid}")
 
+
+def _resolve_live_buy_spread(hyperliquid_config: HyperliquidConfig) -> float:
+    try:
+        return HyperliquidHistoricalProvider(hyperliquid_config).fetch_current_spread()
+    except Exception as exc:
+        print(f"  live spread unavailable ({exc}); using 0.0 for dry-run")
+        return 0.0
 
 
 def main() -> None:
@@ -149,12 +155,14 @@ def main() -> None:
         for symbol, coin in markets:
             print(f"Scanning symbol={symbol} coin={coin}")
 
+            live_buy_spread = 0.0
             if data_source_settings.data_source == "live":
                 hyperliquid_config = _build_live_hyperliquid_config(hyperliquid_base_config, coin)
                 data_provider = get_data_provider(
                     "live",
                     hyperliquid_config=hyperliquid_config,
                 )
+                live_buy_spread = _resolve_live_buy_spread(hyperliquid_config)
             else:
                 data_provider = get_data_provider(
                     "golden",
@@ -162,8 +170,9 @@ def main() -> None:
                 )
 
             data_batch = data_provider.get_data()
-            strategy_config = data_batch.config or StrategyConfig()
+            strategy_config = (data_batch.config or StrategyConfig()).copy(update={"buy_spread": live_buy_spread})
             print(f"  source_name: {data_batch.source_name}")
+            print(f"  live_buy_spread: {live_buy_spread}")
 
             result = run_app_cycle(
                 client=client,
@@ -179,7 +188,7 @@ def main() -> None:
                 symbol_spec=None,
                 data_source=data_source_settings.data_source,
             )
-            scan_results.append(_print_market_summary(symbol, coin, result))
+            scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
 
         markets_with_valid_trend = [item for item in scan_results if item["trend_signal_valid"]]
         markets_with_valid_countertrend = [item for item in scan_results if item["countertrend_signal_valid"]]

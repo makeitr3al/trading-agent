@@ -86,6 +86,7 @@ def test_maps_open_long_position_to_internal_trade() -> None:
             "stopLoss": "95.0",
             "takeProfit": "110.0",
             "quantity": "1.25",
+            "positionId": "position-123",
         }
     )
 
@@ -93,6 +94,8 @@ def test_maps_open_long_position_to_internal_trade() -> None:
     assert trade.direction == TradeDirection.LONG
     assert trade.trade_type == TradeType.TREND
     assert trade.entry == 100.5
+    assert trade.quantity == 1.25
+    assert trade.position_id == "position-123"
 
 
 def test_maps_open_short_countertrend_position_to_internal_trade() -> None:
@@ -176,13 +179,59 @@ def test_build_agent_state_from_propr_data_returns_state_with_active_trade_only(
                     "stopLoss": "95.0",
                     "takeProfit": "110.0",
                     "quantity": "1.25",
+            "positionId": "position-123",
                 }
             ]
         },
     )
 
     assert state.active_trade is not None
+    assert state.active_trade.quantity == 1.25
+    assert state.active_trade.position_id == "position-123"
     assert state.pending_order is None
+
+
+def test_build_agent_state_from_propr_data_tracks_exit_order_ids_separately() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "orderId": "tp-order-1",
+                    "type": "take_profit_limit",
+                    "side": "sell",
+                    "positionId": "position-123",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+                {
+                    "orderId": "sl-order-1",
+                    "type": "stop_market",
+                    "side": "sell",
+                    "positionId": "position-123",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+            ]
+        },
+        positions_payload={
+            "data": [
+                {
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "position-123",
+                }
+            ]
+        },
+    )
+
+    assert state.pending_order is None
+    assert state.pending_order_id is None
+    assert state.stop_loss_order_id == "sl-order-1"
+    assert state.take_profit_order_id == "tp-order-1"
 
 
 def test_build_agent_state_from_propr_data_preserves_strategic_memory_fields_from_previous_state() -> None:
@@ -247,6 +296,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
                         "stopLoss": "95.0",
                         "takeProfit": "110.0",
                         "quantity": "1.25",
+            "positionId": "position-123",
                     },
                     {
                         "status": "open",
@@ -385,3 +435,5 @@ def test_open_relevant_order_statuses_are_recognized_as_pending() -> None:
 
     assert pending_order is not None
     assert pending_order.status == OrderStatus.PENDING
+
+

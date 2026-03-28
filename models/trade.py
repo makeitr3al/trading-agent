@@ -19,6 +19,8 @@ class Trade(BaseModel):
     entry: float
     stop_loss: float
     take_profit: float
+    quantity: float | None = None
+    position_id: str | None = None
     is_active: bool = True
     break_even_activated: bool = False
     opened_at: str | None = None

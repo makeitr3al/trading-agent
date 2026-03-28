@@ -8,6 +8,28 @@ Dies ist ein regelbasierter Trading Agent in Python mit:
 
 V1 startet ohne Broker-Anbindung.
 
+## Signal Rules
+
+Die Strategy verwendet drei Regime auf Basis des MACD:
+- `bullish`
+- `bearish`
+- `neutral`
+
+Trend-Signale:
+- Trend-Signale sind nur in `bullish` oder `bearish` moeglich.
+- Sie muessen innerhalb der konfigurierten maximalen Regime-Alter-Grenze liegen.
+- Der Schlusskurs muss tief genug innerhalb der relevanten Bollinger-Haelfte liegen.
+
+Gegentrend-Signale:
+- Gegentrend-Signale sind in allen Regimen moeglich, also auch in `neutral`.
+- In `bullish` und `bearish` bleibt die First-Bar-Regel aktiv: ein Gegentrend ist dort nur auf dem ersten Bar des Regimes valide.
+- In `neutral` gibt es keine First-Bar-Regel. Die Richtung wird dann direkt aus dem Outside-Fall abgeleitet:
+- oberhalb des oberen Bands => `COUNTERTREND_SHORT`
+- unterhalb des unteren Bands => `COUNTERTREND_LONG`
+- Pro Regime und Richtung darf es nur ein valides Gegentrend-Signal geben.
+
+Der Pine-Verifier in [artifacts/tradingview_strategy_indicator.pine](artifacts/tradingview_strategy_indicator.pine) bildet diese Regeln fuer die visuelle Verifikation im Chart nach.
+
 ## Environment Setup
 
 Erstelle zuerst eine lokale .env auf Basis von .env.example. Verwende dabei nur noch die kanonischen Variablennamen aus der Beispiel-Datei.
@@ -186,6 +208,18 @@ Wichtig dabei:
 - das Skript laedt echte Hyperliquid-Candles ueber den bestehenden Historical Provider
 - es vergleicht Shape, Reihenfolge, Zeitabstaende, Wertebereiche und Candle-Sanity
 - es fuehrt keine Trades und keine Submit-Logik aus
+
+## Historical Reference Case Scan
+
+Wenn du fuer alle Golden-Szenarien echte historische Referenzfaelle aus Hyperliquid suchen willst, starte:
+`.\.venv\Scripts\python.exe scripts/find_historical_reference_cases.py`
+
+Das Skript:
+- laedt echte historische Hyperliquid-Candles ueber den bestehenden Historical Provider
+- replayt rollierende Marktfenster durch die echte Strategy-/Agent-Pipeline
+- sucht pro Golden-Szenario bis zu 2 echte Marktbeispiele fuer die manuelle Review
+- exportiert die Review-Daten zusaetzlich als JSON und als flache CSV-Tabelle mit getrennten Zeit-, Actual-, Expected- und Match-Spalten
+- fuehrt keine Trades und keine Submit-Logik aus
 
 ## Run All Golden Scenarios
 

@@ -17,6 +17,7 @@ from models.decision import DecisionAction, DecisionResult
 from models.order import Order, OrderType
 from models.propr_challenge import ActiveChallengeContext, ProprChallengeAttempt
 from models.runner_result import StrategyRunResult
+from models.trade import Trade, TradeDirection, TradeType
 
 
 class FakeClient:
@@ -78,6 +79,28 @@ def _make_strategy_result(order: Order | None = None) -> StrategyRunResult:
     )
 
 
+
+def _make_trade() -> Trade:
+    return Trade(
+        trade_type=TradeType.TREND,
+        direction=TradeDirection.LONG,
+        entry=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+        quantity=0.5,
+        position_id="position-1",
+    )
+
+
+def _make_strategy_result(order: Order | None = None, close_active_trade: bool = False) -> StrategyRunResult:
+    return StrategyRunResult(
+        trend_signal=None,
+        countertrend_signal=None,
+        decision=DecisionResult(action=DecisionAction.NO_ACTION, reason="test"),
+        order=order,
+        updated_trade=None,
+        close_active_trade=close_active_trade,
+    )
 def _make_symbol_spec():
     from models.symbol_spec import SymbolSpec
 
@@ -759,6 +782,146 @@ def test_execution_proceeds_when_symbol_spec_is_present_and_guards_pass(monkeypa
     assert result.skipped_reason is None
     assert result.symbol_spec_loaded is True
 
+
+
+
+
+
+
+def test_closes_active_trade_when_strategy_requests_market_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    synced_state = AgentState(active_trade=_make_trade())
+    strategy_result = _make_strategy_result(close_active_trade=True)
+    post_cycle_state = AgentState(active_trade=None)
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
+    monkeypatch.setattr("app.trading_app.submit_active_trade_close_if_allowed", lambda order_service, account_id, symbol, state, close_active_trade: {"data": [{"orderId": "urn:prp-order:close-1"}]})
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="live",
+    )
+
+    assert result.closed_trade is True
+    assert result.execution_response is not None
+    assert result.submitted_order is False
+    assert result.replaced_order is False
+
+
+
+def test_golden_mode_blocks_active_trade_close_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    synced_state = AgentState(active_trade=_make_trade())
+    strategy_result = _make_strategy_result(close_active_trade=True)
+    post_cycle_state = AgentState(active_trade=None)
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="golden",
+    )
+
+    assert result.closed_trade is False
+    assert result.execution_response is None
+    assert result.skipped_reason == "submit is not allowed with golden data source"
+
+
+def test_manages_exit_orders_for_active_trade_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    synced_state = AgentState(
+        active_trade=_make_trade(),
+        stop_loss_order_id="old-stop",
+        take_profit_order_id="old-tp",
+    )
+    updated_trade = _make_trade().copy(update={"stop_loss": 96.0, "take_profit": 111.0})
+    strategy_result = StrategyRunResult(
+        trend_signal=None,
+        countertrend_signal=None,
+        decision=DecisionResult(action=DecisionAction.KEEP_EXISTING_TREND_TRADE, reason="update exits"),
+        order=None,
+        updated_trade=updated_trade,
+        close_active_trade=False,
+    )
+    post_cycle_state = AgentState(active_trade=updated_trade)
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
+    monkeypatch.setattr(
+        "app.trading_app.manage_active_trade_exit_orders",
+        lambda order_service, account_id, symbol, state, updated_trade, buy_spread=0.0: {
+            "stop_loss": {"order_id": "new-stop"},
+            "take_profit": {"order_id": "new-tp"},
+        },
+    )
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="live",
+    )
+
+    assert result.managed_exit_orders is True
+    assert result.execution_response is not None
+    assert result.post_cycle_state is not None
+    assert result.post_cycle_state.stop_loss_order_id == "new-stop"
+    assert result.post_cycle_state.take_profit_order_id == "new-tp"
+
+
+def test_golden_mode_blocks_active_trade_exit_order_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    synced_state = AgentState(active_trade=_make_trade())
+    updated_trade = _make_trade().copy(update={"stop_loss": 96.0})
+    strategy_result = StrategyRunResult(
+        trend_signal=None,
+        countertrend_signal=None,
+        decision=DecisionResult(action=DecisionAction.KEEP_EXISTING_TREND_TRADE, reason="update exits"),
+        order=None,
+        updated_trade=updated_trade,
+        close_active_trade=False,
+    )
+    post_cycle_state = AgentState(active_trade=updated_trade)
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="golden",
+    )
+
+    assert result.managed_exit_orders is False
+    assert result.execution_response is None
+    assert result.skipped_reason == "submit is not allowed with golden data source"
 
 
 

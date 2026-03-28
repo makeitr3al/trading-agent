@@ -134,6 +134,18 @@ def test_detect_trend_signal_invalid_because_close_not_deep_inside_bands() -> No
     assert signal.reason == "close not deep inside bands"
 
 
+
+def test_detect_trend_signal_invalid_because_close_in_wrong_band_half() -> None:
+    config = _make_config()
+    candles = _make_candles(final_open=8.2, final_close=8.4)
+    bollinger_df = _make_bollinger_df(last_row=(10.0, 8.5, 7.0))
+    regime_states = _make_regime_states(RegimeType.BULLISH, bars_since_regime_start=3)
+
+    signal = detect_trend_signal(candles, bollinger_df, regime_states, config)
+
+    assert signal is not None
+    assert signal.is_valid is False
+    assert signal.reason == "close not deep inside bands"
 def test_detect_trend_signal_invalid_because_insufficient_bandwidth() -> None:
     config = _make_config()
     candles = _make_candles(final_open=8.1, final_close=8.3)
@@ -145,3 +157,4 @@ def test_detect_trend_signal_invalid_because_insufficient_bandwidth() -> None:
     assert signal is not None
     assert signal.is_valid is False
     assert signal.reason == "insufficient bandwidth"
+

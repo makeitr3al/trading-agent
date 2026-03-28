@@ -17,34 +17,102 @@ def _make_signal(signal_type: SignalType, is_valid: bool, reason: str) -> Signal
     )
 
 
-def _make_trade(trade_type: TradeType) -> Trade:
-    direction = TradeDirection.LONG if trade_type == TradeType.TREND else TradeDirection.SHORT
+def _make_trade(trade_type: TradeType, direction: TradeDirection = TradeDirection.LONG) -> Trade:
     return Trade(
         trade_type=trade_type,
         direction=direction,
         entry=100.0,
-        stop_loss=99.0,
-        take_profit=102.0,
+        stop_loss=99.0 if direction == TradeDirection.LONG else 101.0,
+        take_profit=102.0 if direction == TradeDirection.LONG else 98.0,
     )
 
 
-def test_decide_next_action_valid_countertrend_with_active_trend_trade() -> None:
+def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_tighten_stop() -> None:
     countertrend_signal = _make_signal(
         SignalType.COUNTERTREND_SHORT,
         is_valid=True,
         reason="countertrend signal detected",
     )
-    active_trade = _make_trade(TradeType.TREND)
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.LONG)
 
     result = decide_next_action(
         trend_signal=None,
         countertrend_signal=countertrend_signal,
         active_trade=active_trade,
+        current_price=101.0,
     )
 
-    assert result.action == DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND
-    assert result.reason == "valid countertrend overrides active trend trade"
+    assert result.action == DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE
+    assert result.reason == "valid countertrend locks trend stop to last close"
     assert result.selected_signal_type == SignalType.COUNTERTREND_SHORT.value
+
+
+def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_close_market() -> None:
+    countertrend_signal = _make_signal(
+        SignalType.COUNTERTREND_LONG,
+        is_valid=True,
+        reason="countertrend signal detected",
+    )
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.SHORT)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=countertrend_signal,
+        active_trade=active_trade,
+        current_price=101.5,
+    )
+
+    assert result.action == DecisionAction.CLOSE_TREND_TRADE
+    assert result.reason == "valid countertrend closes active trend trade"
+    assert result.selected_signal_type == SignalType.COUNTERTREND_LONG.value
+
+
+def test_decide_next_action_outer_band_exit_trigger_can_tighten_stop_without_countertrend_signal() -> None:
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.LONG)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=None,
+        active_trade=active_trade,
+        current_price=101.0,
+        trend_exit_triggered=True,
+    )
+
+    assert result.action == DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE
+    assert result.reason == "outer band exit trigger locks trend stop to last close"
+    assert result.selected_signal_type is None
+
+
+def test_decide_next_action_outer_band_exit_trigger_can_close_market_without_countertrend_signal() -> None:
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.SHORT)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=None,
+        active_trade=active_trade,
+        current_price=101.5,
+        trend_exit_triggered=True,
+    )
+
+    assert result.action == DecisionAction.CLOSE_TREND_TRADE
+    assert result.reason == "outer band exit trigger closes active trend trade"
+    assert result.selected_signal_type is None
+
+
+def test_decide_next_action_countertrend_close_trigger_closes_active_countertrend_trade() -> None:
+    active_trade = _make_trade(TradeType.COUNTERTREND, direction=TradeDirection.LONG)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=None,
+        active_trade=active_trade,
+        current_price=100.5,
+        countertrend_close_triggered=True,
+    )
+
+    assert result.action == DecisionAction.CLOSE_COUNTERTREND_TRADE
+    assert result.reason == "middle band touch closes active countertrend trade"
+    assert result.selected_signal_type is None
 
 
 def test_decide_next_action_valid_countertrend_without_active_trade() -> None:
@@ -58,6 +126,7 @@ def test_decide_next_action_valid_countertrend_without_active_trade() -> None:
         trend_signal=None,
         countertrend_signal=countertrend_signal,
         active_trade=None,
+        current_price=100.0,
     )
 
     assert result.action == DecisionAction.PREPARE_COUNTERTREND_ORDER
@@ -76,6 +145,7 @@ def test_decide_next_action_valid_trend_without_active_trade() -> None:
         trend_signal=trend_signal,
         countertrend_signal=None,
         active_trade=None,
+        current_price=100.0,
     )
 
     assert result.action == DecisionAction.PREPARE_TREND_ORDER
@@ -95,6 +165,7 @@ def test_decide_next_action_valid_trend_with_active_trend_trade() -> None:
         trend_signal=trend_signal,
         countertrend_signal=None,
         active_trade=active_trade,
+        current_price=100.0,
     )
 
     assert result.action == DecisionAction.KEEP_EXISTING_TREND_TRADE
@@ -118,6 +189,7 @@ def test_decide_next_action_no_valid_signals() -> None:
         trend_signal=trend_signal,
         countertrend_signal=countertrend_signal,
         active_trade=None,
+        current_price=100.0,
     )
 
     assert result.action == DecisionAction.NO_ACTION
@@ -141,6 +213,7 @@ def test_decide_next_action_valid_countertrend_has_priority_over_valid_trend() -
         trend_signal=trend_signal,
         countertrend_signal=countertrend_signal,
         active_trade=None,
+        current_price=100.0,
     )
 
     assert result.action == DecisionAction.PREPARE_COUNTERTREND_ORDER

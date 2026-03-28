@@ -4,10 +4,14 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from broker.execution import (
+    manage_active_trade_exit_orders,
     has_external_pending_order_id,
     safe_replace_pending_order,
+    should_manage_exit_orders,
     should_cancel_existing_pending_order,
+    should_close_active_trade,
     should_submit_order,
+    submit_active_trade_close_if_allowed,
     submit_agent_order_if_allowed,
 )
 from models.agent_state import AgentState
@@ -24,9 +28,22 @@ class FakeProprOrderService:
         self.calls.append(("submit", account_id, {"order": order, "symbol": symbol}))
         return {"id": "external-new-order", "status": "submitted"}
 
+    def submit_market_close(self, account_id: str, active_trade: Trade, symbol: str) -> dict:
+        self.calls.append(("close", account_id, {"trade": active_trade, "symbol": symbol}))
+        return {"id": "external-close-order", "status": "submitted"}
+
     def cancel_order(self, account_id: str, order_id: str) -> dict:
         self.calls.append(("cancel", account_id, order_id))
         return {"id": order_id, "status": "cancelled"}
+
+    def submit_stop_loss_exit(self, account_id: str, active_trade: Trade, symbol: str, buy_spread: float = 0.0) -> dict:
+        self.calls.append(("stop_loss", account_id, {"trade": active_trade, "symbol": symbol, "buy_spread": buy_spread}))
+        return {"data": [{"orderId": "external-stop-order"}]}
+
+    def submit_take_profit_exit(self, account_id: str, active_trade: Trade, symbol: str, buy_spread: float = 0.0) -> dict:
+        self.calls.append(("take_profit", account_id, {"trade": active_trade, "symbol": symbol, "buy_spread": buy_spread}))
+        return {"data": [{"orderId": "external-tp-order"}]}
+
 
 
 def _make_order() -> Order:
@@ -40,6 +57,7 @@ def _make_order() -> Order:
     )
 
 
+
 def _make_trade() -> Trade:
     return Trade(
         trade_type=TradeType.TREND,
@@ -47,23 +65,30 @@ def _make_trade() -> Trade:
         entry=100.0,
         stop_loss=95.0,
         take_profit=110.0,
+        quantity=1.25,
+        position_id="position-1",
     )
+
 
 
 def test_should_submit_order_returns_false_when_order_is_none() -> None:
     assert should_submit_order(AgentState(), None) is False
 
 
+
 def test_should_submit_order_returns_false_when_active_trade_exists() -> None:
     assert should_submit_order(AgentState(active_trade=_make_trade()), _make_order()) is False
+
 
 
 def test_should_submit_order_returns_false_when_pending_order_exists() -> None:
     assert should_submit_order(AgentState(pending_order=_make_order()), _make_order()) is False
 
 
+
 def test_should_submit_order_returns_true_when_no_active_trade_and_no_pending_order_and_order_exists() -> None:
     assert should_submit_order(AgentState(), _make_order()) is True
+
 
 
 def test_submit_agent_order_if_allowed_returns_none_when_blocked() -> None:
@@ -81,6 +106,7 @@ def test_submit_agent_order_if_allowed_returns_none_when_blocked() -> None:
     assert service.calls == []
 
 
+
 def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
     service = FakeProprOrderService()
 
@@ -96,12 +122,54 @@ def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
     assert service.calls[0][0] == "submit"
 
 
+
+def test_should_close_active_trade_returns_true_only_when_requested_and_active_trade_exists() -> None:
+    assert should_close_active_trade(AgentState(active_trade=_make_trade()), True) is True
+    assert should_close_active_trade(AgentState(active_trade=_make_trade()), False) is False
+    assert should_close_active_trade(AgentState(), True) is False
+
+
+
+def test_submit_active_trade_close_if_allowed_submits_market_close_when_allowed() -> None:
+    service = FakeProprOrderService()
+
+    result = submit_active_trade_close_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=AgentState(active_trade=_make_trade()),
+        close_active_trade=True,
+    )
+
+    assert result == {"id": "external-close-order", "status": "submitted"}
+    assert service.calls[0][0] == "close"
+
+
+
+def test_submit_active_trade_close_if_allowed_returns_none_when_not_allowed() -> None:
+    service = FakeProprOrderService()
+
+    result = submit_active_trade_close_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=AgentState(),
+        close_active_trade=True,
+    )
+
+    assert result is None
+    assert service.calls == []
+
+
+
 def test_should_cancel_existing_pending_order_returns_true_when_pending_order_exists_and_new_order_exists() -> None:
     assert should_cancel_existing_pending_order(AgentState(pending_order=_make_order()), _make_order()) is True
 
 
+
 def test_should_cancel_existing_pending_order_returns_false_when_no_pending_order_exists() -> None:
     assert should_cancel_existing_pending_order(AgentState(), _make_order()) is False
+
 
 
 def test_safe_replace_pending_order_submits_directly_when_no_replacement_is_needed_and_allowed() -> None:
@@ -117,6 +185,7 @@ def test_safe_replace_pending_order_submits_directly_when_no_replacement_is_need
 
     assert result == {"id": "external-new-order", "status": "submitted"}
     assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+
 
 
 def test_safe_replace_pending_order_uses_state_pending_order_id() -> None:
@@ -139,6 +208,7 @@ def test_safe_replace_pending_order_uses_state_pending_order_id() -> None:
     assert service.calls[1][0] == "submit"
 
 
+
 def test_safe_replace_pending_order_raises_value_error_when_replacement_is_needed_but_pending_order_id_is_missing() -> None:
     service = FakeProprOrderService()
     state = AgentState(pending_order=_make_order(), pending_order_id=None)
@@ -153,7 +223,46 @@ def test_safe_replace_pending_order_raises_value_error_when_replacement_is_neede
         )
 
 
+
 def test_helper_detects_external_pending_order_id_correctly() -> None:
     assert has_external_pending_order_id(AgentState(pending_order_id="external-1")) is True
     assert has_external_pending_order_id(AgentState(pending_order_id="   ")) is False
     assert has_external_pending_order_id(AgentState(pending_order_id=None)) is False
+
+
+def test_should_manage_exit_orders_returns_true_when_active_trade_levels_changed() -> None:
+    state = AgentState(
+        active_trade=_make_trade(),
+        stop_loss_order_id="external-stop-order",
+        take_profit_order_id="external-tp-order",
+    )
+    updated_trade = _make_trade().copy(update={"stop_loss": 96.0})
+
+    assert should_manage_exit_orders(state, updated_trade) is True
+
+
+def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None:
+    service = FakeProprOrderService()
+    state = AgentState(
+        active_trade=_make_trade(),
+        stop_loss_order_id="external-old-stop",
+        take_profit_order_id="external-old-tp",
+    )
+    updated_trade = _make_trade().copy(update={"stop_loss": 96.0, "take_profit": 111.0})
+
+    result = manage_active_trade_exit_orders(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=state,
+        updated_trade=updated_trade,
+        buy_spread=1.5,
+    )
+
+    assert result is not None
+    assert result["stop_loss"]["order_id"] == "external-stop-order"
+    assert result["take_profit"]["order_id"] == "external-tp-order"
+    assert service.calls[0] == ("cancel", "account-1", "external-old-stop")
+    assert service.calls[1][0] == "stop_loss"
+    assert service.calls[2] == ("cancel", "account-1", "external-old-tp")
+    assert service.calls[3][0] == "take_profit"

@@ -17,6 +17,7 @@ from broker.symbol_service import HyperliquidSymbolService
 from config.strategy_config import StrategyConfig
 from data.providers import get_data_provider
 from data.providers.golden_data_provider import _load_golden_scenario
+from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from utils.env_loader import (
     load_hyperliquid_config_from_env,
     load_propr_config_from_env,
@@ -40,7 +41,6 @@ def should_run_now_daily(
     return current_utc_datetime.time() >= target_time
 
 
-
 def should_run_now_interval(
     last_run_datetime: datetime | None,
     interval_seconds: int,
@@ -50,7 +50,6 @@ def should_run_now_interval(
         return True
     elapsed_seconds = (current_utc_datetime - last_run_datetime).total_seconds()
     return elapsed_seconds >= interval_seconds
-
 
 
 def _print_result_summary(result: Any) -> None:
@@ -100,7 +99,6 @@ def _print_result_summary(result: Any) -> None:
     print(f"  symbol_spec_loaded: {getattr(result, 'symbol_spec_loaded', False)}")
 
 
-
 def _print_golden_expectations(scenario_name: str) -> None:
     scenario = _load_golden_scenario(scenario_name)
     print("Golden Expectations:")
@@ -110,6 +108,16 @@ def _print_golden_expectations(scenario_name: str) -> None:
     print(f"  expected_countertrend_signal_valid: {scenario.expected_countertrend_signal_valid}")
 
 
+def _resolve_live_buy_spread(hyperliquid_config, require_for_execution: bool) -> float:
+    provider = HyperliquidHistoricalProvider(hyperliquid_config)
+    try:
+        return provider.fetch_current_spread()
+    except Exception as exc:
+        if require_for_execution:
+            raise ValueError(f"Failed to fetch live spread from Hyperliquid: {exc}") from exc
+        print(f"Live spread: unavailable ({exc}); using 0.0 for dry-run")
+        return 0.0
+
 
 def _run_single_cycle(
     client: ProprClient,
@@ -118,12 +126,14 @@ def _run_single_cycle(
     data_provider,
     effective_allow_execution: bool,
     symbol_spec,
+    live_buy_spread: float,
 ) -> None:
     current_utc_datetime = datetime.now(timezone.utc)
     print(f"Running app cycle at {current_utc_datetime.isoformat()}")
     data_batch = data_provider.get_data()
-    strategy_config = data_batch.config or StrategyConfig()
+    strategy_config = (data_batch.config or StrategyConfig()).copy(update={"buy_spread": live_buy_spread})
     print(f"source_name={data_batch.source_name}")
+    print(f"live_buy_spread={live_buy_spread}")
     if runner_settings.data_source == "golden" and runner_settings.golden_scenario:
         _print_golden_expectations(runner_settings.golden_scenario)
 
@@ -143,7 +153,6 @@ def _run_single_cycle(
     _print_result_summary(result)
     if result.skipped_reason == "missing symbol spec for live execution":
         print("Live submit was blocked because no SymbolSpec could be loaded.")
-
 
 
 def main() -> None:
@@ -188,6 +197,14 @@ def main() -> None:
             hyperliquid_config=hyperliquid_config,
         )
 
+        live_buy_spread = 0.0
+        if hyperliquid_config is not None:
+            live_buy_spread = _resolve_live_buy_spread(
+                hyperliquid_config=hyperliquid_config,
+                require_for_execution=effective_allow_execution,
+            )
+            print(f"Live buy spread: {live_buy_spread}")
+
         symbol_spec = None
         try:
             symbol_spec = HyperliquidSymbolService().get_symbol_spec(runner_settings.symbol)
@@ -207,6 +224,7 @@ def main() -> None:
                 data_provider=data_provider,
                 effective_allow_execution=effective_allow_execution,
                 symbol_spec=symbol_spec,
+                live_buy_spread=live_buy_spread,
             )
             print("Scheduled runner finished (manual mode).")
             return
@@ -241,6 +259,7 @@ def main() -> None:
                     data_provider=data_provider,
                     effective_allow_execution=effective_allow_execution,
                     symbol_spec=symbol_spec,
+                    live_buy_spread=live_buy_spread,
                 )
                 last_run_datetime = current_utc_datetime
                 last_run_date = current_utc_datetime.date()
@@ -254,3 +273,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

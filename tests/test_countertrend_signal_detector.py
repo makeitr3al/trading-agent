@@ -13,11 +13,14 @@ from models.signal import SignalType
 from strategy.countertrend_signal_detector import detect_countertrend_signal
 
 
-def _make_config() -> StrategyConfig:
-    return StrategyConfig(
-        min_bandwidth_avg_period=3,
-        outside_buffer_pct=0.20,
-    )
+def _make_config(**overrides) -> StrategyConfig:
+    defaults = {
+        "min_bandwidth_avg_period": 3,
+        "outside_buffer_pct": 0.20,
+        "outside_band_sweet_spot": 0.0,
+    }
+    defaults.update(overrides)
+    return StrategyConfig(**defaults)
 
 
 def _make_candles(final_open: float, final_close: float) -> list[Candle]:
@@ -98,6 +101,20 @@ def test_detect_countertrend_signal_valid_countertrend_long_signal() -> None:
     assert signal.stop_loss < signal.entry
 
 
+def test_detect_countertrend_signal_invalid_when_only_in_sweet_spot() -> None:
+    config = _make_config(outside_band_sweet_spot=0.2)
+    candles = _make_candles(final_open=10.05, final_close=9.85)
+    bollinger_df = _make_bollinger_df(last_row=(10.0, 8.0, 6.0))
+    regime_states = _make_regime_states(RegimeType.BULLISH, bars_since_regime_start=1)
+
+    signal = detect_countertrend_signal(candles, bollinger_df, regime_states, config)
+
+    assert signal is not None
+    assert signal.is_valid is False
+    assert signal.signal_type == SignalType.COUNTERTREND_SHORT
+    assert signal.reason == "close not outside bands"
+
+
 def test_detect_countertrend_signal_invalid_because_neutral_regime() -> None:
     config = _make_config()
     candles = _make_candles(final_open=10.3, final_close=10.9)
@@ -107,11 +124,12 @@ def test_detect_countertrend_signal_invalid_because_neutral_regime() -> None:
     signal = detect_countertrend_signal(candles, bollinger_df, regime_states, config)
 
     assert signal is not None
-    assert signal.is_valid is False
-    assert signal.reason == "neutral regime"
+    assert signal.is_valid is True
+    assert signal.reason == "countertrend signal detected"
+    assert signal.signal_type == SignalType.COUNTERTREND_SHORT
 
 
-def test_detect_countertrend_signal_invalid_because_not_first_regime_bar() -> None:
+def test_detect_countertrend_signal_invalid_after_first_bullish_regime_bar() -> None:
     config = _make_config()
     candles = _make_candles(final_open=10.3, final_close=10.9)
     bollinger_df = _make_bollinger_df(last_row=(10.0, 8.0, 6.0))
@@ -122,11 +140,26 @@ def test_detect_countertrend_signal_invalid_because_not_first_regime_bar() -> No
     assert signal is not None
     assert signal.is_valid is False
     assert signal.reason == "not first regime bar"
+    assert signal.signal_type == SignalType.COUNTERTREND_SHORT
 
 
-def test_detect_countertrend_signal_invalid_because_close_not_deep_outside_bands() -> None:
+def test_detect_countertrend_signal_valid_neutral_regime_long_signal() -> None:
     config = _make_config()
-    candles = _make_candles(final_open=10.1, final_close=10.3)
+    candles = _make_candles(final_open=5.7, final_close=5.1)
+    bollinger_df = _make_bollinger_df(last_row=(10.0, 8.0, 6.0))
+    regime_states = _make_regime_states(RegimeType.NEUTRAL, bars_since_regime_start=3)
+
+    signal = detect_countertrend_signal(candles, bollinger_df, regime_states, config)
+
+    assert signal is not None
+    assert signal.is_valid is True
+    assert signal.reason == "countertrend signal detected"
+    assert signal.signal_type == SignalType.COUNTERTREND_LONG
+
+
+def test_detect_countertrend_signal_invalid_because_close_not_outside_bands() -> None:
+    config = _make_config()
+    candles = _make_candles(final_open=9.6, final_close=9.5)
     bollinger_df = _make_bollinger_df(last_row=(10.0, 8.0, 6.0))
     regime_states = _make_regime_states(RegimeType.BULLISH, bars_since_regime_start=1)
 
@@ -134,7 +167,7 @@ def test_detect_countertrend_signal_invalid_because_close_not_deep_outside_bands
 
     assert signal is not None
     assert signal.is_valid is False
-    assert signal.reason == "close not deep outside bands"
+    assert signal.reason == "close not outside bands"
 
 
 def test_detect_countertrend_signal_invalid_because_insufficient_bandwidth() -> None:

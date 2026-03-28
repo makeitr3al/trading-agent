@@ -9,12 +9,16 @@ import pytest
 from broker.order_service import (
     ProprOrderService,
     build_manual_order_submission_preview,
+    build_market_close_submission_preview,
+    build_stop_loss_submission_preview,
+    build_take_profit_submission_preview,
     build_sdk_create_order_params,
     extract_order_id_from_submit_response,
     generate_intent_id,
     map_internal_order_to_propr_payload,
 )
 from models.order import Order, OrderType
+from models.trade import Trade, TradeDirection, TradeType
 
 
 class FakeProprClient:
@@ -41,6 +45,31 @@ def _make_order(order_type: OrderType, position_size: float | None = 10.0) -> Or
         take_profit=130.0,
         position_size=position_size,
         signal_source="trend_long",
+    )
+
+
+
+def _make_trade() -> Trade:
+    return Trade(
+        trade_type=TradeType.TREND,
+        direction=TradeDirection.LONG,
+        entry=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+        quantity=0.001,
+        position_id="position-123",
+    )
+
+
+def _make_short_trade() -> Trade:
+    return Trade(
+        trade_type=TradeType.COUNTERTREND,
+        direction=TradeDirection.SHORT,
+        entry=100.0,
+        stop_loss=105.0,
+        take_profit=95.0,
+        quantity=0.001,
+        position_id="position-456",
     )
 
 
@@ -163,6 +192,45 @@ def test_build_manual_order_submission_preview_includes_position_id(monkeypatch:
 
 
 
+def test_build_market_close_submission_preview_maps_long_trade_to_reduce_only_market_sell(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+    params = build_market_close_submission_preview(_make_trade(), "BTC/USDC")
+
+    assert params["side"] == "sell"
+    assert params["position_side"] == "long"
+    assert params["order_type"] == "market"
+    assert params["quantity"] == "0.001"
+    assert params["reduce_only"] is True
+    assert params["close_position"] is True
+    assert params["position_id"] == "position-123"
+
+
+def test_build_stop_loss_submission_preview_maps_short_trade_to_buy_stop_market_with_spread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+    params = build_stop_loss_submission_preview(_make_short_trade(), "BTC/USDC", buy_spread=1.5)
+
+    assert params["side"] == "buy"
+    assert params["position_side"] == "short"
+    assert params["order_type"] == "stop_market"
+    assert params["trigger_price"] == "106.5"
+    assert params["reduce_only"] is True
+    assert params["position_id"] == "position-456"
+
+
+def test_build_take_profit_submission_preview_maps_short_trade_to_buy_take_profit_limit_with_spread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+    params = build_take_profit_submission_preview(_make_short_trade(), "BTC/USDC", buy_spread=1.5)
+
+    assert params["side"] == "buy"
+    assert params["position_side"] == "short"
+    assert params["order_type"] == "take_profit_limit"
+    assert params["price"] == "96.5"
+    assert params["trigger_price"] == "96.5"
+    assert params["reduce_only"] is True
+    assert params["position_id"] == "position-456"
+
+
+
 def test_extract_order_id_from_submit_response_reads_response_data_order_id() -> None:
     response = {"data": [{"orderId": "urn:prp-order:123"}]}
 
@@ -188,6 +256,25 @@ def test_submit_pending_order_calls_sdk_adapter_with_documented_parameters(monke
     assert params["order_type"] == "stop_limit"
     assert params["asset"] == "BTC/USDC"
     assert params["intent_id"] == "ulid-fixed"
+    assert response["data"][0]["orderId"] == "urn:prp-order:123"
+
+
+
+def test_submit_market_close_calls_sdk_adapter_with_market_exit_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeProprClient()
+    service = ProprOrderService(client)
+    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
+
+    response = service.submit_market_close("account-1", _make_trade(), "BTC/USDC")
+
+    assert client.calls[0][0] == "create_order"
+    params = client.calls[0][2]
+    assert params["side"] == "sell"
+    assert params["position_side"] == "long"
+    assert params["order_type"] == "market"
+    assert params["reduce_only"] is True
+    assert params["close_position"] is True
+    assert params["position_id"] == "position-123"
     assert response["data"][0]["orderId"] == "urn:prp-order:123"
 
 
@@ -331,6 +418,14 @@ def test_raises_value_error_when_position_size_missing_or_non_positive(monkeypat
 
     with pytest.raises(ValueError, match="position_size must be positive"):
         map_internal_order_to_propr_payload(_make_order(OrderType.BUY_LIMIT, position_size=0.0), "BTC/USDC")
+
+
+
+def test_market_close_preview_raises_value_error_when_quantity_missing() -> None:
+    trade = _make_trade().copy(update={"quantity": None})
+
+    with pytest.raises(ValueError, match="active trade quantity is required for market close"):
+        build_market_close_submission_preview(trade, "BTC/USDC")
 
 
 

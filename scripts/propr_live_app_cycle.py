@@ -15,6 +15,7 @@ from broker.symbol_service import HyperliquidSymbolService
 from config.strategy_config import StrategyConfig
 from data.providers import get_data_provider
 from data.providers.golden_data_provider import _load_golden_scenario
+from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from pydantic import BaseModel
 from utils.env_loader import (
     load_hyperliquid_config_from_env,
@@ -35,7 +36,6 @@ def _serialize(value: Any) -> Any:
     return value
 
 
-
 def _print_section(title: str, value: Any) -> None:
     print(f"{title}:")
     serialized = _serialize(value)
@@ -49,7 +49,6 @@ def _print_section(title: str, value: Any) -> None:
         return
 
     print(f"  {serialized}")
-
 
 
 def _print_cycle_summary(result: Any) -> None:
@@ -89,7 +88,6 @@ def _print_cycle_summary(result: Any) -> None:
     print(f"  replaced_order: {getattr(result, 'replaced_order', False)}")
 
 
-
 def _print_golden_expectations(scenario_name: str) -> None:
     scenario = _load_golden_scenario(scenario_name)
     print("Golden Expectations:")
@@ -98,6 +96,16 @@ def _print_golden_expectations(scenario_name: str) -> None:
     print(f"  expected_trend_signal_valid: {scenario.expected_trend_signal_valid}")
     print(f"  expected_countertrend_signal_valid: {scenario.expected_countertrend_signal_valid}")
 
+
+def _resolve_live_buy_spread(hyperliquid_config, require_for_execution: bool) -> float:
+    provider = HyperliquidHistoricalProvider(hyperliquid_config)
+    try:
+        return provider.fetch_current_spread()
+    except Exception as exc:
+        if require_for_execution:
+            raise ValueError(f"Failed to fetch live spread from Hyperliquid: {exc}") from exc
+        print(f"Live spread: unavailable ({exc}); using 0.0 for dry-run")
+        return 0.0
 
 
 def main() -> None:
@@ -143,6 +151,15 @@ def main() -> None:
         )
         data_batch = data_provider.get_data()
         strategy_config = data_batch.config or StrategyConfig()
+
+        live_buy_spread = 0.0
+        if hyperliquid_config is not None:
+            live_buy_spread = _resolve_live_buy_spread(
+                hyperliquid_config=hyperliquid_config,
+                require_for_execution=effective_allow_execution,
+            )
+            print(f"Live buy spread: {live_buy_spread}")
+            strategy_config = strategy_config.copy(update={"buy_spread": live_buy_spread})
 
         symbol_spec = None
         try:
@@ -196,3 +213,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
