@@ -33,7 +33,19 @@ export PYTHONPATH="$APP_PATH"
 export TRADING_AGENT_DATA_PATH="$DATA_PATH"
 export TRADING_AGENT_OPERATOR_CONFIG_PATH="$OPERATOR_CONFIG_PATH"
 
-eval "$("$VIRTUAL_ENV/bin/python" operator_config.py export-env --path "$OPERATOR_CONFIG_PATH")"
+operator_env_output="$("$VIRTUAL_ENV/bin/python" operator_config.py export-env --path "$OPERATOR_CONFIG_PATH" 2>&1)" || {
+    bashio::log.fatal "Failed to resolve operator config"
+    bashio::log.fatal "$operator_env_output"
+    exit 1
+}
+
+if [[ "$operator_env_output" == \{* ]]; then
+    bashio::log.fatal "Operator config export returned an error payload"
+    bashio::log.fatal "$operator_env_output"
+    exit 1
+fi
+
+eval "$operator_env_output"
 
 export PROPR_ENV="$OPERATOR_ENVIRONMENT"
 export PROPR_BETA_API_KEY="$(bashio::config 'propr_beta_api_key')"
