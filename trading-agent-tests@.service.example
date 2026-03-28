@@ -1,0 +1,14 @@
+[Unit]
+Description=Trading Agent Test Suite (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/opt/trading-agent
+ExecStart=/opt/trading-agent/.venv/bin/python /opt/trading-agent/run_test_suite.py --suite %i --pytest-arg=-q
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -15,6 +15,14 @@ ENV/
 # Logs
 logs/
 *.log
+artifacts/trading_journal_*.jsonl
+artifacts/trading_journal.jsonl
+artifacts/runner_status_*.json
+artifacts/runtime_overrides.json
+artifacts/operator_config.json
+artifacts/test_suite_status.json
+artifacts/test_suite_last.log
+trading-agent-data/
 
 # VS Code / IDE
 .DS_Store

@@ -269,6 +269,55 @@ def test_runner_settings_default_journal_path_uses_prod_environment(monkeypatch:
     assert settings.journal_path == "artifacts/trading_journal_prod.jsonl"
 
 
+def test_runner_settings_default_status_path_uses_prod_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RUNNER_STATUS_PATH", raising=False)
+    monkeypatch.setenv("PROPR_ENV", "prod")
+    monkeypatch.setenv("RUNNER_MODE", "manual")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.status_path == "artifacts/runner_status_prod.json"
+
+
+def test_runner_settings_reads_explicit_status_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNNER_STATUS_PATH", "artifacts/custom-runner-status.json")
+    monkeypatch.setenv("RUNNER_MODE", "manual")
+    monkeypatch.delenv("DATA_SOURCE", raising=False)
+    monkeypatch.delenv("GOLDEN_SCENARIO", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.status_path == "artifacts/custom-runner-status.json"
+
+
+def test_runtime_override_can_replace_propr_symbol(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runtime_path = tmp_path / "runtime_overrides.json"
+    runtime_path.write_text('{"PROPR_SYMBOL": "ETH/USDC"}\n', encoding="utf-8")
+    monkeypatch.setenv("TRADING_AGENT_RUNTIME_CONFIG_PATH", str(runtime_path))
+    monkeypatch.setenv("PROPR_SYMBOL", "BTC/USDC")
+
+    settings = load_manual_test_settings_from_env()
+
+    assert settings.symbol == "ETH/USDC"
+
+
+def test_runtime_override_can_replace_scan_markets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runtime_path = tmp_path / "runtime_overrides.json"
+    runtime_path.write_text('{"SCAN_MARKETS": "BTC/USDC:BTC,ETH/USDC:ETH"}\n', encoding="utf-8")
+    monkeypatch.setenv("TRADING_AGENT_RUNTIME_CONFIG_PATH", str(runtime_path))
+    monkeypatch.setenv("SCAN_CONFIRM", "YES")
+    monkeypatch.setenv("SCAN_MARKETS", "BTC/USDC:BTC")
+    monkeypatch.delenv("SCAN_SYMBOLS", raising=False)
+    monkeypatch.delenv("SCAN_HYPERLIQUID_COINS", raising=False)
+
+    settings = load_multi_market_scan_settings_from_env()
+
+    assert settings.symbols == ["BTC/USDC", "ETH/USDC"]
+    assert settings.hyperliquid_coins == ["BTC", "ETH"]
+
+
 def test_live_app_cycle_settings_legacy_generic_journal_path_maps_to_environment_file(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRADING_JOURNAL_PATH", "artifacts/trading_journal.jsonl")
     monkeypatch.setenv("PROPR_ENV", "beta")

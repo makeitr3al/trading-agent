@@ -1,0 +1,174 @@
+input_select:
+  trading_agent_mode:
+    name: Trading Agent Modus
+    options:
+      - Scharf
+      - Preflight-Test
+      - Beta-Write-Test
+    initial: Scharf
+    icon: mdi:target
+  trading_agent_environment:
+    name: Trading Agent Umgebung
+    options:
+      - beta
+      - prod
+    initial: beta
+    icon: mdi:server-outline
+
+input_number:
+  trading_agent_leverage:
+    name: Trading Agent Leverage
+    min: 1
+    max: 20
+    step: 1
+    mode: box
+    initial: 1
+    icon: mdi:chart-line
+
+input_text:
+  trading_agent_markets:
+    name: Trading Agent Maerkte
+    initial: BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL
+    max: 255
+    icon: mdi:format-list-bulleted
+
+input_boolean:
+  trading_agent_scheduling_aktiv:
+    name: Trading Agent Scheduling aktiv
+    initial: false
+    icon: mdi:calendar-clock
+
+input_datetime:
+  trading_agent_schedule_time:
+    name: Trading Agent Ausfuehrungszeit
+    has_date: false
+    has_time: true
+
+command_line:
+  - sensor:
+      name: Trading Agent Operator Config
+      unique_id: trading_agent_operator_config
+      command: >-
+        sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py show'
+      value_template: "{{ value_json.config.mode | default('unknown') }}"
+      json_attributes:
+        - config_path
+        - config
+        - derived
+        - paths
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Tests
+      unique_id: trading_agent_tests
+      command: >-
+        sh -c 'cat /share/trading-agent-data/test_suite_status.json 2>/dev/null || echo "{\"runner_state\":\"unknown\",\"suite\":null,\"success\":null,\"return_code\":null,\"last_error\":null,\"output_tail\":[]}"'
+      value_template: "{{ value_json.runner_state | default('unknown') }}"
+      json_attributes:
+        - suite
+        - started_at
+        - finished_at
+        - success
+        - return_code
+        - log_path
+        - output_tail
+        - last_error
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Journal
+      unique_id: trading_agent_journal
+      command: >-
+        sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 journal_snapshot.py --limit 20'
+      value_template: "{{ value_json.latest_cycle_action | default('unknown') }}"
+      json_attributes:
+        - journal_path
+        - exists
+        - latest_entry_timestamp
+        - latest_cycle_skipped_reason
+        - latest_order_status
+        - latest_trade_status
+        - latest_trade_pnl
+        - entry_count
+        - cycle_count
+        - order_count
+        - trade_count
+        - recent_entries
+      scan_interval: 60
+
+shell_command:
+  trading_agent_save_operator_config_haos: >-
+    sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py set --mode {{ mode }} --environment {{ environment }} --leverage {{ leverage }} --markets {{ markets }} --scheduling-enabled {{ scheduling_enabled }} --schedule-time {{ schedule_time }}'
+  trading_agent_reset_operator_config_haos: >-
+    sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py reset'
+
+script:
+  trading_agent_save_current_config_haos:
+    alias: Trading Agent Konfiguration speichern
+    sequence:
+      - variables:
+          selected_mode: >-
+            {% if states('input_select.trading_agent_mode') == 'Preflight-Test' %}
+              preflight
+            {% elif states('input_select.trading_agent_mode') == 'Beta-Write-Test' %}
+              beta_write
+            {% else %}
+              scharf
+            {% endif %}
+      - action: shell_command.trading_agent_save_operator_config_haos
+        data:
+          mode: "{{ selected_mode | trim }}"
+          environment: "{{ states('input_select.trading_agent_environment') }}"
+          leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+          markets: "{{ states('input_text.trading_agent_markets') }}"
+          scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+          schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+  trading_agent_jetzt_ausfuehren_haos:
+    alias: Trading Agent Jetzt ausfuehren
+    sequence:
+      - action: script.trading_agent_save_current_config_haos
+      - action: hassio.addon_start
+        data:
+          addon: local_trading_agent
+  trading_agent_scharf_lauf_haos:
+    alias: Trading Agent Scharf-Lauf ausfuehren
+    sequence:
+      - action: shell_command.trading_agent_save_operator_config_haos
+        data:
+          mode: "scharf"
+          environment: "{{ states('input_select.trading_agent_environment') }}"
+          leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+          markets: "{{ states('input_text.trading_agent_markets') }}"
+          scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+          schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+      - action: hassio.addon_start
+        data:
+          addon: local_trading_agent
+  trading_agent_stop_haos:
+    alias: Trading Agent Stopp
+    sequence:
+      - action: hassio.addon_stop
+        data:
+          addon: local_trading_agent
+  trading_agent_neustart_haos:
+    alias: Trading Agent Neustart
+    sequence:
+      - action: script.trading_agent_save_current_config_haos
+      - action: hassio.addon_restart
+        data:
+          addon: local_trading_agent
+  trading_agent_reset_operator_config_haos:
+    alias: Trading Agent Konfiguration zuruecksetzen
+    sequence:
+      - action: shell_command.trading_agent_reset_operator_config_haos
+
+automation:
+  - alias: Trading Agent Geplanter Scharf-Lauf
+    id: trading_agent_geplanter_scharf_lauf
+    triggers:
+      - trigger: time
+        at: input_datetime.trading_agent_schedule_time
+    conditions:
+      - condition: state
+        entity_id: input_boolean.trading_agent_scheduling_aktiv
+        state: "on"
+    actions:
+      - action: script.trading_agent_scharf_lauf_haos

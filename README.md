@@ -45,12 +45,16 @@ Das bevorzugte vereinfachte Schema ist jetzt:
 - `GOLDEN_SCENARIO` nur dann, wenn `DATA_SOURCE=golden`
 - `HYPERLIQUID_*` fuer echte historische Candle-Daten
 - `TRADING_JOURNAL_PATH` optional fuer einen expliziten Journal-Pfad
+- `RUNNER_STATUS_PATH` optional fuer einen expliziten Status-Pfad des Managed Runners
+- `TRADING_AGENT_RUNTIME_CONFIG_PATH` optional fuer die UI-gesteuerte Runtime-Override-Datei
 
 BETA ist der sichere Default fuer Entwicklung und Tests.
 PROD wird nur geladen, wenn zusaetzlich `PROPR_PROD_CONFIRM=YES` gesetzt ist.
 
 Ungueltige oder fehlende `PROPR_LEVERAGE`-Werte fallen sicher auf `x1` zurueck.
 Wenn `TRADING_JOURNAL_PATH` nicht gesetzt ist, wird automatisch pro Umgebung getrennt geschrieben, also standardmaessig nach `artifacts/trading_journal_beta.jsonl` oder `artifacts/trading_journal_prod.jsonl`.
+Wenn `RUNNER_STATUS_PATH` nicht gesetzt ist, schreibt der Managed Runner standardmaessig nach `artifacts/runner_status_beta.json` oder `artifacts/runner_status_prod.json`.
+Wenn `TRADING_AGENT_RUNTIME_CONFIG_PATH` nicht gesetzt ist, werden UI-Overrides standardmaessig in `artifacts/runtime_overrides.json` gespeichert.
 
 ## Data Source Modes
 
@@ -222,6 +226,146 @@ Standardmaessig wird pro Umgebung getrennt geschrieben:
 
 Mit `TRADING_JOURNAL_PATH` kannst du den Zielpfad bei Bedarf explizit ueberschreiben.
 
+## Raspberry Pi / Greenbox Betrieb
+
+Fuer einen dauerhaften 24/7-Betrieb auf einer Greenbox oder einem Raspberry Pi ist der neue Managed Runner gedacht:
+`python managed_runner.py`
+
+Der Managed Runner verwendet intern denselben App-Cycle wie der bestehende Scheduled Runner, schreibt aber zusaetzlich einen Laufzeit-Status nach JSON. Das ist besonders praktisch fuer Monitoring, Watchdogs und Home Assistant.
+
+Standardpfade:
+- Journal: `artifacts/trading_journal_beta.jsonl` oder `artifacts/trading_journal_prod.jsonl`
+- Runner-Status: `artifacts/runner_status_beta.json` oder `artifacts/runner_status_prod.json`
+
+Wichtige Hinweise fuer den Pi:
+- am besten 64-bit Linux verwenden
+- den Bot als `systemd`-Service laufen lassen, nicht in einer offenen SSH-Session
+- moeglichst SSD statt SD-Karte verwenden, weil Journal und Status regelmaessig geschrieben werden
+- zuerst mit `PROPR_ENV=beta` und `RUNNER_ALLOW_SUBMIT=NO` ein paar Tage stabil beobachten
+
+Im Repo liegen dafuer Beispiel-Dateien:
+- `managed_runner.py`
+- `run_managed_runner.sh`
+- `runtime_config.py`
+- `trading-agent.service.example`
+- `trading-agent-sudoers.example`
+- `trading-agent-tests@.service.example`
+
+Ein typischer Linux-Ablauf ist:
+1. Repo nach `/opt/trading-agent` kopieren
+2. virtuelle Umgebung auf dem Pi anlegen und Dependencies installieren
+3. `.env` sauber setzen
+4. `trading-agent.service.example` nach `/etc/systemd/system/trading-agent.service` uebernehmen und Benutzer/Pfade anpassen
+5. `sudo systemctl daemon-reload`
+6. `sudo systemctl enable --now trading-agent.service`
+
+Nuetzliche Befehle auf dem Pi:
+- `systemctl status trading-agent.service`
+- `journalctl -u trading-agent.service -f`
+- `cat artifacts/runner_status_beta.json`
+
+## Journal Snapshot
+
+Fuer Monitoring und Home Assistant gibt es zusaetzlich einen kompakten Journal-Snapshot:
+`python journal_snapshot.py --limit 20 --pretty`
+
+Das Skript liest das JSONL-Journal und gibt eine kompakte JSON-Zusammenfassung aus, unter anderem mit:
+- letztem Cycle-Decision-Action
+- letztem Order-Status
+- letztem Trade-Status und PnL
+- Gesamtanzahl von Cycle-, Order- und Trade-Eintraegen
+- den letzten kompakten Journal-Eintraegen
+
+## Home Assistant Integration
+
+Ja, das laesst sich gut integrieren. Der einfachste und robusteste Weg ist meist:
+- Home Assistant fragt per SSH den Runner-Status als JSON ab
+- Home Assistant fragt per SSH den Journal-Snapshot ab
+- ein `shell_command` in Home Assistant fuehrt `sudo systemctl restart trading-agent.service` auf dem Pi aus
+
+Im Repo liegt dafuer eine Beispielkonfiguration:
+- `home_assistant_package.yaml.example`
+
+Damit bekommst du typischerweise:
+- Binary Sensor fuer den `systemd`-Service-Status
+- Sensor fuer den aktuellen Runner-State inklusive letzter Fehler und letzter Cycle-Ausfuehrung
+- Sensor fuer die aktuell effektive Runtime-Konfiguration
+- Sensor fuer den letzten Testsuite-Status inklusive Return-Code und Log-Tail
+- Sensor fuer die letzte Journal-Zusammenfassung
+- Start-, Stop- und Restart-Commands aus Home Assistant heraus
+- einen Command zum Uebernehmen von `PROPR_ENV`, `PROPR_SYMBOL`, `PROPR_LEVERAGE` und `SCAN_MARKETS`
+- einen Command zum Starten einer sicheren lokalen Testsuite
+
+Fuer Home Assistant OS ist der SSH-Weg meist am unkompliziertesten, weil der Bot auf dem Pi bleibt und Home Assistant nur beobachtet und steuert.
+Fuer laengere Testlaeufe ist ein separater `systemd`-Testservice sinnvoll, weil `shell_command` in Home Assistant laut offizieller Doku nach 60 Sekunden hart beendet wird.
+
+## UI-Gesteuerte Runtime-Konfiguration
+
+Die wichtigsten Operator-Werte koennen jetzt ueber eine Runtime-Override-Datei gesetzt werden, ohne `.env` direkt anzufassen:
+- `PROPR_ENV`
+- `PROPR_SYMBOL`
+- `PROPR_LEVERAGE`
+- `SCAN_MARKETS`
+
+Verwaltet wird das ueber:
+`python runtime_config.py show`
+`python runtime_config.py set --propr-env beta --propr-symbol BTC/USDC --propr-leverage 2 --scan-markets BTC/USDC:BTC,ETH/USDC:ETH`
+`python runtime_config.py clear --all`
+
+Die Datei liegt standardmaessig unter:
+- `artifacts/runtime_overrides.json`
+
+Wichtig dabei:
+- Runtime-Overrides haben Vorrang vor den Werten aus `.env`
+- ein Service-Restart ist sinnvoll, damit der laufende Bot die neuen Werte sicher uebernimmt
+- `PROPR_ENV=prod` funktioniert nur, wenn in `.env` weiterhin auch `PROPR_PROD_API_KEY` und `PROPR_PROD_CONFIRM=YES` korrekt gesetzt sind
+- `SCAN_MARKETS` verwendet weiterhin das kanonische Format `SYMBOL:COIN,SYMBOL:COIN`
+
+Empfohlene HA-UI-Helper:
+- `input_select` fuer `PROPR_ENV` mit `beta` und `prod`
+- `input_select` fuer `PROPR_SYMBOL` mit deinen Standardmaerkten
+- `input_number` fuer `PROPR_LEVERAGE`
+- `input_text` fuer `SCAN_MARKETS`
+
+Empfohlener HA-UI-Script-Ablauf:
+1. `shell_command.trading_agent_apply_config` mit den aktuellen Helper-Werten aufrufen
+2. `shell_command.trading_agent_restart` ausfuehren
+3. den Sensor `Trading Agent Config` pruefen
+
+## Testsuite Fuer Home Assistant
+
+Wenn du von Home Assistant aus Tests anstossen willst, gibt es dafuer jetzt:
+`python run_test_suite.py --suite preflight`
+
+Kurze Beispielaufrufe:
+- `python run_test_suite.py --suite core`
+- `python run_test_suite.py --suite preflight --pytest-arg=-q`
+- `python run_test_suite.py --suite unit --pytest-arg=-q`
+- `python run_test_suite.py --describe-suite preflight`
+- `python run_test_suite.py --suite beta_write --allow-live-beta-writes`
+
+Verfuegbare Suites:
+- `core`: fokussierte Suite fuer die zentralen Bot-, Journal- und Runtime-Pfade
+- `unit`: gesamte lokale `tests/`-Suite
+- `preflight`: gesamte lokale `tests/`-Suite plus `run_all_golden_scenarios.py` plus read-only `propr_smoke_test.py`
+- `beta_write`: echter Beta-Write-Check mit `propr_submit_cancel_test.py` und `propr_order_types_test.py`
+
+Das Skript schreibt zusaetzlich:
+- `artifacts/test_suite_status.json`
+- `artifacts/test_suite_last.log`
+
+Damit kann Home Assistant nicht nur den Test starten, sondern auch den letzten Status, Return-Code und die letzten Log-Zeilen anzeigen.
+
+Empfehlung fuer den Pi-Betrieb:
+- in Home Assistant standardmaessig `--suite preflight` verwenden
+- `beta_write` nur manuell und bewusst ausfuehren, weil dabei echte Beta-Testorders submitted und wieder gecancelt werden
+- `unit` eher manuell oder nachts laufen lassen, falls die komplette Suite spuerbar laenger dauert
+
+Damit `start`, `stop`, `restart` und `run_tests` per SSH funktionieren, braucht der Pi-Benutzer in der Praxis meist eine enge `sudoers`-Regel, zum Beispiel nur fuer:
+- `/bin/systemctl start trading-agent.service`
+- `/bin/systemctl stop trading-agent.service`
+- `/bin/systemctl restart trading-agent.service`
+
 ## Golden Schema Compare
 
 Der Schema-Compare vergleicht echte Hyperliquid-Candles strukturell mit genau einem Golden-Szenario.
@@ -287,3 +431,37 @@ Relevante Echtzeit-Events sind aktuell:
 
 
 
+
+## Current HAOS Operating Model
+
+Fuer Home Assistant OS ist das aktuell empfohlene Zielbild jetzt bewusst einfacher:
+- ein Git-Repo `trading-agent`
+- ein Home-Assistant-Add-on `trading_agent`
+- Home Assistant uebernimmt UI und Scheduling
+- das Add-on fuehrt immer genau einen Lauf aus und beendet sich danach wieder
+- persistente Betriebsdaten liegen getrennt unter `/share/trading-agent-data`
+
+Die fachliche Operator-Konfiguration liegt in genau einer JSON-Datei:
+- `/share/trading-agent-data/operator_config.json`
+
+Verwaltet wird sie ueber:
+- `python operator_config.py show`
+- `python operator_config.py set --mode scharf --environment beta --leverage 2 --markets BTC/USDC:BTC,ETH/USDC:ETH --scheduling-enabled true --schedule-time 07:00`
+- `python operator_config.py reset`
+
+Die wichtigsten UI-Felder in Home Assistant sind:
+- `Modus`: `Scharf`, `Preflight-Test`, `Beta-Write-Test`
+- `Umgebung`: `beta`, `prod`
+- `Leverage`
+- `Maerkte` als Textfeld im Format `SYMBOL:COIN,SYMBOL:COIN`
+- `Scheduling aktiv`
+- `Ausfuehrungszeit`
+
+Fuer HAOS sind die aktuellen Referenzdateien im Repo:
+- `ha_addons/trading_agent/config.yaml`
+- `ha_addons/trading_agent/run.sh`
+- `home_assistant_package_haos_addon.yaml.example`
+- `home_assistant_dashboard_haos_addon.yaml.example`
+- `operator_config.py`
+
+Der fruehere Pfad mit separatem Zusatz-Add-on fuer Tests ist nicht mehr das bevorzugte Modell.

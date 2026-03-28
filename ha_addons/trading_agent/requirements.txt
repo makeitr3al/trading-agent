@@ -1,0 +1,8 @@
+pandas
+numpy
+pydantic
+python-dotenv
+pytest
+requests
+python-ulid
+websockets

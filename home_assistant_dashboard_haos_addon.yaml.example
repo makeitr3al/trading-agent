@@ -1,0 +1,61 @@
+title: Trading Agent
+views:
+  - title: Trading Agent
+    path: trading-agent
+    icon: mdi:robot-industrial
+    cards:
+      - type: entities
+        title: Bedienung
+        entities:
+          - input_select.trading_agent_mode
+          - input_select.trading_agent_environment
+          - input_number.trading_agent_leverage
+          - input_text.trading_agent_markets
+          - input_boolean.trading_agent_scheduling_aktiv
+          - input_datetime.trading_agent_schedule_time
+          - script.trading_agent_save_current_config_haos
+          - script.trading_agent_jetzt_ausfuehren_haos
+          - script.trading_agent_stop_haos
+          - script.trading_agent_neustart_haos
+      - type: entities
+        title: Aktuelle Konfiguration
+        entities:
+          - sensor.trading_agent_operator_config
+          - sensor.trading_agent_tests
+          - sensor.trading_agent_journal
+      - type: markdown
+        title: Letzte Journal-Eintraege
+        content: >-
+          {% set entries = state_attr('sensor.trading_agent_journal', 'recent_entries') or [] %}
+          {% if not entries %}
+          Keine Journal-Eintraege gefunden.
+          {% else %}
+          {% for entry in entries | reverse %}
+          **{{ entry.entry_timestamp or 'n/a' }}** | {{ entry.entry_type or 'entry' }} | {{ entry.symbol or '-' }} | {{ entry.status or entry.decision_action or '-' }}
+          {% if entry.skipped_reason %}
+          Grund: {{ entry.skipped_reason }}
+          {% endif %}
+          {% if entry.pnl is not none %}
+          PnL: {{ entry.pnl }}
+          {% endif %}
+
+          {% endfor %}
+          {% endif %}
+      - type: markdown
+        title: Letzter Testlauf
+        content: >-
+          Suite: {{ state_attr('sensor.trading_agent_tests', 'suite') or 'n/a' }}
+
+          Status: {{ states('sensor.trading_agent_tests') }}
+
+          Erfolg: {{ state_attr('sensor.trading_agent_tests', 'success') }}
+
+          Return code: {{ state_attr('sensor.trading_agent_tests', 'return_code') }}
+
+          {% set tail = state_attr('sensor.trading_agent_tests', 'output_tail') or [] %}
+          {% if tail %}
+          Letzte Log-Zeilen:
+          {% for line in tail %}
+          `{{ line }}`
+          {% endfor %}
+          {% endif %}

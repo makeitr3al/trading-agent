@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from config.hyperliquid_config import HyperliquidConfig
 from config.propr_config import ProprConfig
+from utils.runtime_overrides import get_effective_runtime_value
 
 
 load_dotenv()
@@ -18,6 +19,7 @@ HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"
 DEFAULT_SYMBOL = "BTC/USDC"
 DEFAULT_LEVERAGE = 1
 DEFAULT_TRADING_JOURNAL_PATH = "artifacts/trading_journal_beta.jsonl"
+DEFAULT_RUNNER_STATUS_PATH = "artifacts/runner_status_beta.json"
 LEGACY_TRADING_JOURNAL_PATH = "artifacts/trading_journal.jsonl"
 
 
@@ -68,6 +70,7 @@ class RunnerSettings(BaseModel):
     golden_scenario: str | None = None
     leverage: int = DEFAULT_LEVERAGE
     journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
+    status_path: str = DEFAULT_RUNNER_STATUS_PATH
 
 
 class DataSourceSettings(BaseModel):
@@ -87,7 +90,7 @@ class MultiMarketScanSettings(BaseModel):
 
 
 def _get_env(name: str) -> str:
-    return (os.getenv(name) or "").strip()
+    return get_effective_runtime_value(name)
 
 
 
@@ -126,6 +129,18 @@ def _resolve_journal_path() -> str:
     if not environment:
         environment = "beta"
     return f"artifacts/trading_journal_{environment}.jsonl"
+
+
+
+def _resolve_runner_status_path() -> str:
+    configured_path = _get_env("RUNNER_STATUS_PATH")
+    if configured_path:
+        return configured_path
+
+    environment = (_get_env("PROPR_ENV") or "beta").strip().lower()
+    if not environment:
+        environment = "beta"
+    return f"artifacts/runner_status_{environment}.json"
 
 
 
@@ -301,6 +316,7 @@ def load_runner_settings_from_env() -> RunnerSettings:
         golden_scenario=data_source_settings.golden_scenario,
         leverage=leverage,
         journal_path=_resolve_journal_path(),
+        status_path=_resolve_runner_status_path(),
     )
 
 
@@ -377,3 +393,13 @@ def load_live_app_cycle_settings_from_env() -> LiveAppCycleSettings:
         leverage=manual_settings.leverage,
         journal_path=_resolve_journal_path(),
     )
+
+
+
+def resolve_trading_journal_path_from_env() -> str:
+    return _resolve_journal_path()
+
+
+
+def resolve_runner_status_path_from_env() -> str:
+    return _resolve_runner_status_path()

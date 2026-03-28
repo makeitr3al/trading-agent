@@ -1,0 +1,11 @@
+# Example sudoers drop-in for Home Assistant control of the trading agent service.
+# Install on the Raspberry Pi as for example:
+#   sudo cp trading-agent-sudoers.example /etc/sudoers.d/trading-agent
+#   sudo chmod 440 /etc/sudoers.d/trading-agent
+#   sudo visudo -cf /etc/sudoers.d/trading-agent
+
+User_Alias TRADING_AGENT_REMOTE = trader
+Cmnd_Alias TRADING_AGENT_SYSTEMD = /bin/systemctl start trading-agent.service, /bin/systemctl stop trading-agent.service, /bin/systemctl restart trading-agent.service
+Cmnd_Alias TRADING_AGENT_TESTS = /bin/systemctl start trading-agent-tests@preflight.service, /bin/systemctl start trading-agent-tests@beta_write.service
+
+TRADING_AGENT_REMOTE ALL=(root) NOPASSWD: TRADING_AGENT_SYSTEMD, TRADING_AGENT_TESTS

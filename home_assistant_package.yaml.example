@@ -1,0 +1,127 @@
+command_line:
+  - binary_sensor:
+      name: Trading Agent Service
+      unique_id: trading_agent_service
+      command: >-
+        ssh -i /config/.ssh/id_ed25519
+        -o UserKnownHostsFile=/config/.ssh/known_hosts
+        trader@192.168.1.50
+        'systemctl is-active trading-agent.service'
+      payload_on: "active"
+      payload_off: "inactive"
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Runtime
+      unique_id: trading_agent_runtime
+      command: >-
+        ssh -i /config/.ssh/id_ed25519
+        -o UserKnownHostsFile=/config/.ssh/known_hosts
+        trader@192.168.1.50
+        'cat /opt/trading-agent/artifacts/runner_status_beta.json'
+      value_template: "{{ value_json.runner_state | default('unknown') }}"
+      json_attributes:
+        - heartbeat_at
+        - environment
+        - mode
+        - symbol
+        - data_source
+        - last_cycle_status
+        - last_cycle_skipped_reason
+        - last_cycle_completed_at
+        - last_decision_action
+        - last_submitted_order
+        - last_replaced_order
+        - last_error
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Config
+      unique_id: trading_agent_config
+      command: >-
+        ssh -i /config/.ssh/id_ed25519
+        -o UserKnownHostsFile=/config/.ssh/known_hosts
+        trader@192.168.1.50
+        'cd /opt/trading-agent && ./.venv/bin/python runtime_config.py show'
+      value_template: "{{ value_json.effective.PROPR_SYMBOL | default('unknown') }}"
+      json_attributes:
+        - override_path
+        - overrides_active
+        - overrides
+        - effective
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Tests
+      unique_id: trading_agent_tests
+      command: >-
+        ssh -i /config/.ssh/id_ed25519
+        -o UserKnownHostsFile=/config/.ssh/known_hosts
+        trader@192.168.1.50
+        'cat /opt/trading-agent/artifacts/test_suite_status.json'
+      value_template: "{{ value_json.runner_state | default('unknown') }}"
+      json_attributes:
+        - suite
+        - started_at
+        - finished_at
+        - success
+        - return_code
+        - log_path
+        - output_tail
+        - last_error
+      scan_interval: 30
+  - sensor:
+      name: Trading Agent Journal
+      unique_id: trading_agent_journal
+      command: >-
+        ssh -i /config/.ssh/id_ed25519
+        -o UserKnownHostsFile=/config/.ssh/known_hosts
+        trader@192.168.1.50
+        'cd /opt/trading-agent && ./.venv/bin/python journal_snapshot.py --limit 20'
+      value_template: "{{ value_json.latest_cycle_action | default('unknown') }}"
+      json_attributes:
+        - latest_entry_timestamp
+        - latest_cycle_skipped_reason
+        - latest_order_status
+        - latest_trade_status
+        - latest_trade_pnl
+        - entry_count
+        - cycle_count
+        - order_count
+        - trade_count
+        - recent_entries
+      scan_interval: 60
+
+shell_command:
+  trading_agent_apply_config: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'cd /opt/trading-agent && ./.venv/bin/python runtime_config.py set --propr-env {{ propr_env }} --propr-symbol {{ propr_symbol }} --propr-leverage {{ propr_leverage }} --scan-markets {{ scan_markets }}'
+  trading_agent_clear_config_overrides: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'cd /opt/trading-agent && ./.venv/bin/python runtime_config.py clear --all'
+  trading_agent_start: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'sudo systemctl start trading-agent.service'
+  trading_agent_stop: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'sudo systemctl stop trading-agent.service'
+  trading_agent_restart: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'sudo systemctl restart trading-agent.service'
+  trading_agent_run_tests: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'sudo systemctl start trading-agent-tests@preflight.service'
+  trading_agent_run_beta_write_tests: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    trader@192.168.1.50
+    'sudo systemctl start trading-agent-tests@beta_write.service'
