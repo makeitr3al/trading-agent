@@ -71,6 +71,7 @@ jobs:
           push: true
           platforms: ${{ matrix.platform }}
           build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.21
             BUILD_ARCH=${{ matrix.arch }}
             BUILD_VERSION=${{ steps.version.outputs.version }}
           tags: |
