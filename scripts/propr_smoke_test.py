@@ -24,7 +24,7 @@ def _compact_dict(payload: dict[str, Any], keys: list[str]) -> dict[str, Any]:
     return {key: payload.get(key) for key in keys if payload.get(key) is not None}
 
 
-def main() -> None:
+def main() -> int:
     try:
         config = load_propr_config_from_env()
         client = ProprClient(config)
@@ -54,7 +54,7 @@ def main() -> None:
         challenge_context = get_active_challenge_context(client)
         if challenge_context is None:
             print("No active challenge attempt found. Read-only smoke test finished.")
-            return
+            return 0
 
         print("Active challenge:")
         print(f"- attempt_id: {challenge_context.attempt.attempt_id}")
@@ -70,9 +70,11 @@ def main() -> None:
         print(f"[positions] count={_count_items(positions)}")
         print(f"[trades] count={_count_items(trades)}")
         print("Read-only Propr smoke test finished.")
+        return 0
     except Exception as exc:
         print(f"Smoke test failed: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
