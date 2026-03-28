@@ -1,14 +1,13 @@
 name: Trading Agent
-version: "0.2.0"
+version: "0.3.0"
 slug: trading_agent
 description: Run the trading agent as a one-shot Home Assistant OS add-on controlled by Home Assistant UI helpers.
-url: https://example.invalid/local/trading-agent
+url: https://github.com/makeitr3al/trading-agent
+image: ghcr.io/makeitr3al/{arch}-trading-agent-addon
 arch:
   - aarch64
   - amd64
-  - armv7
-  - armhf
-startup: application
+startup: once
 boot: manual
 init: false
 map:
@@ -17,7 +16,6 @@ map:
   - type: addon_config
     read_only: false
 options:
-  repo_path: /share/trading-agent
   data_path: /share/trading-agent-data
   propr_beta_api_key: ""
   propr_prod_api_key: ""
@@ -26,7 +24,6 @@ options:
   hyperliquid_interval: 1d
   hyperliquid_lookback_bars: 200
 schema:
-  repo_path: str
   data_path: str
   propr_beta_api_key: password?
   propr_prod_api_key: password?

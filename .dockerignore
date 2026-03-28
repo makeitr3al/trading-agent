@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.venv
+.pytest_cache
+__pycache__
+artifacts
+logs
+trading-agent-data
+ha_addons/trading_agent/README.md
+ha_addons/trading_agent/DOCS.md
+home_assistant_package.yaml.example
+home_assistant_package_haos_addon.yaml.example
+home_assistant_dashboard_haos_addon.yaml.example
+trading-agent.code-workspace

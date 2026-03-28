@@ -2,4 +2,4 @@
 
 One-shot Home Assistant OS add-on for the trading agent.
 
-The add-on reads an operator configuration JSON from `/share/trading-agent-data/operator_config.json`, executes exactly one run, writes outputs back to `/share/trading-agent-data`, and exits.
+The add-on bundles the bot code in its container image, reads the operator configuration from `/share/trading-agent-data/operator_config.json`, writes outputs back to `/share/trading-agent-data`, and exits.

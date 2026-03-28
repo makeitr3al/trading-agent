@@ -7,6 +7,7 @@ views:
       - type: entities
         title: Bedienung
         entities:
+          - input_text.trading_agent_addon_slug
           - input_select.trading_agent_mode
           - input_select.trading_agent_environment
           - input_number.trading_agent_leverage

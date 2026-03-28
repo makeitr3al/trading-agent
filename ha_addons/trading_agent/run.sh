@@ -10,13 +10,13 @@ bool_to_yes_no() {
     fi
 }
 
-REPO_PATH="$(bashio::config 'repo_path')"
+APP_PATH="/opt/trading-agent"
 DATA_PATH="$(bashio::config 'data_path')"
 VIRTUAL_ENV="/opt/venv"
 OPERATOR_CONFIG_PATH="$DATA_PATH/operator_config.json"
 
-if [[ ! -d "$REPO_PATH" ]]; then
-    bashio::log.fatal "Configured repo_path does not exist: $REPO_PATH"
+if [[ ! -d "$APP_PATH" ]]; then
+    bashio::log.fatal "Bundled app path does not exist: $APP_PATH"
     exit 1
 fi
 
@@ -26,10 +26,10 @@ if [[ ! -x "$VIRTUAL_ENV/bin/python" ]]; then
 fi
 
 mkdir -p "$DATA_PATH"
-cd "$REPO_PATH"
+cd "$APP_PATH"
 
 export PATH="$VIRTUAL_ENV/bin:$PATH"
-export PYTHONPATH="$REPO_PATH"
+export PYTHONPATH="$APP_PATH"
 export TRADING_AGENT_DATA_PATH="$DATA_PATH"
 export TRADING_AGENT_OPERATOR_CONFIG_PATH="$OPERATOR_CONFIG_PATH"
 
@@ -56,27 +56,33 @@ bashio::log.info "Mode: $OPERATOR_MODE"
 bashio::log.info "Environment: $OPERATOR_ENVIRONMENT"
 bashio::log.info "Markets: $OPERATOR_MARKETS"
 
+run_exit_code=0
+
 case "$OPERATOR_MODE" in
     scharf)
         export SCAN_ALLOW_SUBMIT="YES"
         export MANUAL_WRITE_CONFIRM="NO"
         export MANUAL_ORDER_TYPES_CONFIRM="NO"
-        python scripts/multi_market_scan.py
+        python scripts/multi_market_scan.py || run_exit_code=$?
         ;;
     preflight)
         export SCAN_ALLOW_SUBMIT="NO"
         export MANUAL_WRITE_CONFIRM="NO"
         export MANUAL_ORDER_TYPES_CONFIRM="NO"
-        python run_test_suite.py --suite preflight --pytest-arg=-q --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH"
+        python run_test_suite.py --suite preflight --pytest-arg=-q --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
         ;;
     beta_write)
         export SCAN_ALLOW_SUBMIT="NO"
         export MANUAL_WRITE_CONFIRM="YES"
         export MANUAL_ORDER_TYPES_CONFIRM="YES"
-        python run_test_suite.py --suite beta_write --allow-live-beta-writes --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH"
+        python run_test_suite.py --suite beta_write --allow-live-beta-writes --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
         ;;
     *)
         bashio::log.fatal "Unsupported operator mode: $OPERATOR_MODE"
         exit 1
         ;;
 esac
+
+python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 20 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
+
+exit "$run_exit_code"

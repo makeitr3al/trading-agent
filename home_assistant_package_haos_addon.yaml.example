@@ -31,6 +31,11 @@ input_text:
     initial: BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL
     max: 255
     icon: mdi:format-list-bulleted
+  trading_agent_addon_slug:
+    name: Trading Agent Add-on Slug
+    initial: trading_agent
+    max: 100
+    icon: mdi:puzzle
 
 input_boolean:
   trading_agent_scheduling_aktiv:
@@ -49,19 +54,20 @@ command_line:
       name: Trading Agent Operator Config
       unique_id: trading_agent_operator_config
       command: >-
-        sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py show'
-      value_template: "{{ value_json.config.mode | default('unknown') }}"
+        cat /share/trading-agent-data/operator_config.json 2>/dev/null || echo '{"mode":"unknown","environment":null,"leverage":null,"markets":null,"scheduling_enabled":null,"schedule_time":null}'
+      value_template: "{{ value_json.mode | default('unknown') }}"
       json_attributes:
-        - config_path
-        - config
-        - derived
-        - paths
+        - environment
+        - leverage
+        - markets
+        - scheduling_enabled
+        - schedule_time
       scan_interval: 30
   - sensor:
       name: Trading Agent Tests
       unique_id: trading_agent_tests
       command: >-
-        sh -c 'cat /share/trading-agent-data/test_suite_status.json 2>/dev/null || echo "{\"runner_state\":\"unknown\",\"suite\":null,\"success\":null,\"return_code\":null,\"last_error\":null,\"output_tail\":[]}"'
+        cat /share/trading-agent-data/test_suite_status.json 2>/dev/null || echo '{"runner_state":"unknown","suite":null,"success":null,"return_code":null,"last_error":null,"output_tail":[]}'
       value_template: "{{ value_json.runner_state | default('unknown') }}"
       json_attributes:
         - suite
@@ -77,7 +83,7 @@ command_line:
       name: Trading Agent Journal
       unique_id: trading_agent_journal
       command: >-
-        sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 journal_snapshot.py --limit 20'
+        cat /share/trading-agent-data/journal_snapshot.json 2>/dev/null || echo '{"latest_cycle_action":"unknown","journal_path":null,"exists":false,"entry_count":0,"cycle_count":0,"order_count":0,"trade_count":0,"latest_entry_timestamp":null,"latest_cycle_skipped_reason":null,"latest_order_status":null,"latest_trade_status":null,"latest_trade_pnl":null,"recent_entries":[]}'
       value_template: "{{ value_json.latest_cycle_action | default('unknown') }}"
       json_attributes:
         - journal_path
@@ -96,9 +102,9 @@ command_line:
 
 shell_command:
   trading_agent_save_operator_config_haos: >-
-    sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py set --mode {{ mode }} --environment {{ environment }} --leverage {{ leverage }} --markets {{ markets }} --scheduling-enabled {{ scheduling_enabled }} --schedule-time {{ schedule_time }}'
+    python3 -c "from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); path.write_text('''{{ {'mode': mode, 'environment': environment, 'leverage': leverage | int, 'markets': markets, 'scheduling_enabled': scheduling_enabled == 'true', 'schedule_time': schedule_time} | tojson }}\n''', encoding='utf-8')"
   trading_agent_reset_operator_config_haos: >-
-    sh -c 'cd /share/trading-agent && TRADING_AGENT_DATA_PATH=/share/trading-agent-data TRADING_AGENT_OPERATOR_CONFIG_PATH=/share/trading-agent-data/operator_config.json /usr/local/bin/python3 operator_config.py reset'
+    python3 -c "from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); path.write_text('''{{ {'mode': 'scharf', 'environment': 'beta', 'leverage': 1, 'markets': 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL', 'scheduling_enabled': false, 'schedule_time': '07:00'} | tojson }}\n''', encoding='utf-8')"
 
 script:
   trading_agent_save_current_config_haos:
@@ -127,7 +133,7 @@ script:
       - action: script.trading_agent_save_current_config_haos
       - action: hassio.addon_start
         data:
-          addon: local_trading_agent
+          addon: "{{ states('input_text.trading_agent_addon_slug') }}"
   trading_agent_scharf_lauf_haos:
     alias: Trading Agent Scharf-Lauf ausfuehren
     sequence:
@@ -141,20 +147,20 @@ script:
           schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
       - action: hassio.addon_start
         data:
-          addon: local_trading_agent
+          addon: "{{ states('input_text.trading_agent_addon_slug') }}"
   trading_agent_stop_haos:
     alias: Trading Agent Stopp
     sequence:
       - action: hassio.addon_stop
         data:
-          addon: local_trading_agent
+          addon: "{{ states('input_text.trading_agent_addon_slug') }}"
   trading_agent_neustart_haos:
     alias: Trading Agent Neustart
     sequence:
       - action: script.trading_agent_save_current_config_haos
       - action: hassio.addon_restart
         data:
-          addon: local_trading_agent
+          addon: "{{ states('input_text.trading_agent_addon_slug') }}"
   trading_agent_reset_operator_config_haos:
     alias: Trading Agent Konfiguration zuruecksetzen
     sequence:

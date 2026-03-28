@@ -5,29 +5,35 @@
 Dieses Add-on ist der einzige Runtime-Wrapper fuer den Trading Agent auf Home Assistant OS.
 Home Assistant uebernimmt UI und Scheduling, das Add-on fuehrt immer genau einen Lauf aus und beendet sich danach wieder.
 
-## Ordnerstruktur auf HAOS
+## Architektur
 
-- `/share/trading-agent`
-  Git-Checkout des Python-Repos
-- `/share/trading-agent-data`
-  Persistente Betriebsdaten fuer Operator-Konfiguration, Journal und Teststatus
-- `/addons/local/trading_agent`
-  Add-on-Wrapper aus `ha_addons/trading_agent`
+- GitHub-Repo als Home-Assistant-Add-on-Repository
+- ein einziges Add-on `trading_agent`
+- persistente Betriebsdaten unter `/share/trading-agent-data`
+- kein separater Code-Checkout unter `/share/trading-agent`
+
+## Persistente Daten
+
+Das Add-on liest und schreibt unter:
+- `/share/trading-agent-data/operator_config.json`
+- `/share/trading-agent-data/trading_journal_beta.jsonl`
+- `/share/trading-agent-data/trading_journal_prod.jsonl`
+- `/share/trading-agent-data/journal_snapshot.json`
+- `/share/trading-agent-data/test_suite_status.json`
+- `/share/trading-agent-data/test_suite_last.log`
 
 ## Operator-Konfiguration
 
-Die Bedienoberflaeche in Home Assistant schreibt eine einzige Datei:
+Die Home-Assistant-Oberflaeche schreibt genau eine fachliche Datei:
 - `/share/trading-agent-data/operator_config.json`
 
-Diese Datei enthaelt die fachlichen Operator-Werte:
+Die Werte darin sind:
 - `mode`: `scharf`, `preflight`, `beta_write`
 - `environment`: `beta`, `prod`
 - `leverage`
 - `markets`
 - `scheduling_enabled`
 - `schedule_time`
-
-Die Datei wird ueber `operator_config.py` verwaltet, nicht ueber rohe Env-Variablen.
 
 ## Laufmodi
 
@@ -41,7 +47,6 @@ Die Datei wird ueber `operator_config.py` verwaltet, nicht ueber rohe Env-Variab
 ## Was im Add-on bleibt
 
 Im Add-on-UI bleiben nur technische bzw. sensible Werte:
-- `repo_path`
 - `data_path`
 - API-Keys
 - `propr_prod_confirm`
@@ -56,6 +61,7 @@ Die taegliche Bedienung passiert ueber Helpers, Scripts und Automationen in HA:
 - Maerkte als Textfeld
 - `Scheduling aktiv` als Boolean
 - Zeithelper fuer den Tageslauf
+- Textfeld fuer den Add-on-Slug
 - Button `Jetzt ausfuehren`
 
 ## Scheduling
@@ -63,10 +69,3 @@ Die taegliche Bedienung passiert ueber Helpers, Scripts und Automationen in HA:
 Das Add-on schedult nichts selbst.
 Home Assistant startet das Add-on zur gewuenschten Zeit per Automation. Laut offizieller HA-Doku kann ein Time-Trigger direkt mit einem `input_datetime`-Helper arbeiten.
 Quelle: https://www.home-assistant.io/docs/automation/trigger/
-
-## Hinweis zu alten Zwischenloesungen
-
-Die frueheren Runtime-Override- und Extra-Task-Layer sind fuer das aktuelle Zielbild nicht mehr der bevorzugte Weg. Die aktuelle Referenz fuer HAOS ist:
-- `operator_config.py`
-- `home_assistant_package_haos_addon.yaml.example`
-- `home_assistant_dashboard_haos_addon.yaml.example`
