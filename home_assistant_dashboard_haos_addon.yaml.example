@@ -14,12 +14,19 @@ views:
           - input_text.trading_agent_markets
           - input_boolean.trading_agent_scheduling_aktiv
           - input_datetime.trading_agent_schedule_time
+      - type: entities
+        title: Aktionen
+        entities:
           - script.trading_agent_save_current_config_haos
           - script.trading_agent_jetzt_ausfuehren_haos
+          - script.trading_agent_preflight_test_haos
+          - script.trading_agent_beta_write_test_haos
+          - script.trading_agent_scharf_lauf_haos
           - script.trading_agent_stop_haos
           - script.trading_agent_neustart_haos
+          - script.trading_agent_reset_operator_config_haos
       - type: entities
-        title: Aktuelle Konfiguration
+        title: Status
         entities:
           - sensor.trading_agent_operator_config
           - sensor.trading_agent_tests
