@@ -1,0 +1,12 @@
+﻿# Append to /config/configuration.yaml
+# Registers the central Trading Agent admin panel in the Home Assistant sidebar.
+
+panel_custom:
+  - name: trading-agent-admin-panel
+    sidebar_title: Trading Agent
+    sidebar_icon: mdi:robot-industrial
+    url_path: trading-agent
+    module_url: /local/trading-agent/admin-panel.js?v=1
+    require_admin: true
+    config:
+      title: Trading Agent

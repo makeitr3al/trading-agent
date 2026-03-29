@@ -1,8 +1,9 @@
-# Copy to /config/packages/trading_agent.yaml
+﻿# Copy to /config/packages/trading_agent.yaml
 # This package contains Trading Agent helpers, sensors, and shell commands
 # for the HAOS add-on setup.
 #
 # Copy the companion files:
+# - home_assistant_panel_haos_addon.yaml.example -> /config/configuration.yaml
 # - home_assistant_scripts_haos_addon.yaml.example -> /config/scripts.yaml
 # - home_assistant_automations_haos_addon.yaml.example -> /config/automations.yaml
 #
@@ -25,15 +26,6 @@ input_select:
       - prod
     initial: beta
     icon: mdi:server-outline
-  trading_agent_journal_entry_type:
-    name: Trading Agent Journal Typ
-    options:
-      - Alle
-      - cycle
-      - order
-      - trade
-    initial: Alle
-    icon: mdi:filter-variant
 
 input_number:
   trading_agent_leverage:
@@ -66,16 +58,6 @@ input_text:
     initial: ""
     max: 100
     icon: mdi:history
-  trading_agent_journal_symbol_filter:
-    name: Trading Agent Journal Marktfilter
-    initial: ""
-    max: 40
-    icon: mdi:currency-usd
-  trading_agent_journal_text_filter:
-    name: Trading Agent Journal Textfilter
-    initial: ""
-    max: 120
-    icon: mdi:text-search
 
 input_boolean:
   trading_agent_scheduling_aktiv:

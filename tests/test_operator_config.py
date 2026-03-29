@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import json
 import os
 import subprocess
@@ -63,6 +63,7 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
     assert payload['config']['mode'] == 'preflight'
     assert payload['derived']['primary_symbol'] == 'BTC/USDC'
     assert payload['paths']['journal_path'].endswith('trading_journal_beta.jsonl')
+    assert payload['paths']['journal_table_path'].endswith('journal_table.json')
 
 
 def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> None:
@@ -100,3 +101,5 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
     assert 'export OPERATOR_ENVIRONMENT=prod' in export_result.stdout
     assert 'export OPERATOR_PRIMARY_SYMBOL=SOL/USDC' in export_result.stdout
     assert 'export OPERATOR_RUN_SUMMARY_PATH=' in export_result.stdout
+    assert 'export OPERATOR_JOURNAL_TABLE_PATH=' in export_result.stdout
+

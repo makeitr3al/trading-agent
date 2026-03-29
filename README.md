@@ -478,3 +478,14 @@ Fuer HAOS sind die aktuellen Referenzdateien im Repo:
 - `operator_config.py`
 
 Der fruehere Pfad mit separatem Zusatz-Add-on fuer Tests ist nicht mehr das bevorzugte Modell.
+
+## HAOS Admin Panel
+
+Fuer die aktuelle HAOS-Integration liegen jetzt zusaetzlich diese Referenzdateien im Repo:
+- `ha_addons/trading_agent/panel/admin-panel.js`
+- `home_assistant_panel_haos_addon.yaml.example`
+
+Das empfohlene UI-Zielbild fuer HAOS ist jetzt:
+- ein zentrales `panel_custom` fuer die komplette Bedienung
+- ein kompaktes Lovelace-Dashboard nur noch als Schnelluebersicht
+- das Journal als echte Tabelle mit Suche, Spaltenfiltern, Sortierung und Pagination

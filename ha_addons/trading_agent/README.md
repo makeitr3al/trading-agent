@@ -9,3 +9,6 @@ The companion HA-side example files for this mode are now split by responsibilit
 - `home_assistant_scripts_haos_addon.yaml.example` for `/config/scripts.yaml`
 - `home_assistant_automations_haos_addon.yaml.example` for `/config/automations.yaml`
 - `home_assistant_dashboard_haos_addon.yaml.example` for the Lovelace dashboard
+
+The add-on also ships a local admin panel asset at `/local/trading-agent/admin-panel.js`.
+Register it via `panel_custom` using `home_assistant_panel_haos_addon.yaml.example` and use it as the primary operator UI for mode control, run actions, push configuration, status summaries, and the full journal table split into scans and orders/trades.

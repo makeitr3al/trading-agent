@@ -39,6 +39,7 @@ SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "tests/test_execution.py",
                     "tests/test_journal_integration.py",
                     "tests/test_journal_snapshot.py",
+                    "tests/test_journal_table.py",
                     "tests/test_runtime_status.py",
                 ],
             }

@@ -63,6 +63,16 @@ export SCAN_CONFIRM="YES"
 export TRADING_JOURNAL_PATH="$OPERATOR_JOURNAL_PATH"
 export RUNNER_STATUS_PATH="$OPERATOR_RUNTIME_STATUS_PATH"
 
+PANEL_DIR="/config/www/trading-agent"
+PANEL_ASSET_SOURCE="$APP_PATH/ha_addons/trading_agent/panel/admin-panel.js"
+PANEL_ASSET_TARGET="$PANEL_DIR/admin-panel.js"
+PANEL_JOURNAL_TABLE_PATH="$PANEL_DIR/journal_table.json"
+
+mkdir -p "$PANEL_DIR"
+if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
+    cp "$PANEL_ASSET_SOURCE" "$PANEL_ASSET_TARGET"
+fi
+
 bashio::log.info "Starting Trading Agent one-shot run"
 bashio::log.info "Mode: $OPERATOR_MODE"
 bashio::log.info "Environment: $OPERATOR_ENVIRONMENT"
@@ -99,6 +109,8 @@ esac
 run_finished_at="$(date -Iseconds)"
 
 python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 200 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
+python journal_table.py --path "$OPERATOR_JOURNAL_PATH" --output-path "$OPERATOR_JOURNAL_TABLE_PATH" || true
+cp "$OPERATOR_JOURNAL_TABLE_PATH" "$PANEL_JOURNAL_TABLE_PATH" || true
 python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
 
 exit "$run_exit_code"
