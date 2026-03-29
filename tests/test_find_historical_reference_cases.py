@@ -10,7 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.find_historical_reference_cases import (
+    DEFAULT_MIN_WARMUP_BARS,
     HistoricalReferenceCandidate,
+    _resolve_replay_warmup_bars,
+    _resolve_total_fetch_bars,
     build_replay_windows,
     export_candidates,
     export_candidates_csv,
@@ -74,6 +77,11 @@ def _make_candidate() -> HistoricalReferenceCandidate:
         window_size_bars=20,
         analysis_window_size_bars=220,
         warmup_bars=200,
+        required_warmup_bars=200,
+        actual_warmup_bars=200,
+        search_lookback_bars=800,
+        total_fetch_bars=1000,
+        warmup_ok=True,
         start_timestamp="2026-01-01T00:00:00+00:00",
         end_timestamp="2026-01-20T00:00:00+00:00",
         analysis_start_timestamp="2025-06-15T00:00:00+00:00",
@@ -212,6 +220,11 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     assert csv_rows[0]["analysis_start_date"] == "2025-06-15"
     assert csv_rows[0]["trigger_date"] == "2026-01-20"
     assert csv_rows[0]["warmup_bars"] == "200"
+    assert csv_rows[0]["required_warmup_bars"] == "200"
+    assert csv_rows[0]["actual_warmup_bars"] == "200"
+    assert csv_rows[0]["search_lookback_bars"] == "800"
+    assert csv_rows[0]["total_fetch_bars"] == "1000"
+    assert csv_rows[0]["warmup_ok"] == "yes"
     assert csv_rows[0]["actual_break_even_activated"] == "n/a"
     assert csv_rows[0]["expected_countertrend_signal_type"] == "n/a"
     assert csv_rows[0]["match_countertrend_signal_type"] == "n/a"
@@ -229,9 +242,11 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     assert "scenario_name,candidate_rank,score,coin,window_size_bars" in csv_content
     assert "analysis_window_size_bars" in csv_content
     assert "warmup_bars" in csv_content
+    assert "required_warmup_bars" in csv_content
+    assert "search_lookback_bars" in csv_content
     assert "actual_inside_margin" in csv_content
     assert "actual_bb_upper" in csv_content
-    assert "scenario,1,7,BTC,20,220,200" in csv_content
+    assert "scenario,1,7,BTC,20,220,200,200,200,800,1000,yes" in csv_content
 
 
 def test_chronological_windows_keep_original_order() -> None:
@@ -243,10 +258,66 @@ def test_chronological_windows_keep_original_order() -> None:
 
     windows = build_replay_windows(candles, 2, warmup_bars=1)
 
-    assert len(windows) == 2
+    assert len(windows) == 1
     assert windows[0].trigger_candles[0].timestamp < windows[0].trigger_candles[1].timestamp
-    assert windows[1].analysis_candles[0].timestamp < windows[1].analysis_candles[1].timestamp
-    assert windows[0].warmup_bars == 0
-    assert windows[1].warmup_bars == 1
-    assert len(windows[1].analysis_candles) == 3
-    assert len(windows[1].trigger_candles) == 2
+    assert windows[0].analysis_candles[0].timestamp < windows[0].analysis_candles[1].timestamp
+    assert windows[0].warmup_bars == 1
+    assert len(windows[0].analysis_candles) == 3
+    assert len(windows[0].trigger_candles) == 2
+
+
+def test_replay_windows_require_full_warmup_context() -> None:
+    candles = [
+        _make_candle(day, 100.0 + day, 101.0 + day, 99.0 + day, 100.5 + day)
+        for day in range(1, 6)
+    ]
+
+    windows = build_replay_windows(candles, window_size=2, warmup_bars=2)
+
+    assert len(windows) == 2
+    assert [window.trigger_candles[-1].timestamp.day for window in windows] == [4, 5]
+    assert all(window.warmup_bars == 2 for window in windows)
+    assert all(len(window.analysis_candles) == 4 for window in windows)
+
+
+def test_replay_windows_limit_search_space_to_last_trigger_bars() -> None:
+    candles = [
+        _make_candle(day, 100.0 + day, 101.0 + day, 99.0 + day, 100.5 + day)
+        for day in range(1, 9)
+    ]
+
+    windows = build_replay_windows(
+        candles,
+        window_size=2,
+        warmup_bars=2,
+        search_lookback_bars=3,
+    )
+
+    assert [window.trigger_candles[-1].timestamp.day for window in windows] == [6, 7, 8]
+    assert all(window.warmup_bars == 2 for window in windows)
+
+
+def test_resolve_replay_warmup_bars_honours_minimum_floor() -> None:
+    config = SimpleNamespace(
+        bollinger_period=20,
+        min_bandwidth_avg_period=30,
+        macd_slow_period=26,
+        macd_signal_period=9,
+    )
+
+    assert _resolve_replay_warmup_bars(config, DEFAULT_MIN_WARMUP_BARS) == DEFAULT_MIN_WARMUP_BARS
+
+
+def test_resolve_replay_warmup_bars_uses_indicator_requirement_when_higher() -> None:
+    config = SimpleNamespace(
+        bollinger_period=20,
+        min_bandwidth_avg_period=180,
+        macd_slow_period=26,
+        macd_signal_period=9,
+    )
+
+    assert _resolve_replay_warmup_bars(config, DEFAULT_MIN_WARMUP_BARS) == 180
+
+
+def test_total_fetch_bars_adds_search_space_and_effective_warmup() -> None:
+    assert _resolve_total_fetch_bars(800, 150) == 950

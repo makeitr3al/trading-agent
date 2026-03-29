@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 from dataclasses import asdict, dataclass
 import json
@@ -34,7 +35,8 @@ from utils.env_loader import load_hyperliquid_config_from_env
 ARTIFACTS_JSON_PATH = PROJECT_ROOT / "artifacts" / "historical_reference_cases.json"
 ARTIFACTS_CSV_PATH = PROJECT_ROOT / "artifacts" / "historical_reference_cases.csv"
 CSV_NA = "n/a"
-DEFAULT_WARMUP_BARS = 200
+DEFAULT_MIN_WARMUP_BARS = 150
+DEFAULT_SEARCH_LOOKBACK_BARS = 800
 
 # TODO: Later add scenario filters, e.g. by name prefix or tags.
 # TODO: Later add richer market-shape diagnostics for close manual review.
@@ -48,6 +50,11 @@ class HistoricalReferenceCandidate:
     window_size_bars: int
     analysis_window_size_bars: int
     warmup_bars: int
+    required_warmup_bars: int
+    actual_warmup_bars: int
+    search_lookback_bars: int
+    total_fetch_bars: int
+    warmup_ok: bool
     start_timestamp: str
     end_timestamp: str
     analysis_start_timestamp: str
@@ -122,16 +129,31 @@ def load_all_golden_scenarios() -> list[Any]:
 def build_replay_windows(
     candles: list[Candle],
     window_size: int,
-    warmup_bars: int = DEFAULT_WARMUP_BARS,
+    warmup_bars: int = DEFAULT_MIN_WARMUP_BARS,
+    *,
+    search_lookback_bars: int | None = None,
 ) -> list[ReplayWindow]:
-    if not candles or window_size <= 0 or len(candles) < window_size:
+    if not candles or window_size <= 0:
         return []
 
     resolved_warmup_bars = max(0, warmup_bars)
+    required_total_bars = window_size + resolved_warmup_bars
+    if len(candles) < required_total_bars:
+        return []
+
+    earliest_end_index = required_total_bars - 1
+    if search_lookback_bars is not None:
+        resolved_search_lookback_bars = max(0, search_lookback_bars)
+        if resolved_search_lookback_bars == 0:
+            return []
+        earliest_end_index = max(earliest_end_index, len(candles) - resolved_search_lookback_bars)
+
     replay_windows: list[ReplayWindow] = []
-    for end_index in range(window_size - 1, len(candles)):
+    for end_index in range(earliest_end_index, len(candles)):
         trigger_start_index = end_index - window_size + 1
-        analysis_start_index = max(0, trigger_start_index - resolved_warmup_bars)
+        analysis_start_index = trigger_start_index - resolved_warmup_bars
+        if analysis_start_index < 0:
+            continue
         analysis_candles = candles[analysis_start_index : end_index + 1]
         trigger_candles = candles[trigger_start_index : end_index + 1]
         replay_windows.append(
@@ -144,13 +166,21 @@ def build_replay_windows(
     return replay_windows
 
 
-def _resolve_replay_warmup_bars(config: Any) -> int:
+def _resolve_replay_warmup_bars(config: Any, min_warmup_bars: int = DEFAULT_MIN_WARMUP_BARS) -> int:
     indicator_minimum = max(
         int(config.bollinger_period),
         int(config.min_bandwidth_avg_period),
         int(config.macd_slow_period + config.macd_signal_period),
     )
-    return max(DEFAULT_WARMUP_BARS, indicator_minimum)
+    return max(int(min_warmup_bars), indicator_minimum)
+
+
+def _resolve_total_fetch_bars(search_lookback_bars: int, warmup_bars: int) -> int:
+    if search_lookback_bars <= 0:
+        raise ValueError("search_lookback_bars must be greater than 0")
+    if warmup_bars < 0:
+        raise ValueError("warmup_bars must be greater than or equal to 0")
+    return int(search_lookback_bars) + int(warmup_bars)
 
 
 def _uses_agent_cycle(scenario: Any) -> bool:
@@ -442,6 +472,10 @@ def _build_candidate(
     post_state: AgentState | None,
     score: int,
     match_comment: str | None,
+    *,
+    required_warmup_bars: int,
+    search_lookback_bars: int,
+    total_fetch_bars: int,
 ) -> HistoricalReferenceCandidate:
     analysis_candles = replay_window.analysis_candles
     trigger_candles = replay_window.trigger_candles
@@ -465,6 +499,11 @@ def _build_candidate(
         window_size_bars=len(trigger_candles),
         analysis_window_size_bars=len(analysis_candles),
         warmup_bars=replay_window.warmup_bars,
+        required_warmup_bars=required_warmup_bars,
+        actual_warmup_bars=replay_window.warmup_bars,
+        search_lookback_bars=search_lookback_bars,
+        total_fetch_bars=total_fetch_bars,
+        warmup_ok=replay_window.warmup_bars >= required_warmup_bars,
         start_timestamp=trigger_candles[0].timestamp.isoformat(),
         end_timestamp=trigger_candles[-1].timestamp.isoformat(),
         analysis_start_timestamp=analysis_candles[0].timestamp.isoformat(),
@@ -561,6 +600,11 @@ def flatten_candidates_for_csv(
                 "window_size_bars": candidate.window_size_bars,
                 "analysis_window_size_bars": candidate.analysis_window_size_bars,
                 "warmup_bars": candidate.warmup_bars,
+                "required_warmup_bars": candidate.required_warmup_bars,
+                "actual_warmup_bars": candidate.actual_warmup_bars,
+                "search_lookback_bars": candidate.search_lookback_bars,
+                "total_fetch_bars": candidate.total_fetch_bars,
+                "warmup_ok": candidate.warmup_ok,
                 "window_start_timestamp": candidate.start_timestamp,
                 "window_start_date": candidate.start_timestamp.split("T", 1)[0],
                 "window_end_timestamp": candidate.end_timestamp,
@@ -643,7 +687,8 @@ def export_candidates_csv(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "scenario_name", "candidate_rank", "score", "coin", "window_size_bars",
-        "analysis_window_size_bars", "warmup_bars",
+        "analysis_window_size_bars", "warmup_bars", "required_warmup_bars",
+        "actual_warmup_bars", "search_lookback_bars", "total_fetch_bars", "warmup_ok",
         "window_start_timestamp", "window_start_date", "window_end_timestamp", "window_end_date",
         "analysis_start_timestamp", "analysis_start_date", "analysis_end_timestamp", "analysis_end_date",
         "trigger_timestamp", "trigger_date", "actual_decision_action", "actual_selected_signal_type",
@@ -685,6 +730,11 @@ def _summarize_results(candidates_by_scenario: dict[str, list[HistoricalReferenc
             print(f"    coin: {candidate.coin}")
             print(f"    window: {candidate.start_timestamp} -> {candidate.end_timestamp}")
             print(f"    trigger_timestamp: {candidate.trigger_timestamp}")
+            print(f"    required_warmup_bars: {candidate.required_warmup_bars}")
+            print(f"    actual_warmup_bars: {candidate.actual_warmup_bars}")
+            print(f"    search_lookback_bars: {candidate.search_lookback_bars}")
+            print(f"    total_fetch_bars: {candidate.total_fetch_bars}")
+            print(f"    warmup_ok: {candidate.warmup_ok}")
             print(f"    decision_action: {candidate.decision_action}")
             print(f"    selected_signal_type: {candidate.selected_signal_type}")
             print(f"    trend_signal_valid: {candidate.trend_signal_valid}")
@@ -696,26 +746,51 @@ def _summarize_results(candidates_by_scenario: dict[str, list[HistoricalReferenc
                 print(f"    match_comment: {candidate.match_comment}")
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Find historical reference cases with full warmup context.")
+    parser.add_argument("--search-lookback-bars", type=int, default=DEFAULT_SEARCH_LOOKBACK_BARS)
+    parser.add_argument("--min-warmup-bars", type=int, default=DEFAULT_MIN_WARMUP_BARS)
+    return parser.parse_args()
+
+
 def main() -> None:
     print("Historical reference case scan started.")
 
     try:
+        args = _parse_args()
+        if args.search_lookback_bars <= 0:
+            raise ValueError("--search-lookback-bars must be greater than 0")
+        if args.min_warmup_bars < 0:
+            raise ValueError("--min-warmup-bars must be greater than or equal to 0")
+
         hyperliquid_config = load_hyperliquid_config_from_env()
         scenarios = load_all_golden_scenarios()
 
-        print(f"Hyperliquid coin: {hyperliquid_config.coin}")
-        print(f"interval: {hyperliquid_config.interval}")
-        print(f"lookback_bars: {hyperliquid_config.lookback_bars}")
-        print(f"Golden scenarios: {len(scenarios)}")
-        print(f"default_warmup_bars: {DEFAULT_WARMUP_BARS}")
+        scenario_warmups = [_resolve_replay_warmup_bars(scenario.config, args.min_warmup_bars) for scenario in scenarios]
+        max_required_warmup_bars = max(scenario_warmups, default=args.min_warmup_bars)
+        total_fetch_bars = _resolve_total_fetch_bars(args.search_lookback_bars, max_required_warmup_bars)
+        scan_hyperliquid_config = hyperliquid_config.model_copy(update={"lookback_bars": total_fetch_bars})
 
-        live_batch = HyperliquidHistoricalProvider(hyperliquid_config).fetch_candles()
+        print(f"Hyperliquid coin: {scan_hyperliquid_config.coin}")
+        print(f"interval: {scan_hyperliquid_config.interval}")
+        print(f"search_lookback_bars: {args.search_lookback_bars}")
+        print(f"min_warmup_bars: {args.min_warmup_bars}")
+        print(f"max_required_warmup_bars: {max_required_warmup_bars}")
+        print(f"total_fetch_bars: {total_fetch_bars}")
+        print(f"Golden scenarios: {len(scenarios)}")
+
+        live_batch = HyperliquidHistoricalProvider(scan_hyperliquid_config).fetch_candles()
         candidates_by_scenario: dict[str, list[HistoricalReferenceCandidate]] = {scenario.name: [] for scenario in scenarios}
 
         for scenario in scenarios:
             window_size = len(scenario.candles)
-            replay_warmup_bars = _resolve_replay_warmup_bars(scenario.config)
-            windows = build_replay_windows(live_batch.candles, window_size, warmup_bars=replay_warmup_bars)
+            replay_warmup_bars = _resolve_replay_warmup_bars(scenario.config, args.min_warmup_bars)
+            windows = build_replay_windows(
+                live_batch.candles,
+                window_size,
+                warmup_bars=replay_warmup_bars,
+                search_lookback_bars=args.search_lookback_bars,
+            )
             for replay_window in windows:
                 strategy_result, post_state = _evaluate_window(scenario, replay_window.analysis_candles)
                 score, match_comment = _score_scenario_match_with_comment(
@@ -728,12 +803,15 @@ def main() -> None:
 
                 candidate = _build_candidate(
                     scenario=scenario,
-                    coin=hyperliquid_config.coin,
+                    coin=scan_hyperliquid_config.coin,
                     replay_window=replay_window,
                     strategy_result=strategy_result,
                     post_state=post_state,
                     score=score,
                     match_comment=match_comment,
+                    required_warmup_bars=replay_warmup_bars,
+                    search_lookback_bars=args.search_lookback_bars,
+                    total_fetch_bars=total_fetch_bars,
                 )
                 candidates_by_scenario[scenario.name] = keep_best_candidates(candidates_by_scenario[scenario.name], candidate)
 
