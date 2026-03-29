@@ -461,6 +461,8 @@ Fuer HAOS sind die aktuellen Referenzdateien im Repo:
 - `ha_addons/trading_agent/config.yaml`
 - `ha_addons/trading_agent/run.sh`
 - `home_assistant_package_haos_addon.yaml.example`
+- `home_assistant_scripts_haos_addon.yaml.example`
+- `home_assistant_automations_haos_addon.yaml.example`
 - `home_assistant_dashboard_haos_addon.yaml.example`
 - `operator_config.py`
 

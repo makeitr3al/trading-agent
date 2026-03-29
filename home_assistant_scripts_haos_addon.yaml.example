@@ -1,0 +1,104 @@
+# Append to /config/scripts.yaml
+# This file contains only the Trading Agent script entries.
+
+trading_agent_save_current_config_haos:
+  alias: Trading Agent Konfiguration speichern
+  mode: single
+  sequence:
+    - variables:
+        selected_mode: >-
+          {% if states('input_select.trading_agent_mode') == 'Preflight-Test' %}
+            preflight
+          {% elif states('input_select.trading_agent_mode') == 'Beta-Write-Test' %}
+            beta_write
+          {% else %}
+            scharf
+          {% endif %}
+    - action: shell_command.trading_agent_save_operator_config_haos
+      data:
+        mode: "{{ selected_mode | trim }}"
+        environment: "{{ states('input_select.trading_agent_environment') }}"
+        leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+        markets: "{{ states('input_text.trading_agent_markets') }}"
+        scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+        schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+
+trading_agent_jetzt_ausfuehren_haos:
+  alias: Trading Agent Aktuellen Modus ausfuehren
+  mode: single
+  sequence:
+    - action: script.trading_agent_save_current_config_haos
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_preflight_test_haos:
+  alias: Trading Agent Preflight-Test ausfuehren
+  mode: single
+  sequence:
+    - action: shell_command.trading_agent_save_operator_config_haos
+      data:
+        mode: "preflight"
+        environment: "{{ states('input_select.trading_agent_environment') }}"
+        leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+        markets: "{{ states('input_text.trading_agent_markets') }}"
+        scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+        schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_beta_write_test_haos:
+  alias: Trading Agent Beta-Write-Test ausfuehren
+  mode: single
+  sequence:
+    - action: shell_command.trading_agent_save_operator_config_haos
+      data:
+        mode: "beta_write"
+        environment: "{{ states('input_select.trading_agent_environment') }}"
+        leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+        markets: "{{ states('input_text.trading_agent_markets') }}"
+        scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+        schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_scharf_lauf_haos:
+  alias: Trading Agent Scharf-Lauf ausfuehren
+  mode: single
+  sequence:
+    - action: shell_command.trading_agent_save_operator_config_haos
+      data:
+        mode: "scharf"
+        environment: "{{ states('input_select.trading_agent_environment') }}"
+        leverage: "{{ states('input_number.trading_agent_leverage') | int }}"
+        markets: "{{ states('input_text.trading_agent_markets') }}"
+        scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
+        schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_stop_haos:
+  alias: Trading Agent Stopp
+  mode: single
+  sequence:
+    - action: hassio.addon_stop
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_neustart_haos:
+  alias: Trading Agent Neustart
+  mode: single
+  sequence:
+    - action: script.trading_agent_save_current_config_haos
+    - action: hassio.addon_restart
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+trading_agent_reset_operator_config_haos:
+  alias: Trading Agent Konfiguration zuruecksetzen
+  mode: single
+  sequence:
+    - action: shell_command.trading_agent_reset_operator_config_haos

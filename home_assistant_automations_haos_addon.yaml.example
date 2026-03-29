@@ -1,0 +1,57 @@
+# Append to /config/automations.yaml
+# This file contains only the Trading Agent automation entries.
+
+- alias: Trading Agent Geplanter Scharf-Lauf
+  id: trading_agent_geplanter_scharf_lauf
+  mode: single
+  triggers:
+    - trigger: time
+      at: input_datetime.trading_agent_schedule_time
+  conditions:
+    - condition: state
+      entity_id: input_boolean.trading_agent_scheduling_aktiv
+      state: "on"
+  actions:
+    - action: script.trading_agent_scharf_lauf_haos
+
+- alias: Trading Agent Push nach Lauf
+  id: trading_agent_push_nach_lauf
+  mode: single
+  triggers:
+    - trigger: state
+      entity_id: sensor.trading_agent_run_summary
+  conditions:
+    - condition: state
+      entity_id: input_boolean.trading_agent_push_aktiv
+      state: "on"
+    - condition: template
+      value_template: >-
+        {% set run_id = states('sensor.trading_agent_run_summary') %}
+        {{ run_id not in [None, '', 'unknown', 'unavailable'] and run_id != states('input_text.trading_agent_last_notified_run_id') }}
+  actions:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ states('input_text.trading_agent_notify_action') | trim != '' }}"
+          sequence:
+            - action: "{{ states('input_text.trading_agent_notify_action') | trim }}"
+              data:
+                title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
+                message: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_message') or 'Trading Agent Lauf abgeschlossen.' }}"
+                data:
+                  tag: trading-agent-last-run
+                  clickAction: /trading-agent
+                  url: /trading-agent
+      default:
+        - action: persistent_notification.create
+          data:
+            title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
+            message: >-
+              {% for line in state_attr('sensor.trading_agent_run_summary', 'summary_lines') or [] %}
+              - {{ line }}
+              {% endfor %}
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.trading_agent_last_notified_run_id
+      data:
+        value: "{{ states('sensor.trading_agent_run_summary') }}"
