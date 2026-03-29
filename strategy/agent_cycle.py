@@ -120,13 +120,13 @@ def run_agent_cycle(
     if duplicate_trend_signal_blocked:
         invalid_trend_signal = None
         if result.trend_signal is not None:
-            invalid_trend_signal = result.trend_signal.copy(
+            invalid_trend_signal = result.trend_signal.model_copy(
                 update={
                     "is_valid": False,
                     "reason": "trend regime consumed",
                 }
             )
-        result = result.copy(
+        result = result.model_copy(
             update={
                 "decision": DecisionResult(
                     action=DecisionAction.NO_ACTION,
@@ -146,13 +146,13 @@ def run_agent_cycle(
     if duplicate_countertrend_signal_blocked:
         invalid_countertrend_signal = None
         if result.countertrend_signal is not None:
-            invalid_countertrend_signal = result.countertrend_signal.copy(
+            invalid_countertrend_signal = result.countertrend_signal.model_copy(
                 update={
                     "is_valid": False,
                     "reason": "countertrend regime direction consumed",
                 }
             )
-        result = result.copy(
+        result = result.model_copy(
             update={
                 "decision": DecisionResult(
                     action=DecisionAction.NO_ACTION,
@@ -233,7 +233,7 @@ def run_agent_cycle(
         else state.active_trade
     )
 
-    new_state = state.copy(
+    new_state = state.model_copy(
         update={
             "active_trade": active_trade,
             "pending_order": pending_order,
@@ -249,6 +249,7 @@ def run_agent_cycle(
         }
     )
 
-    result = result.copy(update={"filled_trade": filled_trade})
+    result = result.model_copy(update={"filled_trade": filled_trade})
 
     return result, new_state
+

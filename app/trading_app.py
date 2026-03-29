@@ -107,7 +107,7 @@ def _apply_symbol_specific_position_size(
     )
     prepared_order = order
     if sizing_result.position_size is not None:
-        prepared_order = order.copy(update={"position_size": sizing_result.position_size})
+        prepared_order = order.model_copy(update={"position_size": sizing_result.position_size})
     return apply_symbol_spec_to_order(prepared_order, symbol_spec)
 
 
@@ -192,7 +192,7 @@ def _build_app_cycle_result(
         skipped_reason=skipped_reason,
         exit_price=float(candles[-1].close),
     )
-    result = result.copy(update={"journal_entries": journal_entries})
+    result = result.model_copy(update={"journal_entries": journal_entries})
 
     if journal_path is not None and journal_entries:
         append_journal_entries(journal_path, journal_entries)
@@ -219,7 +219,7 @@ def run_app_cycle(
 ) -> AppCycleResult:
     health_guard_result: HealthGuardResult | None = None
     environment = getattr(getattr(client, "config", None), "environment", None)
-    config = config.copy(update={"outside_band_sweet_spot": _derive_outside_band_sweet_spot(symbol_spec)})
+    config = config.model_copy(update={"outside_band_sweet_spot": _derive_outside_band_sweet_spot(symbol_spec)})
     symbol_spec_loaded = symbol_spec is not None
     if require_healthy_core:
         health_guard_result = fetch_and_check_core_service_health(client)
@@ -286,9 +286,9 @@ def run_app_cycle(
             desired_leverage=desired_leverage,
             symbol_spec=symbol_spec,
         )
-        post_cycle_state = post_cycle_state.copy(update={"pending_order": resized_order})
+        post_cycle_state = post_cycle_state.model_copy(update={"pending_order": resized_order})
         if strategy_result.order is not None:
-            strategy_result = strategy_result.copy(update={"order": resized_order})
+            strategy_result = strategy_result.model_copy(update={"order": resized_order})
 
     risk_guard_result = evaluate_execution_guards(
         challenge_context,
@@ -456,7 +456,7 @@ def run_app_cycle(
                 if isinstance(execution_response, dict)
                 else None
             )
-            post_cycle_state = post_cycle_state.copy(
+            post_cycle_state = post_cycle_state.model_copy(
                 update={
                     "stop_loss_order_id": (stop_loss_payload or {}).get("order_id"),
                     "take_profit_order_id": (take_profit_payload or {}).get("order_id"),
@@ -569,7 +569,7 @@ def run_app_cycle(
             replaced_order = True
             if isinstance(execution_response, dict):
                 submit_response = execution_response.get("submit")
-                post_cycle_state = post_cycle_state.copy(
+                post_cycle_state = post_cycle_state.model_copy(
                     update={
                         "pending_order_id": _extract_external_order_id(submit_response),
                     }
@@ -584,7 +584,7 @@ def run_app_cycle(
             )
             if execution_response is not None:
                 submitted_order = True
-                post_cycle_state = post_cycle_state.copy(
+                post_cycle_state = post_cycle_state.model_copy(
                     update={
                         "pending_order_id": _extract_external_order_id(execution_response),
                     }
@@ -610,3 +610,4 @@ def run_app_cycle(
         asset_guard_result=asset_guard_result,
         symbol_spec_loaded=symbol_spec_loaded,
     )
+

@@ -428,7 +428,7 @@ def test_raises_value_error_when_position_size_missing_or_non_positive(monkeypat
 
 
 def test_market_close_preview_raises_value_error_when_quantity_missing() -> None:
-    trade = _make_trade().copy(update={"quantity": None})
+    trade = _make_trade().model_copy(update={"quantity": None})
 
     with pytest.raises(ValueError, match="active trade quantity is required for market close"):
         build_market_close_submission_preview(trade, "BTC/USDC")
@@ -499,3 +499,4 @@ def test_submit_order_preview_does_not_retry_outside_beta(monkeypatch: pytest.Mo
         service.submit_order_preview("account-1", preview)
 
     assert len(client.calls) == 1
+

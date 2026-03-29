@@ -29,7 +29,7 @@ def tighten_trend_stop_to_last_close(active_trade: Trade, latest_close: float) -
         new_stop_loss = max(active_trade.stop_loss, latest_close)
     else:
         new_stop_loss = min(active_trade.stop_loss, latest_close)
-    return active_trade.copy(update={"stop_loss": new_stop_loss})
+    return active_trade.model_copy(update={"stop_loss": new_stop_loss})
 
 
 def update_active_trade(
@@ -43,7 +43,7 @@ def update_active_trade(
 
     if active_trade.trade_type == TradeType.TREND:
         if active_trade.break_even_activated:
-            return active_trade.copy(
+            return active_trade.model_copy(
                 update={
                     "stop_loss": active_trade.entry,
                     "break_even_activated": True,
@@ -57,14 +57,14 @@ def update_active_trade(
 
             profit = latest_close - active_trade.entry
             if profit >= initial_risk:
-                return active_trade.copy(
+                return active_trade.model_copy(
                     update={
                         "stop_loss": active_trade.entry,
                         "break_even_activated": True,
                     }
                 )
 
-            return active_trade.copy(
+            return active_trade.model_copy(
                 update={
                     "stop_loss": _tighten_trend_stop_loss(
                         active_trade=active_trade,
@@ -80,14 +80,14 @@ def update_active_trade(
 
         profit = active_trade.entry - latest_close
         if profit >= initial_risk:
-            return active_trade.copy(
+            return active_trade.model_copy(
                 update={
                     "stop_loss": active_trade.entry,
                     "break_even_activated": True,
                 }
             )
 
-        return active_trade.copy(
+        return active_trade.model_copy(
             update={
                 "stop_loss": _tighten_trend_stop_loss(
                     active_trade=active_trade,
@@ -97,7 +97,7 @@ def update_active_trade(
             }
         )
 
-    return active_trade.copy(
+    return active_trade.model_copy(
         update={
             "take_profit": _countertrend_take_profit_from_middle_band(
                 active_trade=active_trade,
@@ -106,3 +106,4 @@ def update_active_trade(
             )
         }
     )
+

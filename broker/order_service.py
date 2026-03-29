@@ -98,7 +98,7 @@ def apply_symbol_spec_to_order(order: Order, symbol_spec: SymbolSpec | None) -> 
     }
     if order.position_size is not None:
         updates["position_size"] = float(round_quantity_to_symbol_spec(order.position_size, symbol_spec))
-    return order.copy(update=updates)
+    return order.model_copy(update=updates)
 
 
 
@@ -489,3 +489,4 @@ __all__ = [
     "extract_order_id_from_submit_response",
     "ProprOrderService",
 ]
+

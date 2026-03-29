@@ -302,7 +302,7 @@ def build_agent_state_from_propr_data(
             account_open_positions_count=len(all_mapped_positions),
         )
 
-    return previous_state.copy(
+    return previous_state.model_copy(
         update={
             "active_trade": active_trade,
             "pending_order": pending_order,
@@ -337,3 +337,4 @@ __all__ = [
     "build_agent_state_from_propr_data",
     "sync_agent_state_from_propr",
 ]
+

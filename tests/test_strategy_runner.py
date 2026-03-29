@@ -323,7 +323,7 @@ def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend
         "strategy.strategy_runner.update_active_trade",
         lambda active_trade, latest_bb_middle, latest_close, buy_spread=0.0: (
             captured.update({"latest_bb_middle": latest_bb_middle})
-            or active_trade.copy(update={"take_profit": latest_bb_middle})
+            or active_trade.model_copy(update={"take_profit": latest_bb_middle})
         ),
     )
 
@@ -337,3 +337,4 @@ def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend
     assert captured["latest_bb_middle"] == pytest.approx(97.0)
     assert result.updated_trade is not None
     assert result.updated_trade.take_profit == pytest.approx(97.0)
+

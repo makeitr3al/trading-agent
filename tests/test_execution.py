@@ -236,7 +236,7 @@ def test_should_manage_exit_orders_returns_true_when_active_trade_levels_changed
         stop_loss_order_id="external-stop-order",
         take_profit_order_id="external-tp-order",
     )
-    updated_trade = _make_trade().copy(update={"stop_loss": 96.0})
+    updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0})
 
     assert should_manage_exit_orders(state, updated_trade) is True
 
@@ -248,7 +248,7 @@ def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None
         stop_loss_order_id="external-old-stop",
         take_profit_order_id="external-old-tp",
     )
-    updated_trade = _make_trade().copy(update={"stop_loss": 96.0, "take_profit": 111.0})
+    updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0, "take_profit": 111.0})
 
     result = manage_active_trade_exit_orders(
         order_service=service,
@@ -266,3 +266,4 @@ def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None
     assert service.calls[1][0] == "stop_loss"
     assert service.calls[2] == ("cancel", "account-1", "external-old-tp")
     assert service.calls[3][0] == "take_profit"
+

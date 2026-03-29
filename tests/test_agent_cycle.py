@@ -314,7 +314,7 @@ def test_run_agent_cycle_deletes_unfilled_countertrend_pending_order_when_signal
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 109.0, "low": 108.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 109.0, "low": 108.5})
     state = AgentState(
         pending_order=_make_pending_order(
             OrderType.SELL_LIMIT,
@@ -575,7 +575,7 @@ def test_run_agent_cycle_fills_buy_stop_pending_order_into_active_long_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 110.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 110.5})
     pending_order = _make_pending_order(OrderType.BUY_STOP, "trend_long")
     state = AgentState(pending_order=pending_order)
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
@@ -597,7 +597,7 @@ def test_run_agent_cycle_fills_sell_stop_pending_order_into_active_short_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"low": 109.5})
+    candles[-1] = candles[-1].model_copy(update={"low": 109.5})
     pending_order = _make_pending_order(
         OrderType.SELL_STOP,
         "trend_short",
@@ -623,7 +623,7 @@ def test_run_agent_cycle_fills_buy_limit_pending_order_into_active_long_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"low": 109.5})
+    candles[-1] = candles[-1].model_copy(update={"low": 109.5})
     pending_order = _make_pending_order(OrderType.BUY_LIMIT, "countertrend_long")
     state = AgentState(pending_order=pending_order)
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
@@ -643,7 +643,7 @@ def test_run_agent_cycle_fills_sell_limit_pending_order_into_active_short_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 110.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 110.5})
     pending_order = _make_pending_order(
         OrderType.SELL_LIMIT,
         "countertrend_short",
@@ -669,7 +669,7 @@ def test_run_agent_cycle_does_not_fill_pending_order_if_candle_does_not_reach_en
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 109.0, "low": 108.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 109.0, "low": 108.5})
     pending_order = _make_order()
     state = AgentState(pending_order=pending_order)
     result_stub = _make_result(
@@ -699,7 +699,7 @@ def test_run_agent_cycle_filled_trend_order_becomes_trend_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 110.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 110.5})
     state = AgentState(pending_order=_make_pending_order(OrderType.BUY_STOP, "trend_long"))
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
 
@@ -718,7 +718,7 @@ def test_run_agent_cycle_filled_countertrend_order_becomes_countertrend_trade(
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 110.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 110.5})
     state = AgentState(
         pending_order=_make_pending_order(
             OrderType.SELL_LIMIT,
@@ -744,7 +744,7 @@ def test_run_agent_cycle_filled_order_can_still_be_updated_by_later_trade_manage
     monkeypatch,
 ) -> None:
     candles = _make_candles()
-    candles[-1] = candles[-1].copy(update={"high": 110.5})
+    candles[-1] = candles[-1].model_copy(update={"high": 110.5})
     filled_pending_order = _make_pending_order(OrderType.BUY_STOP, "trend_long")
     updated_trade = Trade(
         trade_type=TradeType.TREND,
@@ -823,3 +823,4 @@ def test_run_agent_cycle_keeps_tightened_trend_stop_when_strategy_requests_last_
 
     assert new_state.active_trade == tightened_trade
     assert new_state.trend_signal_consumed_in_regime is True
+

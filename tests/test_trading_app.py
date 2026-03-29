@@ -855,7 +855,7 @@ def test_manages_exit_orders_for_active_trade_updates(monkeypatch: pytest.Monkey
         stop_loss_order_id="old-stop",
         take_profit_order_id="old-tp",
     )
-    updated_trade = _make_trade().copy(update={"stop_loss": 96.0, "take_profit": 111.0})
+    updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0, "take_profit": 111.0})
     strategy_result = StrategyRunResult(
         trend_signal=None,
         countertrend_signal=None,
@@ -898,7 +898,7 @@ def test_manages_exit_orders_for_active_trade_updates(monkeypatch: pytest.Monkey
 
 def test_golden_mode_blocks_active_trade_exit_order_updates(monkeypatch: pytest.MonkeyPatch) -> None:
     synced_state = AgentState(active_trade=_make_trade())
-    updated_trade = _make_trade().copy(update={"stop_loss": 96.0})
+    updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0})
     strategy_result = StrategyRunResult(
         trend_signal=None,
         countertrend_signal=None,
@@ -1011,3 +1011,4 @@ def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatc
 
     assert result.skipped_reason is None
     assert result.submitted_order is True
+

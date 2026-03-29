@@ -107,7 +107,7 @@ def _prepare_updated_trade_for_exit_orders(state: AgentState, updated_trade: Tra
         updates["position_id"] = state.active_trade.position_id
     if not updates:
         return updated_trade
-    return updated_trade.copy(update=updates)
+    return updated_trade.model_copy(update=updates)
 
 
 
@@ -199,3 +199,4 @@ __all__ = [
     "should_manage_exit_orders",
     "manage_active_trade_exit_orders",
 ]
+
