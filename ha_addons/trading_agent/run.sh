@@ -33,7 +33,7 @@ export PYTHONPATH="$APP_PATH"
 export TRADING_AGENT_DATA_PATH="$DATA_PATH"
 export TRADING_AGENT_OPERATOR_CONFIG_PATH="$OPERATOR_CONFIG_PATH"
 
-operator_env_output="$("$VIRTUAL_ENV/bin/python" operator_config.py export-env --path "$OPERATOR_CONFIG_PATH" 2>&1)" || {
+operator_env_output="$($VIRTUAL_ENV/bin/python operator_config.py export-env --path "$OPERATOR_CONFIG_PATH" 2>&1)" || {
     bashio::log.fatal "Failed to resolve operator config"
     bashio::log.fatal "$operator_env_output"
     exit 1
@@ -68,6 +68,7 @@ bashio::log.info "Mode: $OPERATOR_MODE"
 bashio::log.info "Environment: $OPERATOR_ENVIRONMENT"
 bashio::log.info "Markets: $OPERATOR_MARKETS"
 
+run_started_at="$(date -Iseconds)"
 run_exit_code=0
 
 case "$OPERATOR_MODE" in
@@ -95,6 +96,9 @@ case "$OPERATOR_MODE" in
         ;;
 esac
 
-python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 20 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
+run_finished_at="$(date -Iseconds)"
+
+python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 200 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
+python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
 
 exit "$run_exit_code"

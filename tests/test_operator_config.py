@@ -99,3 +99,4 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
     assert 'export OPERATOR_MODE=scharf' in export_result.stdout
     assert 'export OPERATOR_ENVIRONMENT=prod' in export_result.stdout
     assert 'export OPERATOR_PRIMARY_SYMBOL=SOL/USDC' in export_result.stdout
+    assert 'export OPERATOR_RUN_SUMMARY_PATH=' in export_result.stdout

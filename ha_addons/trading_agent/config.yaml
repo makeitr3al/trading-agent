@@ -1,5 +1,5 @@
 name: Trading Agent
-version: "0.3.3"
+version: "0.3.4"
 slug: trading_agent
 description: Run the trading agent as a one-shot Home Assistant OS add-on controlled by Home Assistant UI helpers.
 url: https://github.com/makeitr3al/trading-agent

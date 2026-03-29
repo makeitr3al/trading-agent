@@ -53,14 +53,19 @@ def _recent_entries(path: Path, limit: int) -> tuple[list[dict[str, Any]], dict[
 def _compact_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         "entry_type": entry.get("entry_type"),
+        "entry_date": entry.get("entry_date"),
         "entry_timestamp": entry.get("entry_timestamp"),
         "symbol": entry.get("symbol"),
         "environment": entry.get("environment"),
         "decision_action": entry.get("decision_action"),
         "skipped_reason": entry.get("skipped_reason"),
         "direction": entry.get("direction"),
+        "position_size": entry.get("position_size"),
         "status": entry.get("status"),
         "pnl": entry.get("pnl"),
+        "source_signal_type": entry.get("source_signal_type"),
+        "fill_timestamp": entry.get("fill_timestamp"),
+        "close_timestamp": entry.get("close_timestamp"),
         "notes": entry.get("notes"),
     }
 

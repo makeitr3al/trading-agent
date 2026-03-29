@@ -17,7 +17,6 @@ views:
       - type: entities
         title: Aktionen
         entities:
-          - script.trading_agent_save_current_config_haos
           - script.trading_agent_jetzt_ausfuehren_haos
           - script.trading_agent_preflight_test_haos
           - script.trading_agent_beta_write_test_haos
@@ -26,31 +25,105 @@ views:
           - script.trading_agent_neustart_haos
           - script.trading_agent_reset_operator_config_haos
       - type: entities
+        title: Benachrichtigungen
+        entities:
+          - input_boolean.trading_agent_push_aktiv
+          - input_text.trading_agent_notify_action
+      - type: entities
         title: Status
         entities:
           - sensor.trading_agent_operator_config
+          - sensor.trading_agent_run_summary
           - sensor.trading_agent_tests
           - sensor.trading_agent_journal
       - type: markdown
-        title: Letzte Journal-Eintraege
+        title: Letzter Lauf
+        entity_id:
+          - sensor.trading_agent_run_summary
+        content: >-
+          {% set title = state_attr('sensor.trading_agent_run_summary', 'title') %}
+          {% if not title %}
+          Noch kein Lauf zusammengefasst.
+          {% else %}
+          **{{ title }}**
+
+          {% for line in state_attr('sensor.trading_agent_run_summary', 'summary_lines') or [] %}
+          - {{ line }}
+          {% endfor %}
+          {% endif %}
+      - type: entities
+        title: Journal-Filter
+        entities:
+          - input_select.trading_agent_journal_entry_type
+          - input_text.trading_agent_journal_symbol_filter
+          - input_text.trading_agent_journal_text_filter
+      - type: markdown
+        title: Journal Uebersicht
+        entity_id:
+          - sensor.trading_agent_journal
+          - input_select.trading_agent_journal_entry_type
+          - input_text.trading_agent_journal_symbol_filter
+          - input_text.trading_agent_journal_text_filter
         content: >-
           {% set entries = state_attr('sensor.trading_agent_journal', 'recent_entries') or [] %}
-          {% if not entries %}
-          Keine Journal-Eintraege gefunden.
-          {% else %}
+          {% set type_filter = states('input_select.trading_agent_journal_entry_type') %}
+          {% set symbol_filter = states('input_text.trading_agent_journal_symbol_filter') | trim | upper %}
+          {% set text_filter = states('input_text.trading_agent_journal_text_filter') | trim | lower %}
+          {% set ns = namespace(filtered=[]) %}
           {% for entry in entries | reverse %}
-          **{{ entry.entry_timestamp or 'n/a' }}** | {{ entry.entry_type or 'entry' }} | {{ entry.symbol or '-' }} | {{ entry.status or entry.decision_action or '-' }}
-          {% if entry.skipped_reason %}
-          Grund: {{ entry.skipped_reason }}
-          {% endif %}
-          {% if entry.pnl is not none %}
-          PnL: {{ entry.pnl }}
-          {% endif %}
-
+            {% set entry_type = entry.entry_type or '' %}
+            {% set symbol = entry.symbol or '' %}
+            {% set outcome = entry.status or entry.decision_action or '' %}
+            {% set haystack = ([entry_type, symbol, outcome, entry.skipped_reason, entry.notes, entry.direction, entry.source_signal_type] | select('string') | join(' ')) | lower %}
+            {% set type_ok = type_filter == 'Alle' or entry_type == type_filter %}
+            {% set symbol_ok = (not symbol_filter) or symbol == symbol_filter %}
+            {% set text_ok = (not text_filter) or (text_filter in haystack) %}
+            {% if type_ok and symbol_ok and text_ok %}
+              {% set ns.filtered = ns.filtered + [entry] %}
+            {% endif %}
+          {% endfor %}
+          Geladene letzte Eintraege: **{{ entries | count }}**  
+          Treffer fuer aktuellen Filter: **{{ ns.filtered | count }}**  
+          Letzter Snapshot: **{{ state_attr('sensor.trading_agent_journal', 'latest_entry_timestamp') or 'n/a' }}**
+      - type: markdown
+        title: Journal Eintraege
+        entity_id:
+          - sensor.trading_agent_journal
+          - input_select.trading_agent_journal_entry_type
+          - input_text.trading_agent_journal_symbol_filter
+          - input_text.trading_agent_journal_text_filter
+        content: >-
+          {% set entries = state_attr('sensor.trading_agent_journal', 'recent_entries') or [] %}
+          {% set type_filter = states('input_select.trading_agent_journal_entry_type') %}
+          {% set symbol_filter = states('input_text.trading_agent_journal_symbol_filter') | trim | upper %}
+          {% set text_filter = states('input_text.trading_agent_journal_text_filter') | trim | lower %}
+          {% set ns = namespace(filtered=[]) %}
+          {% for entry in entries | reverse %}
+            {% set entry_type = entry.entry_type or '' %}
+            {% set symbol = entry.symbol or '' %}
+            {% set outcome = entry.status or entry.decision_action or '' %}
+            {% set haystack = ([entry_type, symbol, outcome, entry.skipped_reason, entry.notes, entry.direction, entry.source_signal_type] | select('string') | join(' ')) | lower %}
+            {% set type_ok = type_filter == 'Alle' or entry_type == type_filter %}
+            {% set symbol_ok = (not symbol_filter) or symbol == symbol_filter %}
+            {% set text_ok = (not text_filter) or (text_filter in haystack) %}
+            {% if type_ok and symbol_ok and text_ok %}
+              {% set ns.filtered = ns.filtered + [entry] %}
+            {% endif %}
+          {% endfor %}
+          {% if not ns.filtered %}
+          Keine Journal-Eintraege fuer den aktuellen Filter gefunden.
+          {% else %}
+          | Zeit | Typ | Markt | Ergebnis | Details |
+          | --- | --- | --- | --- | --- |
+          {% for entry in ns.filtered[:25] %}
+          {% set detail = entry.skipped_reason or entry.notes or ('PnL: ' ~ entry.pnl if entry.pnl is not none else '') or '-' %}
+          | {{ entry.entry_timestamp[5:16] if entry.entry_timestamp else 'n/a' }} | {{ entry.entry_type or '-' }} | {{ entry.symbol or '-' }} | {{ entry.status or entry.decision_action or '-' }} | {{ detail | replace('|', '/') }} |
           {% endfor %}
           {% endif %}
       - type: markdown
         title: Letzter Testlauf
+        entity_id:
+          - sensor.trading_agent_tests
         content: >-
           Suite: {{ state_attr('sensor.trading_agent_tests', 'suite') or 'n/a' }}
 

@@ -1,6 +1,9 @@
 # Copy to /config/packages/trading_agent.yaml
 # This package contains all Trading Agent helpers, sensors, shell commands,
 # scripts, and the daily scheduling automation for the HAOS add-on setup.
+#
+# Set `input_text.trading_agent_notify_action` to your mobile notify action,
+# for example: notify.mobile_app_dein_iphone
 
 input_select:
   trading_agent_mode:
@@ -18,6 +21,15 @@ input_select:
       - prod
     initial: beta
     icon: mdi:server-outline
+  trading_agent_journal_entry_type:
+    name: Trading Agent Journal Typ
+    options:
+      - Alle
+      - cycle
+      - order
+      - trade
+    initial: Alle
+    icon: mdi:filter-variant
 
 input_number:
   trading_agent_leverage:
@@ -40,12 +52,36 @@ input_text:
     initial: trading_agent
     max: 100
     icon: mdi:puzzle
+  trading_agent_notify_action:
+    name: Trading Agent Notify Aktion
+    initial: notify.mobile_app_dein_geraet
+    max: 100
+    icon: mdi:cellphone-message
+  trading_agent_last_notified_run_id:
+    name: Trading Agent Letzte Benachrichtigung
+    initial: ""
+    max: 100
+    icon: mdi:history
+  trading_agent_journal_symbol_filter:
+    name: Trading Agent Journal Marktfilter
+    initial: ""
+    max: 40
+    icon: mdi:currency-usd
+  trading_agent_journal_text_filter:
+    name: Trading Agent Journal Textfilter
+    initial: ""
+    max: 120
+    icon: mdi:text-search
 
 input_boolean:
   trading_agent_scheduling_aktiv:
     name: Trading Agent Scheduling aktiv
     initial: false
     icon: mdi:calendar-clock
+  trading_agent_push_aktiv:
+    name: Trading Agent Push aktiv
+    initial: false
+    icon: mdi:bell-ring-outline
 
 input_datetime:
   trading_agent_schedule_time:
@@ -103,6 +139,32 @@ command_line:
         - trade_count
         - recent_entries
       scan_interval: 60
+  - sensor:
+      name: Trading Agent Run Summary
+      unique_id: trading_agent_run_summary
+      command: >-
+        cat /share/trading-agent-data/run_summary.json 2>/dev/null || echo '{"run_id":"unknown","mode":null,"environment":null,"started_at":null,"finished_at":null,"success":null,"exit_code":null,"suite":null,"entry_count":0,"cycle_count":0,"order_count":0,"trade_count":0,"symbols":[],"latest_symbol":null,"latest_outcome":null,"title":null,"notification_title":null,"notification_message":null,"summary_lines":[]}'
+      value_template: "{{ value_json.run_id | default('unknown') }}"
+      json_attributes:
+        - mode
+        - environment
+        - started_at
+        - finished_at
+        - success
+        - exit_code
+        - suite
+        - entry_count
+        - cycle_count
+        - order_count
+        - trade_count
+        - symbols
+        - latest_symbol
+        - latest_outcome
+        - title
+        - notification_title
+        - notification_message
+        - summary_lines
+      scan_interval: 30
 
 shell_command:
   trading_agent_save_operator_config_haos: >-
@@ -226,3 +288,45 @@ automation:
         state: "on"
     actions:
       - action: script.trading_agent_scharf_lauf_haos
+
+  - alias: Trading Agent Push nach Lauf
+    id: trading_agent_push_nach_lauf
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.trading_agent_run_summary
+    conditions:
+      - condition: state
+        entity_id: input_boolean.trading_agent_push_aktiv
+        state: "on"
+      - condition: template
+        value_template: >-
+          {% set run_id = states('sensor.trading_agent_run_summary') %}
+          {{ run_id not in [None, '', 'unknown', 'unavailable'] and run_id != states('input_text.trading_agent_last_notified_run_id') }}
+    actions:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ states('input_text.trading_agent_notify_action') | trim != '' }}"
+            sequence:
+              - action: "{{ states('input_text.trading_agent_notify_action') | trim }}"
+                data:
+                  title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
+                  message: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_message') or 'Trading Agent Lauf abgeschlossen.' }}"
+                  data:
+                    tag: trading-agent-last-run
+                    clickAction: /trading-agent
+                    url: /trading-agent
+        default:
+          - action: persistent_notification.create
+            data:
+              title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
+              message: >-
+                {% for line in state_attr('sensor.trading_agent_run_summary', 'summary_lines') or [] %}
+                - {{ line }}
+                {% endfor %}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.trading_agent_last_notified_run_id
+        data:
+          value: "{{ states('sensor.trading_agent_run_summary') }}"
