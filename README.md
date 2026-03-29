@@ -28,7 +28,7 @@ Gegentrend-Signale:
 - unterhalb des unteren Bands => `COUNTERTREND_LONG`
 - Pro Regime und Richtung darf es nur ein valides Gegentrend-Signal geben.
 
-Der Pine-Verifier in [artifacts/tradingview_strategy_indicator.pine](artifacts/tradingview_strategy_indicator.pine) bildet diese Regeln fuer die visuelle Verifikation im Chart nach.
+Der Pine-Verifier in [artifacts/tradingview_strategy_indicator.pine](artifacts/tradingview_strategy_indicator.pine) bildet diese Regeln mit denselben kanonischen Live-Defaults fuer die visuelle Verifikation im Chart nach.
 
 ## Environment Setup
 
@@ -388,9 +388,20 @@ Das Skript:
 - laedt echte historische Hyperliquid-Candles ueber den bestehenden Historical Provider
 - replayt rollierende Marktfenster durch die echte Strategy-/Agent-Pipeline
 - verwendet pro Kandidat ein Analysefenster mit Warmup-Historie vor dem eigentlichen Triggerfenster
+- verwendet dabei immer dieselbe kanonische Strategy-Basis-Config wie der Live-Pfad
 - sucht pro Golden-Szenario bis zu 2 echte Marktbeispiele fuer die manuelle Review
-- exportiert die Review-Daten zusaetzlich als JSON und als flache CSV-Tabelle mit getrennten Zeit-, Actual-, Expected-, Analysefenster- und Match-Spalten
+- exportiert die Review-Daten zusaetzlich als JSON und als flache CSV-Tabelle mit getrennten Zeit-, Actual-, Expected-, Analysefenster-, Match- und Config-Spalten
 - fuehrt keine Trades und keine Submit-Logik aus
+
+Fuer einen 1:1-Abgleich einzelner Faelle mit TradingView gibt es zusaetzlich:
+`.\.venv\Scripts\python.exe scripts/export_strategy_diagnostics.py --coin BTC --interval 1d --end-date 2026-03-26 --lookback-bars 220`
+
+Das Diagnose-Skript exportiert pro Bar unter anderem:
+- OHLC
+- Bollinger Upper/Middle/Lower
+- Regime und `bars_since_regime_start`
+- Trend-/Gegentrend-Validitaet plus Reason
+- Decision-Action und Order-Praesenz
 
 ## Run All Golden Scenarios
 

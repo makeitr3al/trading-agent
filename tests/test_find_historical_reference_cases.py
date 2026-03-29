@@ -22,6 +22,7 @@ from scripts.find_historical_reference_cases import (
     score_scenario_match,
     serialize_candidates,
 )
+from config.strategy_config import StrategyConfig
 from models.candle import Candle
 
 
@@ -82,6 +83,13 @@ def _make_candidate() -> HistoricalReferenceCandidate:
         search_lookback_bars=800,
         total_fetch_bars=1000,
         warmup_ok=True,
+        bollinger_period=12,
+        bollinger_std_dev=2.0,
+        macd_fast_period=12,
+        macd_slow_period=26,
+        macd_signal_period=9,
+        outside_buffer_pct=0.2,
+        min_bandwidth_ratio=0.7,
         start_timestamp="2026-01-01T00:00:00+00:00",
         end_timestamp="2026-01-20T00:00:00+00:00",
         analysis_start_timestamp="2025-06-15T00:00:00+00:00",
@@ -225,6 +233,13 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     assert csv_rows[0]["search_lookback_bars"] == "800"
     assert csv_rows[0]["total_fetch_bars"] == "1000"
     assert csv_rows[0]["warmup_ok"] == "yes"
+    assert csv_rows[0]["bollinger_period"] == "12"
+    assert csv_rows[0]["bollinger_std_dev"] == "2.0"
+    assert csv_rows[0]["macd_fast_period"] == "12"
+    assert csv_rows[0]["macd_slow_period"] == "26"
+    assert csv_rows[0]["macd_signal_period"] == "9"
+    assert csv_rows[0]["outside_buffer_pct"] == "0.2"
+    assert csv_rows[0]["min_bandwidth_ratio"] == "0.7"
     assert csv_rows[0]["actual_break_even_activated"] == "n/a"
     assert csv_rows[0]["expected_countertrend_signal_type"] == "n/a"
     assert csv_rows[0]["match_countertrend_signal_type"] == "n/a"
@@ -244,9 +259,11 @@ def test_export_helper_serializes_basic_candidate_data_correctly(tmp_path: Path)
     assert "warmup_bars" in csv_content
     assert "required_warmup_bars" in csv_content
     assert "search_lookback_bars" in csv_content
+    assert "bollinger_period" in csv_content
+    assert "macd_fast_period" in csv_content
     assert "actual_inside_margin" in csv_content
     assert "actual_bb_upper" in csv_content
-    assert "scenario,1,7,BTC,20,220,200,200,200,800,1000,yes" in csv_content
+    assert "scenario,1,7,BTC,20,220,200,200,200,800,1000,yes,12,2.0,12,26,9,0.2,0.7" in csv_content
 
 
 def test_chronological_windows_keep_original_order() -> None:
@@ -321,3 +338,9 @@ def test_resolve_replay_warmup_bars_uses_indicator_requirement_when_higher() -> 
 
 def test_total_fetch_bars_adds_search_space_and_effective_warmup() -> None:
     assert _resolve_total_fetch_bars(800, 150) == 950
+
+
+def test_resolve_replay_warmup_bars_matches_canonical_live_config() -> None:
+    config = StrategyConfig()
+
+    assert _resolve_replay_warmup_bars(config, DEFAULT_MIN_WARMUP_BARS) == DEFAULT_MIN_WARMUP_BARS

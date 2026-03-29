@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -18,3 +22,10 @@ class StrategyConfig(BaseModel):
     buy_spread: float = 0.0
     outside_band_sweet_spot: float = 0.0
     trading_times: list[str] = ["07:00"]
+
+
+def build_strategy_config(**overrides: Any) -> StrategyConfig:
+    base = StrategyConfig()
+    if not overrides:
+        return base
+    return StrategyConfig(**{**base.model_dump(), **overrides})

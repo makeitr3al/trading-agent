@@ -14,7 +14,7 @@ from app.trading_app import run_app_cycle
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.symbol_service import HyperliquidSymbolService
-from config.strategy_config import StrategyConfig
+from config.strategy_config import build_strategy_config
 from data.providers import get_data_provider
 from data.providers.golden_data_provider import _load_golden_scenario
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
@@ -148,7 +148,13 @@ def _run_single_cycle(
     current_utc_datetime = datetime.now(timezone.utc)
     print(f"Running app cycle at {current_utc_datetime.isoformat()}")
     data_batch = data_provider.get_data()
-    strategy_config = (data_batch.config or StrategyConfig()).copy(update={"buy_spread": live_buy_spread})
+    strategy_overrides = data_batch.config.model_dump() if data_batch.config is not None else {}
+    strategy_config = build_strategy_config(
+        **{
+            **strategy_overrides,
+            "buy_spread": live_buy_spread,
+        }
+    )
     print(f"source_name={data_batch.source_name}")
     print(f"live_buy_spread={live_buy_spread}")
     if runner_settings.data_source == "golden" and runner_settings.golden_scenario:

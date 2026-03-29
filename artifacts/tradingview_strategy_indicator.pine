@@ -1,4 +1,5 @@
 //@version=6
+// Default inputs mirror the canonical live StrategyConfig defaults from the Python bot.
 indicator("Propr Strategy Verifier", shorttitle="PR Verify", overlay=true, max_labels_count=500)
 
 bollingerPeriod = input.int(12, "Bollinger Period", minval=1)

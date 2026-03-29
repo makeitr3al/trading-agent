@@ -12,7 +12,7 @@ from app.trading_app import run_app_cycle
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.symbol_service import HyperliquidSymbolService
-from config.strategy_config import StrategyConfig
+from config.strategy_config import build_strategy_config
 from data.providers import get_data_provider
 from data.providers.golden_data_provider import _load_golden_scenario
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
@@ -150,7 +150,8 @@ def main() -> None:
             hyperliquid_config=hyperliquid_config,
         )
         data_batch = data_provider.get_data()
-        strategy_config = data_batch.config or StrategyConfig()
+        strategy_overrides = data_batch.config.model_dump() if data_batch.config is not None else {}
+        strategy_config = build_strategy_config(**strategy_overrides)
 
         live_buy_spread = 0.0
         if hyperliquid_config is not None:
@@ -159,7 +160,12 @@ def main() -> None:
                 require_for_execution=effective_allow_execution,
             )
             print(f"Live buy spread: {live_buy_spread}")
-            strategy_config = strategy_config.copy(update={"buy_spread": live_buy_spread})
+            strategy_config = build_strategy_config(
+                **{
+                    **strategy_config.model_dump(),
+                    "buy_spread": live_buy_spread,
+                }
+            )
 
         symbol_spec = None
         try:

@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from config.strategy_config import StrategyConfig, build_strategy_config
 from data.providers.golden_data_provider import _discover_scenario_builders, _load_strategy_scenarios_module
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from indicators.bollinger import compute_bollinger_bands
@@ -55,6 +56,13 @@ class HistoricalReferenceCandidate:
     search_lookback_bars: int
     total_fetch_bars: int
     warmup_ok: bool
+    bollinger_period: int
+    bollinger_std_dev: float
+    macd_fast_period: int
+    macd_slow_period: int
+    macd_signal_period: int
+    outside_buffer_pct: float
+    min_bandwidth_ratio: float
     start_timestamp: str
     end_timestamp: str
     analysis_start_timestamp: str
@@ -350,11 +358,15 @@ def _calculate_window_diagnostics(candles: list[Candle], config: Any) -> dict[st
     }
 
 
-def _evaluate_window(scenario: Any, candles: list[Candle]) -> tuple[Any, AgentState | None]:
+def _evaluate_window(
+    scenario: Any,
+    candles: list[Candle],
+    strategy_config: StrategyConfig,
+) -> tuple[Any, AgentState | None]:
     if _uses_agent_cycle(scenario):
         result, post_state = run_agent_cycle(
             candles=candles,
-            config=scenario.config,
+            config=strategy_config,
             account_balance=scenario.account_balance,
             state=_build_initial_agent_state(scenario),
         )
@@ -362,7 +374,7 @@ def _evaluate_window(scenario: Any, candles: list[Candle]) -> tuple[Any, AgentSt
 
     result = run_strategy_cycle(
         candles=candles,
-        config=scenario.config,
+        config=strategy_config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
     )
@@ -476,6 +488,7 @@ def _build_candidate(
     required_warmup_bars: int,
     search_lookback_bars: int,
     total_fetch_bars: int,
+    strategy_config: StrategyConfig,
 ) -> HistoricalReferenceCandidate:
     analysis_candles = replay_window.analysis_candles
     trigger_candles = replay_window.trigger_candles
@@ -490,7 +503,7 @@ def _build_candidate(
     countertrend_signal_valid = countertrend_signal.is_valid if countertrend_signal is not None else None
     countertrend_signal_type = countertrend_signal.signal_type.value if countertrend_signal is not None else None
     break_even_activated = updated_trade.break_even_activated if updated_trade is not None else None
-    diagnostics = _calculate_window_diagnostics(analysis_candles, scenario.config)
+    diagnostics = _calculate_window_diagnostics(analysis_candles, strategy_config)
 
     return HistoricalReferenceCandidate(
         scenario_name=scenario.name,
@@ -504,6 +517,13 @@ def _build_candidate(
         search_lookback_bars=search_lookback_bars,
         total_fetch_bars=total_fetch_bars,
         warmup_ok=replay_window.warmup_bars >= required_warmup_bars,
+        bollinger_period=strategy_config.bollinger_period,
+        bollinger_std_dev=strategy_config.bollinger_std_dev,
+        macd_fast_period=strategy_config.macd_fast_period,
+        macd_slow_period=strategy_config.macd_slow_period,
+        macd_signal_period=strategy_config.macd_signal_period,
+        outside_buffer_pct=strategy_config.outside_buffer_pct,
+        min_bandwidth_ratio=strategy_config.min_bandwidth_ratio,
         start_timestamp=trigger_candles[0].timestamp.isoformat(),
         end_timestamp=trigger_candles[-1].timestamp.isoformat(),
         analysis_start_timestamp=analysis_candles[0].timestamp.isoformat(),
@@ -605,6 +625,13 @@ def flatten_candidates_for_csv(
                 "search_lookback_bars": candidate.search_lookback_bars,
                 "total_fetch_bars": candidate.total_fetch_bars,
                 "warmup_ok": candidate.warmup_ok,
+                "bollinger_period": candidate.bollinger_period,
+                "bollinger_std_dev": candidate.bollinger_std_dev,
+                "macd_fast_period": candidate.macd_fast_period,
+                "macd_slow_period": candidate.macd_slow_period,
+                "macd_signal_period": candidate.macd_signal_period,
+                "outside_buffer_pct": candidate.outside_buffer_pct,
+                "min_bandwidth_ratio": candidate.min_bandwidth_ratio,
                 "window_start_timestamp": candidate.start_timestamp,
                 "window_start_date": candidate.start_timestamp.split("T", 1)[0],
                 "window_end_timestamp": candidate.end_timestamp,
@@ -689,6 +716,8 @@ def export_candidates_csv(
         "scenario_name", "candidate_rank", "score", "coin", "window_size_bars",
         "analysis_window_size_bars", "warmup_bars", "required_warmup_bars",
         "actual_warmup_bars", "search_lookback_bars", "total_fetch_bars", "warmup_ok",
+        "bollinger_period", "bollinger_std_dev", "macd_fast_period", "macd_slow_period",
+        "macd_signal_period", "outside_buffer_pct", "min_bandwidth_ratio",
         "window_start_timestamp", "window_start_date", "window_end_timestamp", "window_end_date",
         "analysis_start_timestamp", "analysis_start_date", "analysis_end_timestamp", "analysis_end_date",
         "trigger_timestamp", "trigger_date", "actual_decision_action", "actual_selected_signal_type",
@@ -735,6 +764,7 @@ def _summarize_results(candidates_by_scenario: dict[str, list[HistoricalReferenc
             print(f"    search_lookback_bars: {candidate.search_lookback_bars}")
             print(f"    total_fetch_bars: {candidate.total_fetch_bars}")
             print(f"    warmup_ok: {candidate.warmup_ok}")
+            print(f"    config: bb=({candidate.bollinger_period}, {candidate.bollinger_std_dev}) macd=({candidate.macd_fast_period}, {candidate.macd_slow_period}, {candidate.macd_signal_period}) outside_buffer_pct={candidate.outside_buffer_pct} min_bandwidth_ratio={candidate.min_bandwidth_ratio}")
             print(f"    decision_action: {candidate.decision_action}")
             print(f"    selected_signal_type: {candidate.selected_signal_type}")
             print(f"    trend_signal_valid: {candidate.trend_signal_valid}")
@@ -765,9 +795,9 @@ def main() -> None:
 
         hyperliquid_config = load_hyperliquid_config_from_env()
         scenarios = load_all_golden_scenarios()
+        canonical_strategy_config = build_strategy_config()
 
-        scenario_warmups = [_resolve_replay_warmup_bars(scenario.config, args.min_warmup_bars) for scenario in scenarios]
-        max_required_warmup_bars = max(scenario_warmups, default=args.min_warmup_bars)
+        max_required_warmup_bars = _resolve_replay_warmup_bars(canonical_strategy_config, args.min_warmup_bars)
         total_fetch_bars = _resolve_total_fetch_bars(args.search_lookback_bars, max_required_warmup_bars)
         scan_hyperliquid_config = hyperliquid_config.model_copy(update={"lookback_bars": total_fetch_bars})
 
@@ -777,6 +807,7 @@ def main() -> None:
         print(f"min_warmup_bars: {args.min_warmup_bars}")
         print(f"max_required_warmup_bars: {max_required_warmup_bars}")
         print(f"total_fetch_bars: {total_fetch_bars}")
+        print(f"canonical_strategy_config: {canonical_strategy_config.model_dump()}")
         print(f"Golden scenarios: {len(scenarios)}")
 
         live_batch = HyperliquidHistoricalProvider(scan_hyperliquid_config).fetch_candles()
@@ -784,7 +815,7 @@ def main() -> None:
 
         for scenario in scenarios:
             window_size = len(scenario.candles)
-            replay_warmup_bars = _resolve_replay_warmup_bars(scenario.config, args.min_warmup_bars)
+            replay_warmup_bars = _resolve_replay_warmup_bars(canonical_strategy_config, args.min_warmup_bars)
             windows = build_replay_windows(
                 live_batch.candles,
                 window_size,
@@ -792,7 +823,11 @@ def main() -> None:
                 search_lookback_bars=args.search_lookback_bars,
             )
             for replay_window in windows:
-                strategy_result, post_state = _evaluate_window(scenario, replay_window.analysis_candles)
+                strategy_result, post_state = _evaluate_window(
+                    scenario,
+                    replay_window.analysis_candles,
+                    canonical_strategy_config,
+                )
                 score, match_comment = _score_scenario_match_with_comment(
                     scenario=scenario,
                     strategy_result=strategy_result,
@@ -812,6 +847,7 @@ def main() -> None:
                     required_warmup_bars=replay_warmup_bars,
                     search_lookback_bars=args.search_lookback_bars,
                     total_fetch_bars=total_fetch_bars,
+                    strategy_config=canonical_strategy_config,
                 )
                 candidates_by_scenario[scenario.name] = keep_best_candidates(candidates_by_scenario[scenario.name], candidate)
 

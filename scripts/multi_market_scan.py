@@ -13,7 +13,7 @@ from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.symbol_service import HyperliquidSymbolService
 from config.hyperliquid_config import HyperliquidConfig
-from config.strategy_config import StrategyConfig
+from config.strategy_config import StrategyConfig, build_strategy_config
 from data.providers import get_data_provider
 from data.providers.base import DataBatch
 from data.providers.golden_data_provider import _load_golden_scenario
@@ -190,7 +190,13 @@ def _build_data_batch_and_config(
         )
 
     data_batch = data_provider.get_data()
-    strategy_config = (data_batch.config or StrategyConfig()).copy(update={"buy_spread": live_buy_spread})
+    strategy_overrides = data_batch.config.model_dump() if data_batch.config is not None else {}
+    strategy_config = build_strategy_config(
+        **{
+            **strategy_overrides,
+            "buy_spread": live_buy_spread,
+        }
+    )
     return data_batch, strategy_config, live_buy_spread
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from config.strategy_config import StrategyConfig
+from config.strategy_config import build_strategy_config
 from data.providers.base import DataBatch
 from models.candle import Candle
 
@@ -73,5 +73,5 @@ class LiveDataProvider:
             candles=candles,
             symbol=None,
             source_name="live_stub",
-            config=StrategyConfig(),
+            config=build_strategy_config(),
         )
