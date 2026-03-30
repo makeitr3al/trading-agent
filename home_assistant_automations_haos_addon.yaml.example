@@ -14,16 +14,18 @@
   actions:
     - action: script.trading_agent_scharf_lauf_haos
 
-- alias: Trading Agent Journal Panel Sync
-  id: trading_agent_journal_panel_sync
+- alias: Trading Agent Panel Assets Sync
+  id: trading_agent_panel_assets_sync
   mode: restart
   triggers:
     - trigger: homeassistant
       event: start
     - trigger: state
-      entity_id: sensor.trading_agent_run_summary
+      entity_id:
+        - sensor.trading_agent_run_summary
+        - sensor.trading_agent_live_status
   actions:
-    - action: shell_command.trading_agent_sync_journal_table_haos
+    - action: shell_command.trading_agent_sync_panel_assets_haos
 
 - alias: Trading Agent Push nach Lauf
   id: trading_agent_push_nach_lauf
@@ -40,27 +42,14 @@
         {% set run_id = states('sensor.trading_agent_run_summary') %}
         {{ run_id not in [None, '', 'unknown', 'unavailable'] and run_id != states('input_text.trading_agent_last_notified_run_id') }}
   actions:
-    - choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ states('input_text.trading_agent_notify_action') | trim != '' }}"
-          sequence:
-            - action: "{{ states('input_text.trading_agent_notify_action') | trim }}"
-              data:
-                title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
-                message: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_message') or 'Trading Agent Lauf abgeschlossen.' }}"
-                data:
-                  tag: trading-agent-last-run
-                  clickAction: /trading-agent-admin
-                  url: /trading-agent-admin
-      default:
-        - action: persistent_notification.create
-          data:
-            title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
-            message: >-
-              {% for line in state_attr('sensor.trading_agent_run_summary', 'summary_lines') or [] %}
-              - {{ line }}
-              {% endfor %}
+    - action: notify.mobile_app_dominics_iphone
+      data:
+        title: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_title') or 'Trading Agent' }}"
+        message: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_message') or 'Trading Agent Lauf abgeschlossen.' }}"
+        data:
+          tag: trading-agent-last-run
+          clickAction: /trading-agent-admin
+          url: /trading-agent-admin
     - action: input_text.set_value
       target:
         entity_id: input_text.trading_agent_last_notified_run_id

@@ -1,4 +1,4 @@
-﻿title: Trading Agent
+title: Trading Agent
 views:
   - title: Trading Agent
     path: trading-agent
@@ -10,17 +10,14 @@ views:
           - input_select.trading_agent_mode
           - input_select.trading_agent_environment
           - input_number.trading_agent_leverage
+          - input_boolean.trading_agent_push_aktiv
           - script.trading_agent_jetzt_ausfuehren_haos
           - script.trading_agent_preflight_test_haos
-      - type: entities
-        title: Benachrichtigungen
-        entities:
-          - input_boolean.trading_agent_push_aktiv
-          - input_text.trading_agent_notify_action
       - type: entities
         title: Status
         entities:
           - sensor.trading_agent_operator_config
+          - sensor.trading_agent_live_status
           - sensor.trading_agent_run_summary
           - sensor.trading_agent_tests
           - sensor.trading_agent_journal
@@ -32,8 +29,8 @@ views:
 
           Dort findest du:
           - Steuerung des Add-ons
+          - Live-Status mit PnL und offenen Positionen
           - Status und letzte Run Summary
-          - Push-Konfiguration
           - Journal als echte Tabelle mit Filtern, Suche und Pagination
       - type: markdown
         title: Letzter Testlauf
@@ -55,4 +52,3 @@ views:
           `{{ line }}`
           {% endfor %}
           {% endif %}
-

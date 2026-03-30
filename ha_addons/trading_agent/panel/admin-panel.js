@@ -1,4 +1,4 @@
-﻿const PANEL_NAME = "trading-agent-admin-panel";
+const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
 const HOME_URL = "/lovelace";
 
@@ -11,8 +11,8 @@ const ENTITIES = {
   scheduleEnabled: "input_boolean.trading_agent_scheduling_aktiv",
   scheduleTime: "input_datetime.trading_agent_schedule_time",
   pushEnabled: "input_boolean.trading_agent_push_aktiv",
-  notifyAction: "input_text.trading_agent_notify_action",
   operatorConfig: "sensor.trading_agent_operator_config",
+  liveStatus: "sensor.trading_agent_live_status",
   runSummary: "sensor.trading_agent_run_summary",
   tests: "sensor.trading_agent_tests",
   journal: "sensor.trading_agent_journal",
@@ -97,6 +97,17 @@ function formatValue(value) {
     }
   }
   return escapeHtml(value);
+}
+
+function formatPnl(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return escapeHtml(value);
+  return new Intl.NumberFormat("de-CH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: "always",
+  }).format(numeric);
 }
 
 function badgeClass(value) {
@@ -378,9 +389,9 @@ class TradingAgentAdminPanel extends HTMLElement {
   statusCard(title, rows) {
     return `<section class="card"><h3>${escapeHtml(title)}</h3><div class="status-list">${rows
       .map(
-        ([label, value, useBadge]) =>
+        ([label, value, useBadge, formatter]) =>
           `<div class="status-row"><span class="label">${escapeHtml(label)}</span><span class="value">${
-            useBadge ? `<span class="pill ${badgeClass(value)}">${formatValue(value)}</span>` : formatValue(value)
+            useBadge ? `<span class="pill ${badgeClass(value)}">${formatter ? formatter(value) : formatValue(value)}</span>` : formatter ? formatter(value) : formatValue(value)
           }</span></div>`
       )
       .join("")}</div></section>`;
@@ -397,12 +408,10 @@ class TradingAgentAdminPanel extends HTMLElement {
           ${this.field(ENTITIES.markets)}
           ${this.field(ENTITIES.addonSlug)}
         </div>
-        <div class="toggle-row">${this.field(ENTITIES.scheduleEnabled, "checkbox")}</div>
-      </section>
-      <section class="card">
-        <h3>Benachrichtigungen</h3>
-        <div class="grid two">${this.field(ENTITIES.notifyAction)}</div>
-        <div class="toggle-row">${this.field(ENTITIES.pushEnabled, "checkbox")}</div>
+        <div class="toggle-row">
+          ${this.field(ENTITIES.scheduleEnabled, "checkbox")}
+          ${this.field(ENTITIES.pushEnabled, "checkbox")}
+        </div>
       </section>
       <section class="card">
         <h3>Aktionen</h3>
@@ -414,6 +423,7 @@ class TradingAgentAdminPanel extends HTMLElement {
   statusTab() {
     const journal = this.effectiveJournal();
     const operator = this.entity(ENTITIES.operatorConfig);
+    const liveStatus = this.entity(ENTITIES.liveStatus);
     const runSummary = this.entity(ENTITIES.runSummary);
     const tests = this.entity(ENTITIES.tests);
     const journalSensor = this.entity(ENTITIES.journal);
@@ -427,6 +437,14 @@ class TradingAgentAdminPanel extends HTMLElement {
           ["Maerkte", operator?.attributes?.markets],
           ["Scheduling", operator?.attributes?.scheduling_enabled],
           ["Zeit", operator?.attributes?.schedule_time],
+        ])}
+        ${this.statusCard("Live-Status", [
+          ["PnL", liveStatus?.attributes?.account_unrealized_pnl, false, formatPnl],
+          ["Offene Positionen", liveStatus?.attributes?.account_open_positions_count],
+          ["Quelle", liveStatus?.state, true],
+          ["WebSocket verbunden", liveStatus?.attributes?.websocket_connected, true],
+          ["Letztes Update", liveStatus?.attributes?.updated_at],
+          ["Letzter Fehler", liveStatus?.attributes?.last_error],
         ])}
         ${this.statusCard("Letzter Lauf", [
           ["Run ID", runSummary?.state],
@@ -499,7 +517,7 @@ class TradingAgentAdminPanel extends HTMLElement {
                 .map((column) =>
                   column.sortable
                     ? `<th><button class="sort" data-action="sort" data-table="${name}" data-key="${column.key}">${escapeHtml(column.label)}${
-                        state.sortKey === column.key ? ` ${state.sortDirection === "asc" ? "↑" : "↓"}` : ""
+                        state.sortKey === column.key ? ` ${state.sortDirection === "asc" ? "asc" : "desc"}` : ""
                       }</button></th>`
                     : `<th>${escapeHtml(column.label)}</th>`
                 )
@@ -532,6 +550,7 @@ class TradingAgentAdminPanel extends HTMLElement {
                         `<tr>${columns
                           .map((column) => {
                             const value = cellValue(row, column);
+                            if (column.key === "pnl") return `<td>${formatPnl(value)}</td>`;
                             if (column.key.includes("timestamp")) return `<td>${formatValue(value)}</td>`;
                             if (column.badge) return `<td><span class="pill ${badgeClass(value)}">${formatValue(value)}</span></td>`;
                             if (column.boolean) return `<td>${value ? "Ja" : "Nein"}</td>`;
@@ -629,6 +648,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
   }
   render() {
+    const liveStatus = this.entity(ENTITIES.liveStatus);
     const journal = this.effectiveJournal();
     const title = this.panelConfig?.config?.title || "Trading Agent";
     const body =
@@ -708,7 +728,8 @@ class TradingAgentAdminPanel extends HTMLElement {
         </div>
         <div class="chips">
           <span class="chip">Run ID: ${formatValue(this.entity(ENTITIES.runSummary)?.state)}</span>
-          <span class="chip">Journal: ${formatValue(journal.entry_count_total)}</span>
+          <span class="chip">PnL: ${formatPnl(liveStatus?.attributes?.account_unrealized_pnl)}</span>
+          <span class="chip">Offene Positionen: ${formatValue(liveStatus?.attributes?.account_open_positions_count)}</span>
           <span class="chip">Tests: ${formatValue(this.entity(ENTITIES.tests)?.state)}</span>
         </div>
       </section>
@@ -721,3 +742,15 @@ class TradingAgentAdminPanel extends HTMLElement {
 if (!customElements.get(PANEL_NAME)) {
   customElements.define(PANEL_NAME, TradingAgentAdminPanel);
 }
+
+
+
+
+
+
+
+
+
+
+
+

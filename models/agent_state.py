@@ -19,3 +19,4 @@ class AgentState(BaseModel):
     last_cycle_timestamp: str | None = None
     account_open_entry_orders_count: int = 0
     account_open_positions_count: int = 0
+    account_unrealized_pnl: float | None = None

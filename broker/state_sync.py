@@ -40,6 +40,10 @@ def _to_decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _extract_decimal(payload: dict[str, Any], keys: list[str]) -> Decimal | None:
+    return _to_decimal(_get_first(payload, keys))
+
+
 def _normalize_side(value: Any) -> str | None:
     if value is None:
         return None
@@ -220,6 +224,61 @@ def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
     )
 
 
+def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[dict]) -> float | None:
+    top_level_keys = [
+        "accountUnrealizedPnl",
+        "account_unrealized_pnl",
+        "totalUnrealizedPnl",
+        "total_unrealized_pnl",
+        "totalOpenPnl",
+        "total_open_pnl",
+        "unrealizedPnl",
+        "unrealized_pnl",
+    ]
+    if isinstance(positions_payload, dict):
+        direct_value = _extract_decimal(positions_payload, top_level_keys)
+        if direct_value is not None:
+            return float(direct_value)
+
+        for nested_key in ["account", "summary", "totals", "meta"]:
+            nested_payload = positions_payload.get(nested_key)
+            if isinstance(nested_payload, dict):
+                nested_value = _extract_decimal(nested_payload, top_level_keys)
+                if nested_value is not None:
+                    return float(nested_value)
+
+    per_position_keys = [
+        "unrealizedPnl",
+        "unrealized_pnl",
+        "unrealisedPnl",
+        "unrealised_pnl",
+        "openPnl",
+        "open_pnl",
+        "upl",
+        "pnl",
+        "profitLoss",
+        "profit_loss",
+    ]
+    total = Decimal("0")
+    found_component = False
+    for item in _get_items(positions_payload):
+        if map_propr_position_to_internal(item) is None:
+            continue
+        pnl_value = _extract_decimal(item, per_position_keys)
+        if pnl_value is None:
+            continue
+        total += pnl_value
+        found_component = True
+
+    if found_component:
+        return float(total)
+    return None
+
+
+def _extract_account_open_positions_count_from_payload(positions_payload: dict | list[dict]) -> int:
+    return sum(1 for item in _get_items(positions_payload) if map_propr_position_to_internal(item) is not None)
+
+
 def build_agent_state_from_propr_data(
     orders_payload: dict | list[dict],
     positions_payload: dict | list[dict],
@@ -290,6 +349,8 @@ def build_agent_state_from_propr_data(
         pending_order, pending_order_id = valid_order_entries[0]
 
     active_trade = mapped_positions[0] if mapped_positions else None
+    account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
+    account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
 
     if previous_state is None:
         return AgentState(
@@ -299,7 +360,8 @@ def build_agent_state_from_propr_data(
             stop_loss_order_id=stop_loss_order_id,
             take_profit_order_id=take_profit_order_id,
             account_open_entry_orders_count=len(all_valid_order_entries),
-            account_open_positions_count=len(all_mapped_positions),
+            account_open_positions_count=account_open_positions_count,
+            account_unrealized_pnl=account_unrealized_pnl,
         )
 
     return previous_state.model_copy(
@@ -310,7 +372,8 @@ def build_agent_state_from_propr_data(
             "stop_loss_order_id": stop_loss_order_id,
             "take_profit_order_id": take_profit_order_id,
             "account_open_entry_orders_count": len(all_valid_order_entries),
-            "account_open_positions_count": len(all_mapped_positions),
+            "account_open_positions_count": account_open_positions_count,
+            "account_unrealized_pnl": account_unrealized_pnl,
         }
     )
 
@@ -334,7 +397,8 @@ def sync_agent_state_from_propr(
 __all__ = [
     "map_propr_order_to_internal",
     "map_propr_position_to_internal",
+    "_extract_account_open_positions_count_from_payload",
+    "_extract_account_unrealized_pnl_from_payload",
     "build_agent_state_from_propr_data",
     "sync_agent_state_from_propr",
 ]
-

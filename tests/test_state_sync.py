@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from broker.state_sync import (
+    _extract_account_unrealized_pnl_from_payload,
     build_agent_state_from_propr_data,
     map_propr_order_to_internal,
     map_propr_position_to_internal,
@@ -523,3 +524,90 @@ def test_sync_agent_state_from_propr_allows_multiple_account_positions_when_symb
     assert state.active_trade is not None
     assert state.active_trade.position_id == "btc-position"
     assert state.account_open_positions_count == 2
+
+
+def test_build_agent_state_from_propr_data_prefers_account_level_unrealized_pnl() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "accountUnrealizedPnl": "42.5",
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "btc-position",
+                    "unrealizedPnl": "10.0",
+                },
+                {
+                    "symbol": "ETH/USDC",
+                    "status": "open",
+                    "positionSide": "short",
+                    "entry": 100,
+                    "stopLoss": 105,
+                    "takeProfit": 90,
+                    "quantity": "2",
+                    "positionId": "eth-position",
+                    "unrealizedPnl": "5.0",
+                },
+            ],
+        },
+        symbol="BTC/USDC",
+    )
+
+    assert state.account_open_positions_count == 2
+    assert state.account_unrealized_pnl == 42.5
+
+
+def test_extract_account_unrealized_pnl_from_payload_aggregates_open_positions_when_account_value_missing() -> None:
+    pnl = _extract_account_unrealized_pnl_from_payload(
+        {
+            "data": [
+                {
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "unrealizedPnl": "12.25",
+                },
+                {
+                    "status": "open",
+                    "positionSide": "short",
+                    "entry": 100,
+                    "stopLoss": 105,
+                    "takeProfit": 90,
+                    "quantity": "2",
+                    "profitLoss": "-2.75",
+                },
+            ]
+        }
+    )
+
+    assert pnl == 9.5
+
+
+def test_extract_account_unrealized_pnl_from_payload_returns_none_when_payload_has_no_pnl() -> None:
+    pnl = _extract_account_unrealized_pnl_from_payload(
+        {
+            "data": [
+                {
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                }
+            ]
+        }
+    )
+
+    assert pnl is None
+
+

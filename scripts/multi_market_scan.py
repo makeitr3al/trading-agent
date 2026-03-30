@@ -9,8 +9,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.trading_app import MAX_OPEN_ORDER_TRADE_SLOTS, run_app_cycle
+from broker.challenge_service import get_active_challenge_context
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
+from broker.state_sync import sync_agent_state_from_propr
 from broker.symbol_service import HyperliquidSymbolService
 from config.hyperliquid_config import HyperliquidConfig
 from config.strategy_config import StrategyConfig, build_strategy_config
@@ -24,6 +26,7 @@ from utils.env_loader import (
     load_multi_market_scan_settings_from_env,
     load_propr_config_from_env,
 )
+from utils.live_status import write_live_status_from_state
 
 
 # TODO: Later add persistent scan memory across runs.
@@ -200,13 +203,56 @@ def _build_data_batch_and_config(
     return data_batch, strategy_config, live_buy_spread
 
 
+def _persist_live_status(
+    client: ProprClient,
+    environment: str,
+    symbol: str | None,
+    *,
+    last_error: str | None = None,
+) -> None:
+    try:
+        challenge_context = get_active_challenge_context(client)
+        if challenge_context is None:
+            write_live_status_from_state(
+                environment=environment,
+                state=None,
+                source="poll",
+                last_error=last_error or "no active challenge",
+            )
+            return
+
+        state = sync_agent_state_from_propr(
+            client,
+            challenge_context.account_id,
+            symbol=symbol,
+        )
+        write_live_status_from_state(
+            environment=environment,
+            state=state,
+            source="poll",
+            last_error=last_error,
+        )
+    except Exception as exc:
+        write_live_status_from_state(
+            environment=environment,
+            state=None,
+            source="poll",
+            last_error=last_error or str(exc),
+        )
+
+
 def main() -> None:
     print("Multi-market scan started.")
+    environment = "unknown"
+    primary_symbol: str | None = None
+    client: ProprClient | None = None
 
     try:
         propr_config = load_propr_config_from_env()
+        environment = propr_config.environment
         data_source_settings = load_data_source_settings_from_env()
         scan_settings = load_multi_market_scan_settings_from_env()
+        primary_symbol = scan_settings.symbols[0] if scan_settings.symbols else None
 
         effective_allow_submit = scan_settings.allow_submit and data_source_settings.data_source == "live"
         markets = list(zip(scan_settings.symbols, scan_settings.hyperliquid_coins))
@@ -300,6 +346,8 @@ def main() -> None:
                 )
 
         if not effective_allow_submit:
+            if client is not None:
+                _persist_live_status(client, environment, primary_symbol)
             return
 
         reference_result = scan_results[0]["result"] if scan_results else None
@@ -313,11 +361,13 @@ def main() -> None:
         print(f"Execution slots available: {available_slots}")
         if available_slots <= 0:
             print("No execution slots available. Skipping submits.")
+            _persist_live_status(client, environment, primary_symbol)
             return
 
         selected_candidates = _select_execution_candidates(scan_results, available_slots)
         if not selected_candidates:
             print("No executable signal candidates found.")
+            _persist_live_status(client, environment, primary_symbol)
             return
 
         print("Executing markets:")
@@ -351,8 +401,15 @@ def main() -> None:
                 f"Executed {symbol}: submitted={execution_result.submitted_order}, replaced={execution_result.replaced_order}, "
                 f"skipped_reason={execution_result.skipped_reason}"
             )
+
+        _persist_live_status(client, environment, primary_symbol)
     except Exception as exc:
         print(f"Multi-market scan failed: {exc}")
+        if client is not None:
+            try:
+                _persist_live_status(client, environment, primary_symbol, last_error=str(exc))
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

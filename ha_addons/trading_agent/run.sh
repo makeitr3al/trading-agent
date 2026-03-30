@@ -62,11 +62,13 @@ export SCAN_MARKETS="$OPERATOR_MARKETS"
 export SCAN_CONFIRM="YES"
 export TRADING_JOURNAL_PATH="$OPERATOR_JOURNAL_PATH"
 export RUNNER_STATUS_PATH="$OPERATOR_RUNTIME_STATUS_PATH"
+export TRADING_AGENT_LIVE_STATUS_PATH="$OPERATOR_LIVE_STATUS_PATH"
 
 PANEL_DIR="/config/www/trading-agent"
 PANEL_ASSET_SOURCE="$APP_PATH/ha_addons/trading_agent/panel/admin-panel.js"
 PANEL_ASSET_TARGET="$PANEL_DIR/admin-panel.js"
 PANEL_JOURNAL_TABLE_PATH="$PANEL_DIR/journal_table.json"
+PANEL_LIVE_STATUS_PATH="$PANEL_DIR/live_status.json"
 
 mkdir -p "$PANEL_DIR"
 if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
@@ -111,6 +113,10 @@ run_finished_at="$(date -Iseconds)"
 python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 200 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
 python journal_table.py --path "$OPERATOR_JOURNAL_PATH" --output-path "$OPERATOR_JOURNAL_TABLE_PATH" || true
 cp "$OPERATOR_JOURNAL_TABLE_PATH" "$PANEL_JOURNAL_TABLE_PATH" || true
+if [[ ! -f "$OPERATOR_LIVE_STATUS_PATH" ]]; then
+    python live_status.py --environment "$OPERATOR_ENVIRONMENT" --source poll --websocket-connected false --output-path "$OPERATOR_LIVE_STATUS_PATH" || true
+fi
+cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_PATH" || true
 python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
 
 exit "$run_exit_code"
