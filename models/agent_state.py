@@ -13,6 +13,7 @@ class AgentState(BaseModel):
     last_decision_action: str | None = None
     last_signal_type: str | None = None
     last_regime: str | None = None
+    middle_band_retest_required: bool = False
     trend_signal_consumed_in_regime: bool = False
     countertrend_long_signal_consumed_in_regime: bool = False
     countertrend_short_signal_consumed_in_regime: bool = False

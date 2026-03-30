@@ -13,6 +13,7 @@ from models.runner_result import StrategyRunResult
 from models.signal import SignalState, SignalType
 from models.trade import Trade, TradeDirection, TradeType
 from strategy.agent_cycle import run_agent_cycle
+from models.regime import RegimeState, RegimeType
 
 
 def _make_candles(count: int = 40) -> list[Candle]:
@@ -148,6 +149,39 @@ def _make_result(
         order=order,
         updated_trade=updated_trade,
         close_active_trade=close_active_trade,
+    )
+
+
+def _stub_cycle_context(
+    monkeypatch,
+    candles: list[Candle],
+    bb_upper: float,
+    bb_middle: float,
+    bb_lower: float,
+    regime: RegimeType = RegimeType.BULLISH,
+    bars_since_regime_start: int = 1,
+) -> None:
+    import pandas as pd
+
+    bollinger_df = pd.DataFrame(
+        {
+            "bb_upper": [bb_upper] * len(candles),
+            "bb_middle": [bb_middle] * len(candles),
+            "bb_lower": [bb_lower] * len(candles),
+        }
+    )
+    regime_states = [
+        RegimeState(regime=regime, bars_since_regime_start=bars_since_regime_start)
+        for _ in candles
+    ]
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.compute_bollinger_bands",
+        lambda closes, period, std_dev: bollinger_df,
+    )
+    monkeypatch.setattr(
+        "strategy.agent_cycle.build_regime_states",
+        lambda macd_df: regime_states,
     )
 
 
@@ -396,6 +430,232 @@ def test_run_agent_cycle_blocks_duplicate_countertrend_short_signal_in_same_regi
     assert result.decision.action == DecisionAction.NO_ACTION
     assert new_state.pending_order is None
     assert new_state.countertrend_short_signal_consumed_in_regime is True
+
+
+def test_run_agent_cycle_allows_current_outside_close_countertrend_signal_and_sets_middle_band_retest_lock(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].model_copy(update={"close": 106.5, "high": 107.0, "low": 105.5})
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+    valid_countertrend_signal = SignalState(
+        signal_type=SignalType.COUNTERTREND_SHORT,
+        is_valid=True,
+        reason="countertrend signal detected",
+        entry=106.5,
+        stop_loss=113.0,
+        take_profit=100.0,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.PREPARE_COUNTERTREND_ORDER,
+            selected_signal_type="COUNTERTREND_SHORT",
+        ),
+        order=_make_countertrend_order(),
+        countertrend_signal=valid_countertrend_signal,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    result, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(),
+    )
+
+    assert result.countertrend_signal is not None
+    assert result.countertrend_signal.is_valid is True
+    assert result.decision.action == DecisionAction.PREPARE_COUNTERTREND_ORDER
+    assert new_state.middle_band_retest_required is True
+
+
+def test_run_agent_cycle_blocks_follow_up_countertrend_signal_until_middle_band_retest(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].model_copy(update={"close": 106.5, "high": 107.0, "low": 105.5})
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+    valid_countertrend_signal = SignalState(
+        signal_type=SignalType.COUNTERTREND_SHORT,
+        is_valid=True,
+        reason="countertrend signal detected",
+        entry=106.5,
+        stop_loss=113.0,
+        take_profit=100.0,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.PREPARE_COUNTERTREND_ORDER,
+            selected_signal_type="COUNTERTREND_SHORT",
+        ),
+        order=_make_countertrend_order(),
+        countertrend_signal=valid_countertrend_signal,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    result, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(middle_band_retest_required=True),
+    )
+
+    assert result.countertrend_signal is not None
+    assert result.countertrend_signal.is_valid is False
+    assert result.countertrend_signal.reason == "waiting for middle band retest"
+    assert result.decision.action == DecisionAction.NO_ACTION
+    assert new_state.pending_order is None
+    assert new_state.middle_band_retest_required is True
+
+
+def test_run_agent_cycle_middle_band_touch_unlocks_for_next_bar_but_current_bar_stays_blocked(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].model_copy(update={"close": 102.0, "high": 102.5, "low": 99.5})
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+    valid_trend_signal = SignalState(
+        signal_type=SignalType.TREND_LONG,
+        is_valid=True,
+        reason="trend signal detected",
+        entry=105.0,
+        stop_loss=100.0,
+        take_profit=115.0,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.PREPARE_TREND_ORDER,
+            selected_signal_type="TREND_LONG",
+        ),
+        order=_make_order(),
+        trend_signal=valid_trend_signal,
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    result, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(middle_band_retest_required=True),
+    )
+
+    assert result.trend_signal is not None
+    assert result.trend_signal.is_valid is False
+    assert result.trend_signal.reason == "waiting for middle band retest"
+    assert result.decision.action == DecisionAction.NO_ACTION
+    assert new_state.middle_band_retest_required is False
+
+
+def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outside_bands_without_countertrend_signal(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].model_copy(update={"close": 105.5, "high": 105.8, "low": 105.2})
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(DecisionAction.NO_ACTION),
+        countertrend_signal=SignalState(
+            signal_type=SignalType.COUNTERTREND_SHORT,
+            is_valid=False,
+            reason="close not outside bands",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(outside_band_sweet_spot=1.0),
+        account_balance=10000.0,
+        state=AgentState(),
+    )
+
+    assert new_state.middle_band_retest_required is True
+
+
+def test_run_agent_cycle_does_not_set_middle_band_retest_lock_for_sweet_spot_close_inside_bands(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    candles[-1] = candles[-1].model_copy(update={"close": 104.5, "high": 104.8, "low": 104.0})
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+    result_stub = _make_result(
+        decision=_make_decision(DecisionAction.NO_ACTION),
+        countertrend_signal=SignalState(
+            signal_type=SignalType.COUNTERTREND_SHORT,
+            is_valid=False,
+            reason="close not outside bands",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(outside_band_sweet_spot=1.0),
+        account_balance=10000.0,
+        state=AgentState(),
+    )
+
+    assert new_state.middle_band_retest_required is False
 
 
 def test_run_agent_cycle_resets_countertrend_consumed_flags_on_regime_change(

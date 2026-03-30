@@ -1,6 +1,7 @@
 import pandas as pd
 
 from config.strategy_config import StrategyConfig
+from indicators.bollinger import compute_bollinger_bands
 from indicators.macd import compute_macd
 from models.agent_state import AgentState
 from models.candle import Candle
@@ -11,6 +12,7 @@ from models.signal import SignalState, SignalType
 from models.trade import Trade, TradeDirection, TradeType
 from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
+from strategy.signal_rules import touches_middle_band
 from strategy.strategy_runner import run_strategy_cycle
 
 # TODO: Later manage pending-order validity across multiple days.
@@ -76,6 +78,91 @@ def _is_countertrend_signal_consumed_in_regime(
     return False
 
 
+def _is_signal_driven_action(action: DecisionAction) -> bool:
+    return action in {
+        DecisionAction.PREPARE_TREND_ORDER,
+        DecisionAction.PREPARE_COUNTERTREND_ORDER,
+        DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND,
+        DecisionAction.CLOSE_TREND_TRADE,
+        DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
+    }
+
+
+def _invalidate_signal_for_middle_band_lock(signal: SignalState | None) -> SignalState | None:
+    if signal is None:
+        return None
+
+    return signal.model_copy(
+        update={
+            "is_valid": False,
+            "reason": "waiting for middle band retest",
+        }
+    )
+
+
+def _apply_middle_band_retest_lock(
+    result: StrategyRunResult,
+    state: AgentState,
+) -> StrategyRunResult:
+    if not state.middle_band_retest_required:
+        return result
+
+    updates: dict[str, object] = {
+        "trend_signal": _invalidate_signal_for_middle_band_lock(result.trend_signal),
+        "countertrend_signal": _invalidate_signal_for_middle_band_lock(result.countertrend_signal),
+    }
+
+    if _is_signal_driven_action(result.decision.action):
+        updates.update(
+            {
+                "decision": DecisionResult(
+                    action=DecisionAction.NO_ACTION,
+                    reason="waiting for middle band retest",
+                    selected_signal_type=None,
+                ),
+                "order": None,
+                "updated_trade": None,
+                "close_active_trade": False,
+            }
+        )
+
+    return result.model_copy(update=updates)
+
+
+def _resolve_middle_band_retest_required(
+    candles: list[Candle],
+    config: StrategyConfig,
+    previous_required: bool,
+) -> bool:
+    closes = pd.Series([candle.close for candle in candles], dtype=float)
+    bollinger_df = compute_bollinger_bands(
+        closes=closes,
+        period=config.bollinger_period,
+        std_dev=config.bollinger_std_dev,
+    )
+    latest_bollinger = bollinger_df.iloc[-1]
+    bb_upper = latest_bollinger["bb_upper"]
+    bb_middle = latest_bollinger["bb_middle"]
+    bb_lower = latest_bollinger["bb_lower"]
+
+    if pd.isna(bb_upper) or pd.isna(bb_middle) or pd.isna(bb_lower):
+        return previous_required
+
+    latest_candle = candles[-1]
+    close_outside_bands = latest_candle.close > float(bb_upper) or latest_candle.close < float(bb_lower)
+    if close_outside_bands:
+        return True
+
+    if touches_middle_band(
+        high=latest_candle.high,
+        low=latest_candle.low,
+        bb_middle=float(bb_middle),
+    ):
+        return False
+
+    return previous_required
+
+
 def run_agent_cycle(
     candles: list[Candle],
     config: StrategyConfig,
@@ -98,6 +185,7 @@ def run_agent_cycle(
         account_balance=account_balance,
         active_trade=working_active_trade,
     )
+    result = _apply_middle_band_retest_lock(result=result, state=state)
 
     closes = pd.Series([candle.close for candle in candles], dtype=float)
     macd_df = compute_macd(
@@ -110,6 +198,11 @@ def run_agent_cycle(
     last_regime = regime_states[-1].regime.value if regime_states else None
     regime_changed = state.last_regime is not None and state.last_regime != last_regime
     current_price = float(closes.iloc[-1])
+    middle_band_retest_required = _resolve_middle_band_retest_required(
+        candles=candles,
+        config=config,
+        previous_required=state.middle_band_retest_required,
+    )
 
     duplicate_trend_signal_blocked = (
         state.trend_signal_consumed_in_regime
@@ -242,6 +335,7 @@ def run_agent_cycle(
             if result.decision.selected_signal_type is not None
             else None,
             "last_regime": last_regime,
+            "middle_band_retest_required": middle_band_retest_required,
             "trend_signal_consumed_in_regime": trend_signal_consumed_in_regime,
             "countertrend_long_signal_consumed_in_regime": countertrend_long_signal_consumed_in_regime,
             "countertrend_short_signal_consumed_in_regime": countertrend_short_signal_consumed_in_regime,
