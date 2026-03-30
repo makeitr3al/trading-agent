@@ -25,7 +25,7 @@ from models.propr_challenge import ActiveChallengeContext
 from models.runner_result import StrategyRunResult
 from models.symbol_spec import SymbolSpec
 from strategy.engine import run_agent_cycle
-from strategy.position_sizer import calculate_position_size
+from strategy.position_sizer import calculate_position_size, evaluate_position_size_execution
 from strategy.state import AgentState
 
 # TODO: Later add challenge-specific risk limits.
@@ -105,10 +105,28 @@ def _apply_symbol_specific_position_size(
         desired_leverage=desired_leverage,
         symbol_spec=symbol_spec,
     )
-    prepared_order = order
-    if sizing_result.position_size is not None:
-        prepared_order = order.model_copy(update={"position_size": sizing_result.position_size})
+    prepared_order = order.model_copy(update={"position_size": sizing_result.position_size})
     return apply_symbol_spec_to_order(prepared_order, symbol_spec)
+
+
+
+def _validate_pending_order_execution_size(
+    order: Order,
+    account_balance: float,
+    desired_leverage: int,
+    symbol_spec: SymbolSpec | None,
+) -> str | None:
+    if order.position_size is None:
+        return "position size unavailable"
+
+    sizing_execution_result = evaluate_position_size_execution(
+        entry=order.entry,
+        position_size=order.position_size,
+        account_balance=account_balance,
+        desired_leverage=desired_leverage,
+        max_leverage=symbol_spec.max_leverage if symbol_spec is not None else None,
+    )
+    return sizing_execution_result.reason
 
 
 
@@ -552,6 +570,34 @@ def run_app_cycle(
                 closed_trade=False,
                 managed_exit_orders=False,
                 skipped_reason=asset_guard_result.reason,
+                risk_guard_result=risk_guard_result,
+                health_guard_result=health_guard_result,
+                asset_guard_result=asset_guard_result,
+                symbol_spec_loaded=symbol_spec_loaded,
+            )
+
+        pending_order_size_reason = _validate_pending_order_execution_size(
+            order=post_cycle_state.pending_order,
+            account_balance=account_balance,
+            desired_leverage=desired_leverage,
+            symbol_spec=symbol_spec,
+        )
+        if pending_order_size_reason is not None:
+            return _build_app_cycle_result(
+                symbol=symbol,
+                environment=environment,
+                candles=candles,
+                journal_path=journal_path,
+                challenge_context=challenge_context,
+                synced_state=synced_state,
+                strategy_result=strategy_result,
+                post_cycle_state=post_cycle_state,
+                execution_response=None,
+                submitted_order=False,
+                replaced_order=False,
+                closed_trade=False,
+                managed_exit_orders=False,
+                skipped_reason=pending_order_size_reason,
                 risk_guard_result=risk_guard_result,
                 health_guard_result=health_guard_result,
                 asset_guard_result=asset_guard_result,

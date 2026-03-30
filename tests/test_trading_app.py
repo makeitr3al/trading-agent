@@ -1012,3 +1012,50 @@ def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatc
     assert result.skipped_reason is None
     assert result.submitted_order is True
 
+
+def test_app_cycle_blocks_pending_order_when_risk_based_size_exceeds_desired_leverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from models.symbol_spec import SymbolSpec
+
+    order = Order(
+        order_type=OrderType.BUY_LIMIT,
+        entry=1000.0,
+        stop_loss=999.0,
+        take_profit=1200.0,
+        position_size=999.0,
+        signal_source="manual_test",
+    )
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
+    monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
+    monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(risk_per_trade_pct=0.01),
+        account_balance=100.0,
+        allow_execution=True,
+        desired_leverage=1,
+        symbol_spec=SymbolSpec(
+            symbol="BTC/USDC",
+            asset="BTC",
+            base="BTC",
+            quote="USDC",
+            quantity_decimals=3,
+            price_decimals=None,
+            max_leverage=5,
+            source_name="test",
+        ),
+        data_source="live",
+    )
+
+    assert result.submitted_order is False
+    assert result.replaced_order is False
+    assert result.execution_response is None
+    assert result.skipped_reason == "risk based position size exceeds desired leverage"
+
+

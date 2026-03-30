@@ -11,7 +11,18 @@ from models.symbol_spec import SymbolSpec
 class PositionSizeResult(BaseModel):
     position_size: float | None
     applied_leverage: int
-    was_margin_capped: bool = False
+    raw_position_size: float | None = None
+    risk_amount: float | None = None
+    risk_per_unit: float | None = None
+    reason: str | None = None
+
+
+class PositionSizeExecutionResult(BaseModel):
+    allow_execution: bool
+    desired_leverage: int
+    max_leverage: int | None = None
+    required_notional: float | None = None
+    required_leverage: float | None = None
     reason: str | None = None
 
 
@@ -39,6 +50,9 @@ def calculate_position_size(
         return PositionSizeResult(
             position_size=None,
             applied_leverage=leverage,
+            raw_position_size=None,
+            risk_amount=None,
+            risk_per_unit=None,
             reason="entry must be positive",
         )
 
@@ -47,17 +61,15 @@ def calculate_position_size(
         return PositionSizeResult(
             position_size=None,
             applied_leverage=leverage,
+            raw_position_size=None,
+            risk_amount=None,
+            risk_per_unit=None,
             reason="risk per unit must be positive",
         )
 
     risk_amount = balance_decimal * risk_pct_decimal
     risk_based_size = risk_amount / risk_per_unit
-
-    # Hyperliquid perps use size in units of the base asset. Margin scales with
-    # notional / leverage, so we cap size by balance * leverage / entry.
-    leverage_based_max_size = (balance_decimal * Decimal(leverage)) / entry_decimal
-    was_margin_capped = leverage_based_max_size < risk_based_size
-    sized = min(risk_based_size, leverage_based_max_size)
+    sized = risk_based_size
 
     if symbol_spec is not None:
         sized = round_quantity_to_symbol_spec(sized, symbol_spec)
@@ -68,13 +80,86 @@ def calculate_position_size(
         return PositionSizeResult(
             position_size=None,
             applied_leverage=leverage,
-            was_margin_capped=was_margin_capped,
+            raw_position_size=float(risk_based_size),
+            risk_amount=float(risk_amount),
+            risk_per_unit=float(risk_per_unit),
             reason="position size rounds to zero",
         )
 
     return PositionSizeResult(
         position_size=float(sized),
         applied_leverage=leverage,
-        was_margin_capped=was_margin_capped,
+        raw_position_size=float(risk_based_size),
+        risk_amount=float(risk_amount),
+        risk_per_unit=float(risk_per_unit),
+        reason=None,
+    )
+
+
+def evaluate_position_size_execution(
+    entry: float,
+    position_size: float,
+    account_balance: float,
+    desired_leverage: int = 1,
+    max_leverage: int | None = None,
+) -> PositionSizeExecutionResult:
+    entry_decimal = _to_decimal(entry)
+    position_size_decimal = _to_decimal(position_size)
+    balance_decimal = _to_decimal(account_balance)
+    leverage = max(int(desired_leverage), 1)
+
+    if entry_decimal <= Decimal("0"):
+        return PositionSizeExecutionResult(
+            allow_execution=False,
+            desired_leverage=leverage,
+            max_leverage=max_leverage,
+            reason="entry must be positive",
+        )
+
+    if position_size_decimal <= Decimal("0"):
+        return PositionSizeExecutionResult(
+            allow_execution=False,
+            desired_leverage=leverage,
+            max_leverage=max_leverage,
+            reason="position size must be positive",
+        )
+
+    if balance_decimal <= Decimal("0"):
+        return PositionSizeExecutionResult(
+            allow_execution=False,
+            desired_leverage=leverage,
+            max_leverage=max_leverage,
+            reason="account balance must be positive",
+        )
+
+    required_notional = entry_decimal * position_size_decimal
+    required_leverage = required_notional / balance_decimal
+
+    if required_leverage > Decimal(leverage):
+        return PositionSizeExecutionResult(
+            allow_execution=False,
+            desired_leverage=leverage,
+            max_leverage=max_leverage,
+            required_notional=float(required_notional),
+            required_leverage=float(required_leverage),
+            reason="risk based position size exceeds desired leverage",
+        )
+
+    if max_leverage is not None and required_leverage > Decimal(max_leverage):
+        return PositionSizeExecutionResult(
+            allow_execution=False,
+            desired_leverage=leverage,
+            max_leverage=max_leverage,
+            required_notional=float(required_notional),
+            required_leverage=float(required_leverage),
+            reason="risk based position size exceeds max allowed leverage",
+        )
+
+    return PositionSizeExecutionResult(
+        allow_execution=True,
+        desired_leverage=leverage,
+        max_leverage=max_leverage,
+        required_notional=float(required_notional),
+        required_leverage=float(required_leverage),
         reason=None,
     )
