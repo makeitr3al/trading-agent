@@ -82,9 +82,9 @@ def _make_trade() -> Trade:
 
 
 
-def _make_external_pending_entry_order(symbol: str = "EURUSD") -> dict:
+def _make_external_pending_entry_order(symbol: str = "EURUSD", order_id: str = "external-existing-order") -> dict:
     return {
-        "id": "external-existing-order",
+        "id": order_id,
         "symbol": symbol,
         "side": "buy",
         "type": "stop",
@@ -93,6 +93,13 @@ def _make_external_pending_entry_order(symbol: str = "EURUSD") -> dict:
         "stopLoss": 100.0,
         "takeProfit": 130.0,
     }
+
+
+
+def _make_external_changed_pending_entry_order(symbol: str = "EURUSD", order_id: str = "external-existing-order") -> dict:
+    payload = _make_external_pending_entry_order(symbol=symbol, order_id=order_id)
+    payload["price"] = 111.0
+    return payload
 
 
 
@@ -269,8 +276,92 @@ def test_safe_replace_pending_order_submits_directly_when_no_replacement_is_need
 
 
 
-def test_safe_replace_pending_order_uses_state_pending_order_id() -> None:
-    service = FakeProprOrderService()
+def test_safe_replace_pending_order_reuses_existing_equivalent_order_when_pending_order_id_is_missing() -> None:
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order()]})
+    state = AgentState(pending_order=_make_order(), pending_order_id=None)
+
+    result = safe_replace_pending_order(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=state,
+        new_order=_make_order(),
+    )
+
+    assert result == {
+        "cancel": None,
+        "submit": {"id": "external-existing-order", "status": "unchanged"},
+        "reused_existing": True,
+    }
+    assert service.calls == []
+
+
+
+def test_safe_replace_pending_order_submits_fresh_when_pending_order_id_is_missing_and_no_external_order_exists() -> None:
+    service = FakeProprOrderService(orders_payload={"data": []})
+    state = AgentState(pending_order=_make_order(), pending_order_id=None)
+
+    result = safe_replace_pending_order(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=state,
+        new_order=_make_order(),
+    )
+
+    assert result == {
+        "cancel": None,
+        "submit": {"id": "external-new-order", "status": "submitted"},
+    }
+    assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+
+
+
+def test_safe_replace_pending_order_reuses_equivalent_external_order_when_local_pending_order_id_is_stale() -> None:
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order(order_id="external-live-order")]})
+    state = AgentState(pending_order=_make_order(), pending_order_id="external-stale-order")
+
+    result = safe_replace_pending_order(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=state,
+        new_order=_make_order(),
+    )
+
+    assert result == {
+        "cancel": None,
+        "submit": {"id": "external-live-order", "status": "unchanged"},
+        "reused_existing": True,
+    }
+    assert service.calls == []
+
+
+
+def test_safe_replace_pending_order_submits_fresh_when_local_pending_order_id_is_stale_and_no_external_order_exists() -> None:
+    service = FakeProprOrderService(orders_payload={"data": []})
+    state = AgentState(pending_order=_make_order(), pending_order_id="external-stale-order")
+
+    result = safe_replace_pending_order(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=state,
+        new_order=_make_order(),
+    )
+
+    assert result == {
+        "cancel": None,
+        "submit": {"id": "external-new-order", "status": "submitted"},
+    }
+    assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+
+
+
+def test_safe_replace_pending_order_uses_state_pending_order_id_when_external_order_still_exists_and_changed() -> None:
+    service = FakeProprOrderService(
+        orders_payload={"data": [_make_external_changed_pending_entry_order(order_id="external-old-order")]}
+    )
     state = AgentState(pending_order=_make_order(), pending_order_id="external-old-order")
 
     result = safe_replace_pending_order(
@@ -290,18 +381,26 @@ def test_safe_replace_pending_order_uses_state_pending_order_id() -> None:
 
 
 
-def test_safe_replace_pending_order_raises_value_error_when_replacement_is_needed_but_pending_order_id_is_missing() -> None:
-    service = FakeProprOrderService()
-    state = AgentState(pending_order=_make_order(), pending_order_id=None)
+def test_safe_replace_pending_order_reuses_state_pending_order_id_when_external_order_still_exists_and_is_unchanged() -> None:
+    service = FakeProprOrderService(
+        orders_payload={"data": [_make_external_pending_entry_order(order_id="external-old-order")]}
+    )
+    state = AgentState(pending_order=_make_order(), pending_order_id="external-old-order")
 
-    with pytest.raises(ValueError, match="Missing external pending order id for replacement"):
-        safe_replace_pending_order(
-            order_service=service,
-            account_id="account-1",
-            symbol="EURUSD",
-            state=state,
-            new_order=_make_order(),
-        )
+    result = safe_replace_pending_order(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=state,
+        new_order=_make_order(),
+    )
+
+    assert result == {
+        "cancel": None,
+        "submit": {"id": "external-old-order", "status": "unchanged"},
+        "reused_existing": True,
+    }
+    assert service.calls == []
 
 
 

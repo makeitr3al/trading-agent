@@ -96,6 +96,36 @@ def _is_pending_entry_order_payload(order_payload: dict[str, Any]) -> bool:
     return mapped_order is not None and mapped_order.status == OrderStatus.PENDING
 
 
+def _iter_matching_pending_entry_order_payloads(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+) -> list[dict[str, Any]]:
+    matching_items: list[dict[str, Any]] = []
+    for item in _get_open_orders_payload(order_service, account_id):
+        if not _payload_matches_symbol(item, symbol):
+            continue
+        if not _is_pending_entry_order_payload(item):
+            continue
+        matching_items.append(item)
+    return matching_items
+
+
+def _find_external_pending_order_payload_by_id(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    order_id: str | None,
+) -> dict[str, Any] | None:
+    if order_id is None or not order_id.strip():
+        return None
+
+    for item in _iter_matching_pending_entry_order_payloads(order_service, account_id, symbol):
+        if _extract_external_order_id(item) == order_id.strip():
+            return item
+    return None
+
+
 def _values_close(left: float | None, right: float | None) -> bool:
     if left is None or right is None:
         return left is right
@@ -117,18 +147,21 @@ def _orders_are_equivalent(left: Order, right: Order) -> bool:
     return True
 
 
+def _build_reused_pending_order_response(order_id: str) -> dict[str, Any]:
+    return {
+        "cancel": None,
+        "submit": {"id": order_id, "status": "unchanged"},
+        "reused_existing": True,
+    }
+
+
 def find_equivalent_external_pending_order_id(
     order_service: ProprOrderService,
     account_id: str,
     symbol: str,
     order: Order,
 ) -> str | None:
-    for item in _get_open_orders_payload(order_service, account_id):
-        if not _payload_matches_symbol(item, symbol):
-            continue
-        if not _is_pending_entry_order_payload(item):
-            continue
-
+    for item in _iter_matching_pending_entry_order_payloads(order_service, account_id, symbol):
         mapped_order = map_propr_order_to_internal(item)
         if mapped_order is None:
             continue
@@ -223,13 +256,41 @@ def safe_replace_pending_order(
             return order_service.submit_pending_order(account_id, new_order, symbol)
         return None
 
-    if not has_external_pending_order_id(state):
-        raise ValueError("Missing external pending order id for replacement")
+    if new_order is None:
+        return None
 
-    cancel_response = order_service.cancel_order(account_id, state.pending_order_id)
+    current_external_order_payload = _find_external_pending_order_payload_by_id(
+        order_service=order_service,
+        account_id=account_id,
+        symbol=symbol,
+        order_id=state.pending_order_id,
+    )
+    if current_external_order_payload is not None:
+        mapped_current_order = map_propr_order_to_internal(current_external_order_payload)
+        if mapped_current_order is not None and _orders_are_equivalent(mapped_current_order, new_order):
+            existing_order_id = _extract_external_order_id(current_external_order_payload)
+            if existing_order_id is not None:
+                return _build_reused_pending_order_response(existing_order_id)
+
+        cancel_response = order_service.cancel_order(account_id, state.pending_order_id)
+        submit_response = order_service.submit_pending_order(account_id, new_order, symbol)
+        return {
+            "cancel": cancel_response,
+            "submit": submit_response,
+        }
+
+    equivalent_order_id = find_equivalent_external_pending_order_id(
+        order_service=order_service,
+        account_id=account_id,
+        symbol=symbol,
+        order=new_order,
+    )
+    if equivalent_order_id is not None:
+        return _build_reused_pending_order_response(equivalent_order_id)
+
     submit_response = order_service.submit_pending_order(account_id, new_order, symbol)
     return {
-        "cancel": cancel_response,
+        "cancel": None,
         "submit": submit_response,
     }
 
