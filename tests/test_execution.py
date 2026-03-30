@@ -103,6 +103,47 @@ def _make_external_changed_pending_entry_order(symbol: str = "EURUSD", order_id:
 
 
 
+def _make_external_stop_loss_exit_order(
+    order_id: str = "external-stop-order",
+    symbol: str = "BTC/USDC",
+    trigger_price: float = 95.0,
+) -> dict:
+    return {
+        "id": order_id,
+        "symbol": symbol,
+        "side": "sell",
+        "positionSide": "long",
+        "type": "stop_market",
+        "status": "open",
+        "quantity": 1.25,
+        "triggerPrice": trigger_price,
+        "reduceOnly": True,
+        "positionId": "position-1",
+    }
+
+
+
+def _make_external_take_profit_exit_order(
+    order_id: str = "external-tp-order",
+    symbol: str = "BTC/USDC",
+    take_profit_price: float = 110.0,
+) -> dict:
+    return {
+        "id": order_id,
+        "symbol": symbol,
+        "side": "sell",
+        "positionSide": "long",
+        "type": "take_profit_limit",
+        "status": "open",
+        "quantity": 1.25,
+        "price": take_profit_price,
+        "triggerPrice": take_profit_price,
+        "reduceOnly": True,
+        "positionId": "position-1",
+    }
+
+
+
 def test_should_submit_order_returns_false_when_order_is_none() -> None:
     assert should_submit_order(AgentState(), None) is False
 
@@ -423,7 +464,85 @@ def test_should_manage_exit_orders_returns_true_when_active_trade_levels_changed
 
 
 
-def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None:
+def test_manage_active_trade_exit_orders_reuses_existing_stop_loss_order_when_local_id_is_missing() -> None:
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_stop_loss_exit_order()]})
+    state = AgentState(active_trade=_make_trade(), stop_loss_order_id=None, take_profit_order_id="external-tp-order")
+
+    result = manage_active_trade_exit_orders(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=state,
+        updated_trade=_make_trade(),
+    )
+
+    assert result == {
+        "stop_loss": {
+            "cancel": None,
+            "submit": None,
+            "order_id": "external-stop-order",
+            "reused_existing": True,
+        }
+    }
+    assert service.calls == []
+
+
+
+def test_manage_active_trade_exit_orders_reuses_existing_take_profit_order_when_update_is_requested_but_local_id_is_stale() -> None:
+    service = FakeProprOrderService(
+        orders_payload={"data": [_make_external_take_profit_exit_order(order_id="external-live-tp", take_profit_price=111.0)]}
+    )
+    state = AgentState(active_trade=_make_trade(), stop_loss_order_id="external-stop-order", take_profit_order_id="external-stale-tp")
+    updated_trade = _make_trade().model_copy(update={"take_profit": 111.0})
+
+    result = manage_active_trade_exit_orders(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=state,
+        updated_trade=updated_trade,
+    )
+
+    assert result == {
+        "take_profit": {
+            "cancel": None,
+            "submit": None,
+            "order_id": "external-live-tp",
+            "reused_existing": True,
+        }
+    }
+    assert service.calls == []
+
+
+
+def test_manage_active_trade_exit_orders_reuses_state_stop_loss_order_id_when_external_order_already_matches_desired_levels() -> None:
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_stop_loss_exit_order(order_id="external-old-stop")]})
+    state = AgentState(active_trade=_make_trade(), stop_loss_order_id="external-old-stop", take_profit_order_id="external-tp-order")
+    updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0})
+    matching_external_payload = _make_external_stop_loss_exit_order(order_id="external-old-stop", trigger_price=96.0)
+    service.client = FakeProprClient({"data": [matching_external_payload]})
+
+    result = manage_active_trade_exit_orders(
+        order_service=service,
+        account_id="account-1",
+        symbol="BTC/USDC",
+        state=state,
+        updated_trade=updated_trade,
+    )
+
+    assert result == {
+        "stop_loss": {
+            "cancel": None,
+            "submit": None,
+            "order_id": "external-old-stop",
+            "reused_existing": True,
+        }
+    }
+    assert service.calls == []
+
+
+
+def test_manage_active_trade_exit_orders_replaces_existing_exit_orders_without_broker_lookup_support() -> None:
     service = FakeProprOrderService()
     state = AgentState(
         active_trade=_make_trade(),
@@ -448,3 +567,4 @@ def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None
     assert service.calls[1][0] == "stop_loss"
     assert service.calls[2] == ("cancel", "account-1", "external-old-tp")
     assert service.calls[3][0] == "take_profit"
+

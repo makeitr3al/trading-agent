@@ -1,9 +1,14 @@
-from typing import Any
+from typing import Any, Callable
 
 from models.agent_state import AgentState
 from models.order import Order, OrderStatus
 from models.trade import Trade
-from broker.order_service import ProprOrderService, extract_order_id_from_submit_response
+from broker.order_service import (
+    ProprOrderService,
+    build_stop_loss_submission_preview,
+    build_take_profit_submission_preview,
+    extract_order_id_from_submit_response,
+)
 from broker.state_sync import map_propr_order_to_internal
 
 # TODO: Later add real idempotency.
@@ -15,11 +20,13 @@ from broker.state_sync import map_propr_order_to_internal
 FLOAT_TOLERANCE = 1e-9
 
 
+
 def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
     for key in keys:
         if key in payload and payload[key] is not None:
             return payload[key]
     return None
+
 
 
 def _truthy_flag(value: Any) -> bool:
@@ -30,11 +37,21 @@ def _truthy_flag(value: Any) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
+
 def _normalize_symbol(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip().upper()
     return text or None
+
+
+
+def _normalize_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower().replace("-", "_")
+    return text or None
+
 
 
 def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
@@ -52,11 +69,13 @@ def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
     return _normalize_symbol(_extract_first(payload, ["coin"]))
 
 
+
 def _payload_matches_symbol(payload: dict[str, Any], symbol: str) -> bool:
     payload_symbol = _extract_payload_symbol(payload)
     if payload_symbol is None:
         return True
     return payload_symbol == symbol.strip().upper()
+
 
 
 def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
@@ -67,11 +86,18 @@ def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
     return text or None
 
 
-def _get_open_orders_payload(order_service: ProprOrderService, account_id: str) -> list[dict[str, Any]]:
+
+def _supports_open_orders_lookup(order_service: ProprOrderService) -> bool:
     client = getattr(order_service, "client", None)
-    if client is None or not hasattr(client, "get_orders"):
+    return client is not None and hasattr(client, "get_orders")
+
+
+
+def _get_open_orders_payload(order_service: ProprOrderService, account_id: str) -> list[dict[str, Any]]:
+    if not _supports_open_orders_lookup(order_service):
         return []
 
+    client = getattr(order_service, "client", None)
     try:
         payload = client.get_orders(account_id)
     except Exception:
@@ -86,6 +112,7 @@ def _get_open_orders_payload(order_service: ProprOrderService, account_id: str) 
     return []
 
 
+
 def _is_pending_entry_order_payload(order_payload: dict[str, Any]) -> bool:
     if _truthy_flag(_extract_first(order_payload, ["reduceOnly", "reduce_only"])):
         return False
@@ -94,6 +121,22 @@ def _is_pending_entry_order_payload(order_payload: dict[str, Any]) -> bool:
 
     mapped_order = map_propr_order_to_internal(order_payload)
     return mapped_order is not None and mapped_order.status == OrderStatus.PENDING
+
+
+
+def _classify_exit_order_payload(order_payload: dict[str, Any]) -> str | None:
+    reduce_only = _truthy_flag(_extract_first(order_payload, ["reduceOnly", "reduce_only"]))
+    position_id = _extract_first(order_payload, ["positionId", "position_id"])
+    if not reduce_only and position_id is None:
+        return None
+
+    order_type = _normalize_text(_extract_first(order_payload, ["order_type", "type"]))
+    if order_type in {"take_profit_limit", "take_profit_market", "limit"}:
+        return "take_profit"
+    if order_type in {"stop_market", "stop_limit", "stop"}:
+        return "stop_loss"
+    return None
+
 
 
 def _iter_matching_pending_entry_order_payloads(
@@ -111,6 +154,24 @@ def _iter_matching_pending_entry_order_payloads(
     return matching_items
 
 
+
+def _iter_matching_exit_order_payloads(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    exit_kind: str,
+) -> list[dict[str, Any]]:
+    matching_items: list[dict[str, Any]] = []
+    for item in _get_open_orders_payload(order_service, account_id):
+        if not _payload_matches_symbol(item, symbol):
+            continue
+        if _classify_exit_order_payload(item) != exit_kind:
+            continue
+        matching_items.append(item)
+    return matching_items
+
+
+
 def _find_external_pending_order_payload_by_id(
     order_service: ProprOrderService,
     account_id: str,
@@ -126,10 +187,39 @@ def _find_external_pending_order_payload_by_id(
     return None
 
 
+
+def _find_external_exit_order_payload_by_id(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    exit_kind: str,
+    order_id: str | None,
+) -> dict[str, Any] | None:
+    if order_id is None or not order_id.strip():
+        return None
+
+    for item in _iter_matching_exit_order_payloads(order_service, account_id, symbol, exit_kind):
+        if _extract_external_order_id(item) == order_id.strip():
+            return item
+    return None
+
+
+
 def _values_close(left: float | None, right: float | None) -> bool:
     if left is None or right is None:
         return left is right
     return abs(left - right) <= FLOAT_TOLERANCE
+
+
+
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 
 
 def _orders_are_equivalent(left: Order, right: Order) -> bool:
@@ -147,12 +237,68 @@ def _orders_are_equivalent(left: Order, right: Order) -> bool:
     return True
 
 
+
+def _payload_matches_exit_preview(
+    order_payload: dict[str, Any],
+    symbol: str,
+    desired_preview: dict[str, Any],
+    exit_kind: str,
+) -> bool:
+    if not _payload_matches_symbol(order_payload, symbol):
+        return False
+    if _classify_exit_order_payload(order_payload) != exit_kind:
+        return False
+
+    if _normalize_text(_extract_first(order_payload, ["side", "direction"])) != _normalize_text(desired_preview.get("side")):
+        return False
+    if _normalize_text(_extract_first(order_payload, ["positionSide", "position_side"])) != _normalize_text(desired_preview.get("position_side")):
+        return False
+    if str(_extract_first(order_payload, ["positionId", "position_id"]) or "") != str(desired_preview.get("position_id") or ""):
+        return False
+    if _truthy_flag(_extract_first(order_payload, ["reduceOnly", "reduce_only"])) != _truthy_flag(desired_preview.get("reduce_only")):
+        return False
+
+    if not _values_close(
+        _to_optional_float(_extract_first(order_payload, ["quantity", "qty", "size"])),
+        _to_optional_float(desired_preview.get("quantity")),
+    ):
+        return False
+
+    desired_price = _to_optional_float(desired_preview.get("price"))
+    if desired_price is not None and not _values_close(
+        _to_optional_float(_extract_first(order_payload, ["price"])),
+        desired_price,
+    ):
+        return False
+
+    desired_trigger = _to_optional_float(desired_preview.get("trigger_price"))
+    if desired_trigger is not None and not _values_close(
+        _to_optional_float(_extract_first(order_payload, ["triggerPrice", "trigger_price", "trigger"])),
+        desired_trigger,
+    ):
+        return False
+
+    return True
+
+
+
 def _build_reused_pending_order_response(order_id: str) -> dict[str, Any]:
     return {
         "cancel": None,
         "submit": {"id": order_id, "status": "unchanged"},
         "reused_existing": True,
     }
+
+
+
+def _build_reused_exit_order_response(order_id: str) -> dict[str, Any]:
+    return {
+        "cancel": None,
+        "submit": None,
+        "order_id": order_id,
+        "reused_existing": True,
+    }
+
 
 
 def find_equivalent_external_pending_order_id(
@@ -168,6 +314,21 @@ def find_equivalent_external_pending_order_id(
         if _orders_are_equivalent(mapped_order, order):
             return _extract_external_order_id(item)
     return None
+
+
+
+def _find_equivalent_external_exit_order_payload(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    exit_kind: str,
+    desired_preview: dict[str, Any],
+) -> dict[str, Any] | None:
+    for item in _iter_matching_exit_order_payloads(order_service, account_id, symbol, exit_kind):
+        if _payload_matches_exit_preview(item, symbol, desired_preview, exit_kind):
+            return item
+    return None
+
 
 
 def should_submit_order(
@@ -313,6 +474,83 @@ def _prepare_updated_trade_for_exit_orders(state: AgentState, updated_trade: Tra
 
 
 
+def _resolve_exit_order_request(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    exit_kind: str,
+    current_order_id: str | None,
+    desired_preview: dict[str, Any],
+    submit_fn: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    if not _supports_open_orders_lookup(order_service):
+        cancel_response = None
+        if _has_external_order_id(current_order_id):
+            cancel_response = order_service.cancel_order(account_id, current_order_id)
+        submit_response = submit_fn()
+        return {
+            "cancel": cancel_response,
+            "submit": submit_response,
+            "order_id": extract_order_id_from_submit_response(submit_response),
+        }
+
+    current_payload = _find_external_exit_order_payload_by_id(
+        order_service=order_service,
+        account_id=account_id,
+        symbol=symbol,
+        exit_kind=exit_kind,
+        order_id=current_order_id,
+    )
+    if current_payload is not None:
+        current_payload_id = _extract_external_order_id(current_payload)
+        if current_payload_id is not None and _payload_matches_exit_preview(current_payload, symbol, desired_preview, exit_kind):
+            return _build_reused_exit_order_response(current_payload_id)
+
+        equivalent_payload = _find_equivalent_external_exit_order_payload(
+            order_service=order_service,
+            account_id=account_id,
+            symbol=symbol,
+            exit_kind=exit_kind,
+            desired_preview=desired_preview,
+        )
+        equivalent_order_id = _extract_external_order_id(equivalent_payload) if equivalent_payload is not None else None
+        if equivalent_order_id is not None and equivalent_order_id != current_payload_id:
+            cancel_response = order_service.cancel_order(account_id, current_payload_id)
+            return {
+                "cancel": cancel_response,
+                "submit": None,
+                "order_id": equivalent_order_id,
+                "reused_existing": True,
+            }
+
+        cancel_response = order_service.cancel_order(account_id, current_payload_id)
+        submit_response = submit_fn()
+        return {
+            "cancel": cancel_response,
+            "submit": submit_response,
+            "order_id": extract_order_id_from_submit_response(submit_response),
+        }
+
+    equivalent_payload = _find_equivalent_external_exit_order_payload(
+        order_service=order_service,
+        account_id=account_id,
+        symbol=symbol,
+        exit_kind=exit_kind,
+        desired_preview=desired_preview,
+    )
+    equivalent_order_id = _extract_external_order_id(equivalent_payload) if equivalent_payload is not None else None
+    if equivalent_order_id is not None:
+        return _build_reused_exit_order_response(equivalent_order_id)
+
+    submit_response = submit_fn()
+    return {
+        "cancel": None,
+        "submit": submit_response,
+        "order_id": extract_order_id_from_submit_response(submit_response),
+    }
+
+
+
 def should_manage_exit_orders(
     state: AgentState,
     updated_trade: Trade | None,
@@ -353,39 +591,49 @@ def manage_active_trade_exit_orders(
         state.active_trade.stop_loss != normalized_trade.stop_loss
         or not _has_external_order_id(state.stop_loss_order_id)
     ):
-        stop_loss_cancel = None
-        if _has_external_order_id(state.stop_loss_order_id):
-            stop_loss_cancel = order_service.cancel_order(account_id, state.stop_loss_order_id)
-        stop_loss_submit = order_service.submit_stop_loss_exit(
-            account_id,
+        desired_stop_loss_preview = build_stop_loss_submission_preview(
             normalized_trade,
             symbol,
             buy_spread=buy_spread,
         )
-        response["stop_loss"] = {
-            "cancel": stop_loss_cancel,
-            "submit": stop_loss_submit,
-            "order_id": extract_order_id_from_submit_response(stop_loss_submit),
-        }
+        response["stop_loss"] = _resolve_exit_order_request(
+            order_service=order_service,
+            account_id=account_id,
+            symbol=symbol,
+            exit_kind="stop_loss",
+            current_order_id=state.stop_loss_order_id,
+            desired_preview=desired_stop_loss_preview,
+            submit_fn=lambda: order_service.submit_stop_loss_exit(
+                account_id,
+                normalized_trade,
+                symbol,
+                buy_spread=buy_spread,
+            ),
+        )
 
     if (
         state.active_trade.take_profit != normalized_trade.take_profit
         or not _has_external_order_id(state.take_profit_order_id)
     ):
-        take_profit_cancel = None
-        if _has_external_order_id(state.take_profit_order_id):
-            take_profit_cancel = order_service.cancel_order(account_id, state.take_profit_order_id)
-        take_profit_submit = order_service.submit_take_profit_exit(
-            account_id,
+        desired_take_profit_preview = build_take_profit_submission_preview(
             normalized_trade,
             symbol,
             buy_spread=buy_spread,
         )
-        response["take_profit"] = {
-            "cancel": take_profit_cancel,
-            "submit": take_profit_submit,
-            "order_id": extract_order_id_from_submit_response(take_profit_submit),
-        }
+        response["take_profit"] = _resolve_exit_order_request(
+            order_service=order_service,
+            account_id=account_id,
+            symbol=symbol,
+            exit_kind="take_profit",
+            current_order_id=state.take_profit_order_id,
+            desired_preview=desired_take_profit_preview,
+            submit_fn=lambda: order_service.submit_take_profit_exit(
+                account_id,
+                normalized_trade,
+                symbol,
+                buy_spread=buy_spread,
+            ),
+        )
 
     return response or None
 
