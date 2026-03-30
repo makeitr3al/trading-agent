@@ -20,9 +20,20 @@ from models.trade import Trade, TradeDirection, TradeType
 import pytest
 
 
+class FakeProprClient:
+    def __init__(self, orders_payload: dict | list[dict]) -> None:
+        self.orders_payload = orders_payload
+        self.get_orders_calls: list[str] = []
+
+    def get_orders(self, account_id: str) -> dict | list[dict]:
+        self.get_orders_calls.append(account_id)
+        return self.orders_payload
+
+
 class FakeProprOrderService:
-    def __init__(self) -> None:
+    def __init__(self, orders_payload: dict | list[dict] | None = None) -> None:
         self.calls: list[tuple[str, str, object]] = []
+        self.client = FakeProprClient(orders_payload) if orders_payload is not None else None
 
     def submit_pending_order(self, account_id: str, order: Order, symbol: str) -> dict:
         self.calls.append(("submit", account_id, {"order": order, "symbol": symbol}))
@@ -71,6 +82,20 @@ def _make_trade() -> Trade:
 
 
 
+def _make_external_pending_entry_order(symbol: str = "EURUSD") -> dict:
+    return {
+        "id": "external-existing-order",
+        "symbol": symbol,
+        "side": "buy",
+        "type": "stop",
+        "status": "open",
+        "price": 110.0,
+        "stopLoss": 100.0,
+        "takeProfit": 130.0,
+    }
+
+
+
 def test_should_submit_order_returns_false_when_order_is_none() -> None:
     assert should_submit_order(AgentState(), None) is False
 
@@ -109,6 +134,62 @@ def test_submit_agent_order_if_allowed_returns_none_when_blocked() -> None:
 
 def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
     service = FakeProprOrderService()
+
+    result = submit_agent_order_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=AgentState(),
+        order=_make_order(),
+    )
+
+    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert service.calls[0][0] == "submit"
+
+
+
+def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pending_order_exists() -> None:
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order()]})
+
+    result = submit_agent_order_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=AgentState(),
+        order=_make_order(),
+    )
+
+    assert result is None
+    assert service.calls == []
+    assert service.client is not None
+    assert service.client.get_orders_calls == ["account-1"]
+
+
+
+def test_submit_agent_order_if_allowed_ignores_equivalent_order_on_other_symbol() -> None:
+    service = FakeProprOrderService(
+        orders_payload={"data": [_make_external_pending_entry_order(symbol="BTC/USDC")]}
+    )
+
+    result = submit_agent_order_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=AgentState(),
+        order=_make_order(),
+    )
+
+    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert service.calls[0][0] == "submit"
+
+
+
+def test_submit_agent_order_if_allowed_ignores_reduce_only_exit_orders_when_deduplicating() -> None:
+    exit_order_payload = _make_external_pending_entry_order()
+    exit_order_payload["reduceOnly"] = True
+    exit_order_payload["positionId"] = "position-1"
+
+    service = FakeProprOrderService(orders_payload={"data": [exit_order_payload]})
 
     result = submit_agent_order_if_allowed(
         order_service=service,
@@ -230,6 +311,7 @@ def test_helper_detects_external_pending_order_id_correctly() -> None:
     assert has_external_pending_order_id(AgentState(pending_order_id=None)) is False
 
 
+
 def test_should_manage_exit_orders_returns_true_when_active_trade_levels_changed() -> None:
     state = AgentState(
         active_trade=_make_trade(),
@@ -239,6 +321,7 @@ def test_should_manage_exit_orders_returns_true_when_active_trade_levels_changed
     updated_trade = _make_trade().model_copy(update={"stop_loss": 96.0})
 
     assert should_manage_exit_orders(state, updated_trade) is True
+
 
 
 def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None:
@@ -266,4 +349,3 @@ def test_manage_active_trade_exit_orders_replaces_existing_exit_orders() -> None
     assert service.calls[1][0] == "stop_loss"
     assert service.calls[2] == ("cancel", "account-1", "external-old-tp")
     assert service.calls[3][0] == "take_profit"
-

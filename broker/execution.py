@@ -1,12 +1,140 @@
+from typing import Any
+
 from models.agent_state import AgentState
-from models.order import Order
+from models.order import Order, OrderStatus
 from models.trade import Trade
 from broker.order_service import ProprOrderService, extract_order_id_from_submit_response
+from broker.state_sync import map_propr_order_to_internal
 
 # TODO: Later add real idempotency.
 # TODO: Later add duplicate detection based on external order ids.
 # TODO: Later sync with Propr open orders before submit.
 # TODO: Later handle partial fills.
+
+
+FLOAT_TOLERANCE = 1e-9
+
+
+def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
+
+
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _normalize_symbol(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    return text or None
+
+
+def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
+    direct_symbol = _normalize_symbol(
+        _extract_first(payload, ["symbol", "asset", "market", "instrument"])
+    )
+    if direct_symbol is not None:
+        return direct_symbol
+
+    base = _normalize_symbol(_extract_first(payload, ["base"]))
+    quote = _normalize_symbol(_extract_first(payload, ["quote"]))
+    if base and quote:
+        return f"{base}/{quote}"
+
+    return _normalize_symbol(_extract_first(payload, ["coin"]))
+
+
+def _payload_matches_symbol(payload: dict[str, Any], symbol: str) -> bool:
+    payload_symbol = _extract_payload_symbol(payload)
+    if payload_symbol is None:
+        return True
+    return payload_symbol == symbol.strip().upper()
+
+
+def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
+    value = _extract_first(order_payload, ["id", "orderId", "order_id"])
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _get_open_orders_payload(order_service: ProprOrderService, account_id: str) -> list[dict[str, Any]]:
+    client = getattr(order_service, "client", None)
+    if client is None or not hasattr(client, "get_orders"):
+        return []
+
+    try:
+        payload = client.get_orders(account_id)
+    except Exception:
+        return []
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("data", [])
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _is_pending_entry_order_payload(order_payload: dict[str, Any]) -> bool:
+    if _truthy_flag(_extract_first(order_payload, ["reduceOnly", "reduce_only"])):
+        return False
+    if _extract_first(order_payload, ["positionId", "position_id"]) is not None:
+        return False
+
+    mapped_order = map_propr_order_to_internal(order_payload)
+    return mapped_order is not None and mapped_order.status == OrderStatus.PENDING
+
+
+def _values_close(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return abs(left - right) <= FLOAT_TOLERANCE
+
+
+def _orders_are_equivalent(left: Order, right: Order) -> bool:
+    if left.order_type != right.order_type:
+        return False
+    if not _values_close(left.entry, right.entry):
+        return False
+    if not _values_close(left.stop_loss, right.stop_loss):
+        return False
+    if not _values_close(left.take_profit, right.take_profit):
+        return False
+    if left.position_size is not None and right.position_size is not None:
+        if not _values_close(left.position_size, right.position_size):
+            return False
+    return True
+
+
+def find_equivalent_external_pending_order_id(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    order: Order,
+) -> str | None:
+    for item in _get_open_orders_payload(order_service, account_id):
+        if not _payload_matches_symbol(item, symbol):
+            continue
+        if not _is_pending_entry_order_payload(item):
+            continue
+
+        mapped_order = map_propr_order_to_internal(item)
+        if mapped_order is None:
+            continue
+        if _orders_are_equivalent(mapped_order, order):
+            return _extract_external_order_id(item)
+    return None
 
 
 def should_submit_order(
@@ -32,6 +160,19 @@ def submit_agent_order_if_allowed(
 ) -> dict | None:
     if not should_submit_order(state, order):
         return None
+
+    if order is None:
+        return None
+
+    existing_order_id = find_equivalent_external_pending_order_id(
+        order_service=order_service,
+        account_id=account_id,
+        symbol=symbol,
+        order=order,
+    )
+    if existing_order_id is not None:
+        return None
+
     return order_service.submit_pending_order(account_id, order, symbol)
 
 
@@ -189,6 +330,7 @@ def manage_active_trade_exit_orders(
 
 
 __all__ = [
+    "find_equivalent_external_pending_order_id",
     "should_submit_order",
     "submit_agent_order_if_allowed",
     "should_close_active_trade",
@@ -199,4 +341,3 @@ __all__ = [
     "should_manage_exit_orders",
     "manage_active_trade_exit_orders",
 ]
-
