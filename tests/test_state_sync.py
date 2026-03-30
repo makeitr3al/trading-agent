@@ -258,7 +258,7 @@ def test_build_agent_state_from_propr_data_preserves_strategic_memory_fields_fro
 
 
 def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_valid_orders_exist() -> None:
-    with pytest.raises(ValueError, match="Multiple valid open orders found in Propr state"):
+    with pytest.raises(ValueError, match="Multiple pending entry orders found in Propr state"):
         build_agent_state_from_propr_data(
             orders_payload={
                 "data": [
@@ -285,7 +285,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
 
 
 def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_valid_positions_exist() -> None:
-    with pytest.raises(ValueError, match="Multiple valid open positions found in Propr state"):
+    with pytest.raises(ValueError, match="Multiple open positions found in Propr state"):
         build_agent_state_from_propr_data(
             orders_payload={"data": []},
             positions_payload={
@@ -752,3 +752,103 @@ def test_build_agent_state_from_propr_data_tracks_unbound_exit_orders_when_no_ac
     assert state.active_trade is None
     assert state.stop_loss_order_id == "sl-unbound"
     assert state.take_profit_order_id == "tp-unbound"
+
+
+def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_stop_loss_exit_orders_exist_for_active_position() -> None:
+    with pytest.raises(ValueError, match="Multiple active stop-loss exit orders found for position 'position-123'"):
+        build_agent_state_from_propr_data(
+            orders_payload={
+                "data": [
+                    {
+                        "orderId": "sl-order-1",
+                        "symbol": "BTC/USDC",
+                        "type": "stop_market",
+                        "side": "sell",
+                        "positionId": "position-123",
+                        "reduceOnly": True,
+                        "status": "open",
+                    },
+                    {
+                        "orderId": "sl-order-2",
+                        "symbol": "BTC/USDC",
+                        "type": "stop_market",
+                        "side": "sell",
+                        "positionId": "position-123",
+                        "reduceOnly": True,
+                        "status": "open",
+                    },
+                ]
+            },
+            positions_payload={
+                "data": [
+                    {
+                        "symbol": "BTC/USDC",
+                        "status": "open",
+                        "positionSide": "long",
+                        "entryPrice": "100.5",
+                        "stopLoss": "95.0",
+                        "takeProfit": "110.0",
+                        "quantity": "1.25",
+                        "positionId": "position-123",
+                    }
+                ]
+            },
+            symbol="BTC/USDC",
+        )
+
+
+
+def test_build_agent_state_from_propr_data_raises_value_error_when_exit_orders_belong_to_unrelated_position() -> None:
+    with pytest.raises(ValueError, match="Stop-loss exit orders found for unrelated positions in Propr state"):
+        build_agent_state_from_propr_data(
+            orders_payload={
+                "data": [
+                    {
+                        "orderId": "sl-other-position",
+                        "symbol": "BTC/USDC",
+                        "type": "stop_market",
+                        "side": "sell",
+                        "positionId": "old-position",
+                        "reduceOnly": True,
+                        "status": "open",
+                    }
+                ]
+            },
+            positions_payload={
+                "data": [
+                    {
+                        "symbol": "BTC/USDC",
+                        "status": "open",
+                        "positionSide": "long",
+                        "entryPrice": "100.5",
+                        "stopLoss": "95.0",
+                        "takeProfit": "110.0",
+                        "quantity": "1.25",
+                        "positionId": "active-position",
+                    }
+                ]
+            },
+            symbol="BTC/USDC",
+        )
+
+
+
+def test_build_agent_state_from_propr_data_raises_value_error_when_bound_exit_orders_exist_without_active_position() -> None:
+    with pytest.raises(ValueError, match="Take-profit exit orders found without active position in Propr state"):
+        build_agent_state_from_propr_data(
+            orders_payload={
+                "data": [
+                    {
+                        "orderId": "tp-order-1",
+                        "symbol": "BTC/USDC",
+                        "type": "take_profit_limit",
+                        "side": "sell",
+                        "positionId": "position-123",
+                        "reduceOnly": True,
+                        "status": "open",
+                    }
+                ]
+            },
+            positions_payload={"data": []},
+            symbol="BTC/USDC",
+        )

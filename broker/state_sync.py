@@ -326,23 +326,71 @@ def _extract_account_open_positions_count_from_payload(positions_payload: dict |
 
 
 
-def _filter_exit_order_ids_for_active_position(
+def _format_conflict_ids(values: list[str | None]) -> str:
+    normalized = [str(value).strip() for value in values if value is not None and str(value).strip()]
+    if not normalized:
+        return "n/a"
+    return ", ".join(normalized)
+
+
+
+def _resolve_exit_order_ids_for_active_position(
+    exit_kind: str,
     exit_entries: list[tuple[str, str | None]],
     active_position_id: str | None,
 ) -> list[str]:
     if not exit_entries:
         return []
 
-    if active_position_id is not None:
-        exact_matches = [order_id for order_id, position_id in exit_entries if position_id == active_position_id]
-        if exact_matches:
-            return exact_matches
+    label = "stop-loss" if exit_kind == "stop_loss" else "take-profit"
+    bound_entries = [(order_id, position_id) for order_id, position_id in exit_entries if position_id is not None]
+    unbound_ids = [order_id for order_id, position_id in exit_entries if position_id is None]
 
-        unbound_matches = [order_id for order_id, position_id in exit_entries if position_id is None]
-        if unbound_matches:
-            return unbound_matches
+    if active_position_id is None:
+        if bound_entries:
+            raise ValueError(
+                f"{label.capitalize()} exit orders found without active position in Propr state: "
+                f"order_ids=[{_format_conflict_ids([order_id for order_id, _ in bound_entries])}], "
+                f"position_ids=[{_format_conflict_ids([position_id for _, position_id in bound_entries])}]"
+            )
+        if len(unbound_ids) > 1:
+            raise ValueError(
+                f"Multiple unbound active {label} exit orders found in Propr state: "
+                f"order_ids=[{_format_conflict_ids(unbound_ids)}]"
+            )
+        return unbound_ids
 
-    return [order_id for order_id, _ in exit_entries]
+    exact_ids = [order_id for order_id, position_id in bound_entries if position_id == active_position_id]
+    foreign_entries = [(order_id, position_id) for order_id, position_id in bound_entries if position_id != active_position_id]
+
+    if len(exact_ids) > 1:
+        raise ValueError(
+            f"Multiple active {label} exit orders found for position '{active_position_id}' in Propr state: "
+            f"order_ids=[{_format_conflict_ids(exact_ids)}]"
+        )
+    if exact_ids and unbound_ids:
+        raise ValueError(
+            f"Conflicting {label} exit orders found for position '{active_position_id}' in Propr state: "
+            f"exact_order_ids=[{_format_conflict_ids(exact_ids)}], "
+            f"unbound_order_ids=[{_format_conflict_ids(unbound_ids)}]"
+        )
+    if exact_ids:
+        return exact_ids
+    if len(unbound_ids) > 1:
+        raise ValueError(
+            f"Multiple unbound active {label} exit orders found in Propr state: "
+            f"order_ids=[{_format_conflict_ids(unbound_ids)}]"
+        )
+    if unbound_ids:
+        return unbound_ids
+    if foreign_entries:
+        raise ValueError(
+            f"{label.capitalize()} exit orders found for unrelated positions in Propr state: "
+            f"active_position_id='{active_position_id}', "
+            f"order_ids=[{_format_conflict_ids([order_id for order_id, _ in foreign_entries])}], "
+            f"position_ids=[{_format_conflict_ids([position_id for _, position_id in foreign_entries])}]"
+        )
+    return []
 
 
 
@@ -398,20 +446,21 @@ def build_agent_state_from_propr_data(
     ]
 
     if len(valid_order_entries) > 1:
-        raise ValueError("Multiple valid open orders found in Propr state")
+        raise ValueError(
+            f"Multiple pending entry orders found in Propr state: "
+            f"order_ids=[{_format_conflict_ids([order_id for _, order_id in valid_order_entries])}]"
+        )
     if len(mapped_positions) > 1:
-        raise ValueError("Multiple valid open positions found in Propr state")
+        raise ValueError(
+            f"Multiple open positions found in Propr state: "
+            f"position_ids=[{_format_conflict_ids([position.position_id for position in mapped_positions])}]"
+        )
 
     active_trade = mapped_positions[0] if mapped_positions else None
     active_position_id = active_trade.position_id if active_trade is not None else None
 
-    stop_loss_order_ids = _filter_exit_order_ids_for_active_position(stop_loss_exit_entries, active_position_id)
-    take_profit_order_ids = _filter_exit_order_ids_for_active_position(take_profit_exit_entries, active_position_id)
-
-    if len(stop_loss_order_ids) > 1:
-        raise ValueError("Multiple active stop-loss exit orders found in Propr state")
-    if len(take_profit_order_ids) > 1:
-        raise ValueError("Multiple active take-profit exit orders found in Propr state")
+    stop_loss_order_ids = _resolve_exit_order_ids_for_active_position("stop_loss", stop_loss_exit_entries, active_position_id)
+    take_profit_order_ids = _resolve_exit_order_ids_for_active_position("take_profit", take_profit_exit_entries, active_position_id)
 
     pending_order: Order | None = None
     pending_order_id: str | None = None
@@ -474,3 +523,5 @@ __all__ = [
     "build_agent_state_from_propr_data",
     "sync_agent_state_from_propr",
 ]
+
+
