@@ -611,3 +611,144 @@ def test_extract_account_unrealized_pnl_from_payload_returns_none_when_payload_h
     assert pnl is None
 
 
+
+def test_map_propr_order_to_internal_reads_position_size_and_created_at_aliases() -> None:
+    order = map_propr_order_to_internal(
+        {
+            "side": "buy",
+            "type": "stop_limit",
+            "entryPrice": "110.0",
+            "internal_stop_loss": "100.0",
+            "internal_take_profit": "130.0",
+            "qty": "0.75",
+            "status": "working",
+            "submittedAt": "2026-03-30T07:00:00Z",
+        }
+    )
+
+    assert order is not None
+    assert order.status == OrderStatus.PENDING
+    assert order.position_size == 0.75
+    assert order.created_at == "2026-03-30T07:00:00Z"
+
+
+
+def test_map_propr_position_to_internal_reads_alias_fields_and_active_status() -> None:
+    trade = map_propr_position_to_internal(
+        {
+            "status": "active",
+            "positionSide": "long",
+            "avgEntryPrice": "100.25",
+            "internal_stop_loss": "95.5",
+            "internal_take_profit": "110.75",
+            "size": "1.5",
+            "createdAt": "2026-03-30T06:55:00Z",
+            "positionId": "position-abc",
+        }
+    )
+
+    assert trade is not None
+    assert trade.entry == 100.25
+    assert trade.stop_loss == 95.5
+    assert trade.take_profit == 110.75
+    assert trade.quantity == 1.5
+    assert trade.position_id == "position-abc"
+    assert trade.opened_at == "2026-03-30T06:55:00Z"
+
+
+
+def test_build_agent_state_from_propr_data_prefers_exit_orders_linked_to_active_position() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "orderId": "tp-old-position",
+                    "symbol": "BTC/USDC",
+                    "type": "take_profit_limit",
+                    "side": "sell",
+                    "positionId": "old-position",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+                {
+                    "orderId": "tp-active-position",
+                    "symbol": "BTC/USDC",
+                    "type": "take_profit_limit",
+                    "side": "sell",
+                    "positionId": "active-position",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+                {
+                    "orderId": "sl-old-position",
+                    "symbol": "BTC/USDC",
+                    "type": "stop_market",
+                    "side": "sell",
+                    "positionId": "old-position",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+                {
+                    "orderId": "sl-active-position",
+                    "symbol": "BTC/USDC",
+                    "type": "stop_market",
+                    "side": "sell",
+                    "positionId": "active-position",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+            ]
+        },
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "active-position",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+    )
+
+    assert state.active_trade is not None
+    assert state.active_trade.position_id == "active-position"
+    assert state.stop_loss_order_id == "sl-active-position"
+    assert state.take_profit_order_id == "tp-active-position"
+
+
+
+def test_build_agent_state_from_propr_data_tracks_unbound_exit_orders_when_no_active_trade_exists() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "orderId": "tp-unbound",
+                    "symbol": "BTC/USDC",
+                    "type": "take_profit_limit",
+                    "side": "sell",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+                {
+                    "orderId": "sl-unbound",
+                    "symbol": "BTC/USDC",
+                    "type": "stop_market",
+                    "side": "sell",
+                    "reduceOnly": True,
+                    "status": "open",
+                },
+            ]
+        },
+        positions_payload={"data": []},
+        symbol="BTC/USDC",
+    )
+
+    assert state.active_trade is None
+    assert state.stop_loss_order_id == "sl-unbound"
+    assert state.take_profit_order_id == "tp-unbound"

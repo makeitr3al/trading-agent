@@ -15,6 +15,7 @@ from models.trade import Trade, TradeDirection, TradeType
 # TODO: Later add websocket-based sync.
 
 
+
 def _get_items(payload: dict | list[dict]) -> list[dict]:
     if isinstance(payload, list):
         return payload
@@ -24,11 +25,13 @@ def _get_items(payload: dict | list[dict]) -> list[dict]:
     return []
 
 
+
 def _get_first(payload: dict[str, Any], keys: list[str]) -> Any:
     for key in keys:
         if key in payload and payload[key] is not None:
             return payload[key]
     return None
+
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -40,8 +43,10 @@ def _to_decimal(value: Any) -> Decimal | None:
         return None
 
 
+
 def _extract_decimal(payload: dict[str, Any], keys: list[str]) -> Decimal | None:
     return _to_decimal(_get_first(payload, keys))
+
 
 
 def _normalize_side(value: Any) -> str | None:
@@ -55,6 +60,7 @@ def _normalize_side(value: Any) -> str | None:
     return None
 
 
+
 def _normalize_order_type(value: Any) -> str | None:
     if value is None:
         return None
@@ -66,17 +72,43 @@ def _normalize_order_type(value: Any) -> str | None:
     return None
 
 
-def _map_order_status(value: Any) -> OrderStatus | None:
+
+def _normalize_status(value: Any) -> str | None:
     if value is None:
         return None
-    normalized = str(value).strip().lower()
-    if normalized in {"pending", "open", "new", "partially_filled", "partial_fill", "partially-filled"}:
+    normalized = str(value).strip().lower().replace("-", "_")
+    return normalized or None
+
+
+
+def _map_order_status(value: Any) -> OrderStatus | None:
+    normalized = _normalize_status(value)
+    if normalized is None:
+        return None
+    if normalized in {
+        "pending",
+        "open",
+        "new",
+        "partially_filled",
+        "partial_fill",
+        "working",
+        "accepted",
+        "active",
+        "live",
+        "triggered",
+    }:
         return OrderStatus.PENDING
-    if normalized in {"filled", "executed"}:
+    if normalized in {"filled", "executed", "closed"}:
         return OrderStatus.FILLED
-    if normalized in {"cancelled", "canceled"}:
+    if normalized in {"cancelled", "canceled", "rejected", "expired"}:
         return OrderStatus.CANCELLED
     return None
+
+
+
+def _is_open_position_status(value: Any) -> bool:
+    return _normalize_status(value) in {"open", "active", "live"}
+
 
 
 def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
@@ -87,11 +119,11 @@ def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
     return text or None
 
 
+
 def _raw_order_type(value: Any) -> str | None:
-    if value is None:
-        return None
-    normalized = str(value).strip().lower().replace("-", "_")
+    normalized = _normalize_status(value)
     return normalized or None
+
 
 
 def _truthy_flag(value: Any) -> bool:
@@ -102,11 +134,13 @@ def _truthy_flag(value: Any) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
+
 def _normalize_symbol(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip().upper()
     return text or None
+
 
 
 def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
@@ -124,6 +158,7 @@ def _extract_payload_symbol(payload: dict[str, Any]) -> str | None:
     return _normalize_symbol(_get_first(payload, ["coin"]))
 
 
+
 def _payload_matches_symbol(payload: dict[str, Any], symbol: str | None) -> bool:
     if symbol is None:
         return True
@@ -131,6 +166,7 @@ def _payload_matches_symbol(payload: dict[str, Any], symbol: str | None) -> bool
     if payload_symbol is None:
         return True
     return payload_symbol == symbol.strip().upper()
+
 
 
 def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
@@ -150,12 +186,16 @@ def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
     return "pending_entry"
 
 
+
 def map_propr_order_to_internal(order_payload: dict) -> Order | None:
     side = _normalize_side(_get_first(order_payload, ["side", "direction", "positionSide"]))
     order_type = _normalize_order_type(_get_first(order_payload, ["order_type", "type"]))
-    entry = _to_decimal(_get_first(order_payload, ["entry", "price", "entry_price", "triggerPrice"]))
-    stop_loss = _to_decimal(_get_first(order_payload, ["stop_loss", "stopLoss", "sl"]))
-    take_profit = _to_decimal(_get_first(order_payload, ["take_profit", "takeProfit", "tp"]))
+    entry = _to_decimal(
+        _get_first(order_payload, ["entry", "price", "entry_price", "entryPrice", "triggerPrice", "trigger_price"])
+    )
+    stop_loss = _to_decimal(_get_first(order_payload, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"]))
+    take_profit = _to_decimal(_get_first(order_payload, ["take_profit", "takeProfit", "tp", "internal_take_profit"]))
+    quantity = _to_decimal(_get_first(order_payload, ["quantity", "qty", "size", "position_size", "positionSize"]))
     status = _map_order_status(_get_first(order_payload, ["status"]))
 
     if side is None or order_type is None or status is None:
@@ -180,24 +220,28 @@ def map_propr_order_to_internal(order_payload: dict) -> Order | None:
         entry=float(entry),
         stop_loss=float(stop_loss),
         take_profit=float(take_profit),
+        position_size=float(quantity) if quantity is not None else None,
         signal_source=str(order_payload.get("signal_source") or order_payload.get("signalSource") or "external_unknown"),
-        created_at=_get_first(order_payload, ["created_at", "createdAt"]),
+        created_at=_get_first(order_payload, ["created_at", "createdAt", "submittedAt", "updatedAt", "timestamp"]),
     )
+
 
 
 def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
     status = _get_first(position_payload, ["status"])
-    if str(status).strip().lower() != "open":
+    if not _is_open_position_status(status):
         return None
 
-    quantity = _to_decimal(_get_first(position_payload, ["quantity"]))
+    quantity = _to_decimal(_get_first(position_payload, ["quantity", "qty", "size", "positionSize"]))
     if quantity is not None and quantity == Decimal("0"):
         return None
 
     side = _normalize_side(_get_first(position_payload, ["side", "direction", "positionSide"]))
-    entry = _to_decimal(_get_first(position_payload, ["entry", "entry_price", "entryPrice", "price"]))
-    stop_loss = _to_decimal(_get_first(position_payload, ["stop_loss", "stopLoss", "sl"]))
-    take_profit = _to_decimal(_get_first(position_payload, ["take_profit", "takeProfit", "tp"]))
+    entry = _to_decimal(
+        _get_first(position_payload, ["entry", "entry_price", "entryPrice", "avgEntryPrice", "averageEntryPrice", "price"])
+    )
+    stop_loss = _to_decimal(_get_first(position_payload, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"]))
+    take_profit = _to_decimal(_get_first(position_payload, ["take_profit", "takeProfit", "tp", "internal_take_profit"]))
 
     if side is None or entry is None or stop_loss is None or take_profit is None:
         return None
@@ -220,8 +264,9 @@ def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
         position_id=_get_first(position_payload, ["positionId", "position_id", "id"]),
         is_active=True,
         break_even_activated=False,
-        opened_at=_get_first(position_payload, ["opened_at", "openedAt"]),
+        opened_at=_get_first(position_payload, ["opened_at", "openedAt", "createdAt", "updatedAt", "timestamp"]),
     )
+
 
 
 def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[dict]) -> float | None:
@@ -275,8 +320,30 @@ def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[
     return None
 
 
+
 def _extract_account_open_positions_count_from_payload(positions_payload: dict | list[dict]) -> int:
     return sum(1 for item in _get_items(positions_payload) if map_propr_position_to_internal(item) is not None)
+
+
+
+def _filter_exit_order_ids_for_active_position(
+    exit_entries: list[tuple[str, str | None]],
+    active_position_id: str | None,
+) -> list[str]:
+    if not exit_entries:
+        return []
+
+    if active_position_id is not None:
+        exact_matches = [order_id for order_id, position_id in exit_entries if position_id == active_position_id]
+        if exact_matches:
+            return exact_matches
+
+        unbound_matches = [order_id for order_id, position_id in exit_entries if position_id is None]
+        if unbound_matches:
+            return unbound_matches
+
+    return [order_id for order_id, _ in exit_entries]
+
 
 
 def build_agent_state_from_propr_data(
@@ -289,8 +356,8 @@ def build_agent_state_from_propr_data(
 
     all_valid_order_entries: list[tuple[Order, str | None]] = []
     valid_order_entries: list[tuple[Order, str | None]] = []
-    stop_loss_order_ids: list[str] = []
-    take_profit_order_ids: list[str] = []
+    stop_loss_exit_entries: list[tuple[str, str | None]] = []
+    take_profit_exit_entries: list[tuple[str, str | None]] = []
     for item in _get_items(orders_payload):
         order_classification = _classify_open_order_payload(item)
         external_order_id = _extract_external_order_id(item)
@@ -305,37 +372,42 @@ def build_agent_state_from_propr_data(
 
         if not _payload_matches_symbol(item, normalized_symbol):
             continue
+        if external_order_id is None:
+            continue
 
+        linked_position_id = _get_first(item, ["positionId", "position_id"])
         if order_classification == "stop_loss_exit":
-            if external_order_id is not None:
-                stop_loss_order_ids.append(external_order_id)
+            stop_loss_exit_entries.append((external_order_id, linked_position_id))
             continue
         if order_classification == "take_profit_exit":
-            if external_order_id is not None:
-                take_profit_order_ids.append(external_order_id)
+            take_profit_exit_entries.append((external_order_id, linked_position_id))
             continue
 
-    all_mapped_positions = [
-        position
-        for position in (
-            map_propr_position_to_internal(item)
+    mapped_position_entries = [
+        (item, position)
+        for item, position in (
+            (item, map_propr_position_to_internal(item))
             for item in _get_items(positions_payload)
         )
         if position is not None
     ]
     mapped_positions = [
         position
-        for item, position in (
-            (item, map_propr_position_to_internal(item))
-            for item in _get_items(positions_payload)
-        )
-        if position is not None and _payload_matches_symbol(item, normalized_symbol)
+        for item, position in mapped_position_entries
+        if _payload_matches_symbol(item, normalized_symbol)
     ]
 
     if len(valid_order_entries) > 1:
         raise ValueError("Multiple valid open orders found in Propr state")
     if len(mapped_positions) > 1:
         raise ValueError("Multiple valid open positions found in Propr state")
+
+    active_trade = mapped_positions[0] if mapped_positions else None
+    active_position_id = active_trade.position_id if active_trade is not None else None
+
+    stop_loss_order_ids = _filter_exit_order_ids_for_active_position(stop_loss_exit_entries, active_position_id)
+    take_profit_order_ids = _filter_exit_order_ids_for_active_position(take_profit_exit_entries, active_position_id)
+
     if len(stop_loss_order_ids) > 1:
         raise ValueError("Multiple active stop-loss exit orders found in Propr state")
     if len(take_profit_order_ids) > 1:
@@ -348,7 +420,6 @@ def build_agent_state_from_propr_data(
     if valid_order_entries:
         pending_order, pending_order_id = valid_order_entries[0]
 
-    active_trade = mapped_positions[0] if mapped_positions else None
     account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
     account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
 
@@ -376,6 +447,7 @@ def build_agent_state_from_propr_data(
             "account_unrealized_pnl": account_unrealized_pnl,
         }
     )
+
 
 
 def sync_agent_state_from_propr(
