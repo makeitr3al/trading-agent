@@ -14,6 +14,17 @@
   actions:
     - action: script.trading_agent_scharf_lauf_haos
 
+- alias: Trading Agent Journal Panel Sync
+  id: trading_agent_journal_panel_sync
+  mode: restart
+  triggers:
+    - trigger: homeassistant
+      event: start
+    - trigger: state
+      entity_id: sensor.trading_agent_run_summary
+  actions:
+    - action: shell_command.trading_agent_sync_journal_table_haos
+
 - alias: Trading Agent Push nach Lauf
   id: trading_agent_push_nach_lauf
   mode: single
@@ -40,8 +51,8 @@
                 message: "{{ state_attr('sensor.trading_agent_run_summary', 'notification_message') or 'Trading Agent Lauf abgeschlossen.' }}"
                 data:
                   tag: trading-agent-last-run
-                  clickAction: /trading-agent
-                  url: /trading-agent
+                  clickAction: /trading-agent-admin
+                  url: /trading-agent-admin
       default:
         - action: persistent_notification.create
           data:

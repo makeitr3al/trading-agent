@@ -28,7 +28,7 @@ views:
         title: Admin-Panel
         content: >-
           Die volle Bedienung liegt jetzt im zentralen Admin-Panel unter
-          [**Trading Agent**](/trading-agent).
+          [**Trading Agent Admin**](/trading-agent-admin).
 
           Dort findest du:
           - Steuerung des Add-ons
@@ -55,3 +55,4 @@ views:
           `{{ line }}`
           {% endfor %}
           {% endif %}
+
