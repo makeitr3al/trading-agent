@@ -231,6 +231,95 @@ def test_run_agent_cycle_carries_forward_active_trade_when_updated_trade_exists(
     assert new_state.active_trade is not None
 
 
+def test_run_agent_cycle_stamps_created_at_on_new_pending_order(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    order = _make_order()
+    result_stub = _make_result(
+        decision=_make_decision(
+            DecisionAction.PREPARE_TREND_ORDER,
+            selected_signal_type="TREND_LONG",
+        ),
+        order=order,
+    )
+
+    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(),
+    )
+
+    assert new_state.pending_order is not None
+    assert new_state.pending_order.created_at == candles[-1].timestamp.isoformat()
+
+
+
+def test_run_agent_cycle_preserves_created_at_on_unchanged_pending_order(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    existing_created_at = candles[-2].timestamp.isoformat()
+    pending_order = _make_pending_order(
+        OrderType.BUY_STOP,
+        "manual_pending_order",
+    ).model_copy(update={"created_at": existing_created_at})
+    result_stub = _make_result(
+        decision=_make_decision(DecisionAction.NO_ACTION),
+    )
+
+    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(pending_order=pending_order),
+    )
+
+    assert new_state.pending_order is not None
+    assert new_state.pending_order.created_at == existing_created_at
+
+
+
+def test_run_agent_cycle_refreshes_created_at_when_trend_pending_order_is_rebuilt(
+    monkeypatch,
+) -> None:
+    candles = _make_candles()
+    old_created_at = candles[-2].timestamp.isoformat()
+    old_order = _make_order().model_copy(update={"created_at": old_created_at})
+    refreshed_signal = SignalState(
+        signal_type=SignalType.TREND_LONG,
+        is_valid=True,
+        reason="trend signal detected",
+        entry=115.0,
+        stop_loss=105.0,
+        take_profit=135.0,
+    )
+    state = AgentState(pending_order=old_order)
+    result_stub = _make_result(
+        decision=_make_decision(DecisionAction.NO_ACTION),
+        trend_signal=refreshed_signal,
+    )
+
+    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=state,
+    )
+
+    assert new_state.pending_order is not None
+    assert new_state.pending_order.created_at == candles[-1].timestamp.isoformat()
+    assert new_state.pending_order.created_at != old_created_at
+
+
+
 def test_run_agent_cycle_stores_pending_order_when_strategy_runner_returns_an_order(
     monkeypatch,
 ) -> None:
@@ -745,8 +834,14 @@ def test_run_agent_cycle_replaces_old_pending_order_when_a_new_order_is_generate
         state=state,
     )
 
-    assert new_state.pending_order == new_order
+    assert new_state.pending_order is not None
     assert new_state.pending_order != old_order
+    assert new_state.pending_order.entry == new_order.entry
+    assert new_state.pending_order.stop_loss == new_order.stop_loss
+    assert new_state.pending_order.take_profit == new_order.take_profit
+    assert new_state.pending_order.position_size == new_order.position_size
+    assert new_state.pending_order.signal_source == new_order.signal_source
+    assert new_state.pending_order.created_at == candles[-1].timestamp.isoformat()
 
 
 def test_run_agent_cycle_deletes_old_trend_pending_order_when_current_trend_signal_is_no_longer_valid(

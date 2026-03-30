@@ -22,7 +22,6 @@ from strategy.strategy_runner import run_strategy_cycle
 # TODO: Later add real broker fill timing.
 # TODO: Later add broker sync.
 # TODO: Later implement aggressive reversal as a real trade state update.
-# TODO: Later add order age and created_at handling.
 
 
 def _is_order_filled(order: Order, candle: Candle) -> bool:
@@ -59,6 +58,14 @@ def _build_trade_from_filled_order(order: Order, fill_timestamp: str | None = No
         break_even_activated=False,
         opened_at=fill_timestamp,
     )
+
+
+def _with_pending_order_created_at(order: Order | None, created_at: str) -> Order | None:
+    if order is None:
+        return None
+    if order.created_at == created_at:
+        return order
+    return order.model_copy(update={"created_at": created_at})
 
 
 def _is_countertrend_signal_consumed_in_regime(
@@ -259,8 +266,10 @@ def run_agent_cycle(
             }
         )
 
+    pending_order_created_at = latest_candle.timestamp.isoformat()
+
     if result.order is not None:
-        pending_order = result.order
+        pending_order = _with_pending_order_created_at(result.order, pending_order_created_at)
     elif (
         old_pending_order is not None
         and old_pending_order.signal_source
@@ -277,18 +286,21 @@ def run_agent_cycle(
             and result.trend_signal.signal_type.value.lower()
             == old_pending_order.signal_source
         ):
-            pending_order = build_order_from_decision(
-                decision=DecisionResult(
-                    action=DecisionAction.PREPARE_TREND_ORDER,
-                    reason="refresh trend pending order",
-                    selected_signal_type=result.trend_signal.signal_type.value,
+            pending_order = _with_pending_order_created_at(
+                build_order_from_decision(
+                    decision=DecisionResult(
+                        action=DecisionAction.PREPARE_TREND_ORDER,
+                        reason="refresh trend pending order",
+                        selected_signal_type=result.trend_signal.signal_type.value,
+                    ),
+                    trend_signal=result.trend_signal,
+                    countertrend_signal=result.countertrend_signal,
+                    current_price=current_price,
+                    account_balance=account_balance,
+                    risk_per_trade_pct=config.risk_per_trade_pct,
+                    buy_spread=config.buy_spread,
                 ),
-                trend_signal=result.trend_signal,
-                countertrend_signal=result.countertrend_signal,
-                current_price=current_price,
-                account_balance=account_balance,
-                risk_per_trade_pct=config.risk_per_trade_pct,
-                buy_spread=config.buy_spread,
+                pending_order_created_at,
             )
         else:
             pending_order = None
