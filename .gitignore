@@ -29,6 +29,7 @@ trading-agent-data/
 Thumbs.db
 .vscode/
 .idea/
+trading-agent.code-workspace
 
 # pytest / cache
 .pytest_cache/
