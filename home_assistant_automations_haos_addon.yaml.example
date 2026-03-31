@@ -14,6 +14,17 @@
   actions:
     - action: script.trading_agent_scharf_lauf_haos
 
+- alias: Trading Agent Helper Sync
+  id: trading_agent_helper_sync
+  mode: restart
+  triggers:
+    - trigger: homeassistant
+      event: start
+  actions:
+    - delay:
+        seconds: 5
+    - action: script.trading_agent_load_current_config_haos
+
 - alias: Trading Agent Panel Assets Sync
   id: trading_agent_panel_assets_sync
   mode: restart

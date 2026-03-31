@@ -1,6 +1,7 @@
 const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
 const HOME_URL = "/lovelace";
+const PANEL_VERSION = "2026-03-31";
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -731,6 +732,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           <span class="chip">PnL: ${formatPnl(liveStatus?.attributes?.account_unrealized_pnl)}</span>
           <span class="chip">Offene Positionen: ${formatValue(liveStatus?.attributes?.account_open_positions_count)}</span>
           <span class="chip">Tests: ${formatValue(this.entity(ENTITIES.tests)?.state)}</span>
+          <span class="chip">Panel: ${escapeHtml(PANEL_VERSION)}</span>
         </div>
       </section>
       <nav class="tabs">${TABS.map(([key, label]) => `<button class="tab ${this.currentTab === key ? "active" : ""}" data-action="tab" data-tab="${key}">${escapeHtml(label)}</button>`).join("")}</nav>

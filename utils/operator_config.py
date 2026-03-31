@@ -13,12 +13,14 @@ DEFAULT_OPERATOR_CONFIG = {
     "mode": "scharf",
     "environment": "beta",
     "leverage": 1,
-    "markets": "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL",
+    "markets": "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY",
     "scheduling_enabled": False,
     "schedule_time": "07:00",
 }
 SUPPORTED_MODES = ("scharf", "preflight", "beta_write")
 SUPPORTED_ENVIRONMENTS = ("beta", "prod")
+DEFAULT_MARKETS = DEFAULT_OPERATOR_CONFIG["markets"]
+LEGACY_DEFAULT_MARKETS = "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL"
 
 
 def resolve_operator_data_path() -> Path:
@@ -64,6 +66,8 @@ def _normalize_leverage(value: Any) -> int:
 
 def _normalize_markets(value: str | None) -> str:
     raw_value = (value or DEFAULT_OPERATOR_CONFIG["markets"]).strip()
+    if raw_value.upper() == LEGACY_DEFAULT_MARKETS.upper():
+        raw_value = DEFAULT_MARKETS
     entries = [item.strip() for item in raw_value.split(",") if item.strip()]
     if not entries:
         raise ValueError("markets must not be empty")

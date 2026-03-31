@@ -106,3 +106,59 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
     assert 'export OPERATOR_LIVE_STATUS_PATH=' in export_result.stdout
 
 
+
+
+def test_operator_config_missing_file_uses_new_six_market_default(tmp_path: Path) -> None:
+    data_path = tmp_path / 'trading-agent-data'
+    config_path = data_path / 'operator_config.json'
+    env = dict(os.environ)
+    env['TRADING_AGENT_DATA_PATH'] = str(data_path)
+    env['TRADING_AGENT_OPERATOR_CONFIG_PATH'] = str(config_path)
+
+    show_result = subprocess.run(
+        [sys.executable, 'operator_config.py', 'show'],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert show_result.returncode == 0
+    payload = json.loads(show_result.stdout)
+    assert payload['config']['markets'] == 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY'
+
+
+def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) -> None:
+    data_path = tmp_path / 'trading-agent-data'
+    config_path = data_path / 'operator_config.json'
+    data_path.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                'mode': 'scharf',
+                'environment': 'beta',
+                'leverage': 1,
+                'markets': 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL',
+                'scheduling_enabled': False,
+                'schedule_time': '07:00',
+            }
+        ) + '\n',
+        encoding='utf-8',
+    )
+    env = dict(os.environ)
+    env['TRADING_AGENT_DATA_PATH'] = str(data_path)
+    env['TRADING_AGENT_OPERATOR_CONFIG_PATH'] = str(config_path)
+
+    show_result = subprocess.run(
+        [sys.executable, 'operator_config.py', 'show'],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert show_result.returncode == 0
+    payload = json.loads(show_result.stdout)
+    assert payload['config']['markets'] == 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY'

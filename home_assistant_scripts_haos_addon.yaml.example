@@ -1,6 +1,64 @@
 # Append to /config/scripts.yaml
 # This file contains only the Trading Agent script entries.
 
+trading_agent_load_current_config_haos:
+  alias: Trading Agent Konfiguration laden
+  mode: single
+  sequence:
+    - variables:
+        operator_mode: "{{ states('sensor.trading_agent_operator_config') }}"
+        operator_environment: "{{ state_attr('sensor.trading_agent_operator_config', 'environment') or 'beta' }}"
+        operator_leverage: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') or 1 }}"
+        operator_markets: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') or 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY' }}"
+        operator_scheduling_enabled: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') }}"
+        operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
+        ui_mode: >-
+          {% if operator_mode == 'preflight' %}
+            Preflight-Test
+          {% elif operator_mode == 'beta_write' %}
+            Beta-Write-Test
+          {% else %}
+            Scharf
+          {% endif %}
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.trading_agent_mode
+      data:
+        option: "{{ ui_mode | trim }}"
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.trading_agent_environment
+      data:
+        option: "{{ operator_environment }}"
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.trading_agent_leverage
+      data:
+        value: "{{ operator_leverage | int }}"
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.trading_agent_markets
+      data:
+        value: "{{ operator_markets }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ operator_scheduling_enabled in [true, 'true', 'True', 'on', '1'] }}"
+          sequence:
+            - action: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.trading_agent_scheduling_aktiv
+      default:
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.trading_agent_scheduling_aktiv
+    - action: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.trading_agent_schedule_time
+      data:
+        time: "{{ operator_schedule_time[:5] }}"
+
+
 trading_agent_save_current_config_haos:
   alias: Trading Agent Konfiguration speichern
   mode: single
@@ -102,3 +160,4 @@ trading_agent_reset_operator_config_haos:
   mode: single
   sequence:
     - action: shell_command.trading_agent_reset_operator_config_haos
+    - action: script.trading_agent_load_current_config_haos
