@@ -10,7 +10,10 @@ Usage:
     print(client.get_positions())
 """
 
+import logging
 import os
+import time
+from collections import deque
 from decimal import Decimal
 from typing import Any, Optional
 from ulid import ULID
@@ -20,7 +23,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 __version__ = "0.1.0"
+
+_RETRY_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+_MAX_RETRIES = 3
+_BACKOFF_BASE = 1.0  # seconds — doubles each retry: 1s, 2s, 4s
 
 
 class ProprAPIError(Exception):
@@ -80,12 +89,28 @@ class ProprClient:
         params: dict | None = None,
         json: dict | None = None,
     ) -> requests.Response:
-        """Make an API request and raise on error."""
+        """Make an API request and raise on error. Retries on 429/5xx with exponential backoff."""
         url = f"{self.base_url}{path}"
-        response = self._session.request(
-            method, url, params=params, json=json, timeout=self.timeout
-        )
+        response: requests.Response | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            response = self._session.request(method, url, params=params, json=json, timeout=self.timeout)
+            if response.status_code not in _RETRY_STATUS_CODES or attempt >= _MAX_RETRIES:
+                break
+            wait = _BACKOFF_BASE * (2 ** attempt)
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                if retry_after is not None:
+                    try:
+                        wait = float(retry_after)
+                    except ValueError:
+                        pass
+            logger.warning(
+                "_request: %s %s returned HTTP %d (attempt %d/%d), retrying in %.1fs",
+                method, path, response.status_code, attempt + 1, _MAX_RETRIES, wait,
+            )
+            time.sleep(wait)
 
+        assert response is not None
         if response.status_code >= 400:
             try:
                 body = response.json()
