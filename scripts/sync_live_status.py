@@ -8,7 +8,7 @@ import sys
 from broker.challenge_service import get_active_challenge_context
 from broker.propr_client import ProprClient
 from broker.state_sync import sync_agent_state_from_propr
-from config.propr_config import load_propr_config_from_env
+from utils.env_loader import load_propr_config_from_env
 from utils.live_status import write_live_status_from_state
 
 
