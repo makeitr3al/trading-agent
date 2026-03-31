@@ -36,3 +36,4 @@ class JournalEntry(BaseModel):
     status: str | None = None
     source_signal_type: str | None = None
     notes: str | None = None
+    lifecycle_id: str | None = None

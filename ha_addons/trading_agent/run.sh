@@ -70,9 +70,21 @@ PANEL_ASSET_TARGET="$PANEL_DIR/admin-panel.js"
 PANEL_JOURNAL_TABLE_PATH="$PANEL_DIR/journal_table.json"
 PANEL_LIVE_STATUS_PATH="$PANEL_DIR/live_status.json"
 
+# Extract version for cache-busting loader
+ADDON_VERSION=$(sed -n 's/^version: "\([^"]*\)".*/\1/p' "$APP_PATH/ha_addons/trading_agent/config.yaml" | tr -d '\r')
+
 mkdir -p "$PANEL_DIR"
 if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
-    cp "$PANEL_ASSET_SOURCE" "$PANEL_ASSET_TARGET"
+    # Copy actual panel to versioned filename (browser fetches new URL each version)
+    cp "$PANEL_ASSET_SOURCE" "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js"
+
+    # Create tiny loader at the original URL (what HA configuration.yaml points to)
+    cat > "$PANEL_ASSET_TARGET" << LOADER
+(function(){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-${ADDON_VERSION}.js";document.currentScript.parentNode.insertBefore(s,document.currentScript.nextSibling);})();
+LOADER
+
+    # Remove old versioned panel files (keep current only)
+    find "$PANEL_DIR" -name "admin-panel-*.js" ! -name "admin-panel-${ADDON_VERSION}.js" -delete 2>/dev/null || true
 fi
 
 bashio::log.info "Starting Trading Agent one-shot run"
@@ -113,9 +125,7 @@ run_finished_at="$(date -Iseconds)"
 python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 200 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
 python journal_table.py --path "$OPERATOR_JOURNAL_PATH" --output-path "$OPERATOR_JOURNAL_TABLE_PATH" || true
 cp "$OPERATOR_JOURNAL_TABLE_PATH" "$PANEL_JOURNAL_TABLE_PATH" || true
-if [[ ! -f "$OPERATOR_LIVE_STATUS_PATH" ]]; then
-    python live_status.py --environment "$OPERATOR_ENVIRONMENT" --source poll --websocket-connected false --output-path "$OPERATOR_LIVE_STATUS_PATH" || true
-fi
+python scripts/sync_live_status.py --output-path "$OPERATOR_LIVE_STATUS_PATH" || true
 cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_PATH" || true
 python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
 

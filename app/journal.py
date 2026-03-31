@@ -105,6 +105,7 @@ def build_journal_entries(
 ) -> list[JournalEntry]:
     timestamp = cycle_timestamp
     entry_date = _entry_date(timestamp)
+    cycle_lifecycle_id = f"{symbol}_{timestamp}"
 
     entries = [
         JournalEntry(
@@ -119,6 +120,7 @@ def build_journal_entries(
             used_signals=_used_signals(strategy_result),
             unused_signals=_unused_signals(strategy_result),
             notes=strategy_result.decision.reason if strategy_result is not None else skipped_reason,
+            lifecycle_id=cycle_lifecycle_id,
         )
     ]
 
@@ -149,6 +151,7 @@ def build_journal_entries(
                 status=order_status,
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes=f"pending order via {pending_order.signal_source}",
+                lifecycle_id=cycle_lifecycle_id,
             )
         )
 
@@ -171,6 +174,7 @@ def build_journal_entries(
                 status="filled",
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes="pending order filled into active trade",
+                lifecycle_id=f"{symbol}_{strategy_result.filled_trade.opened_at or timestamp}",
             )
         )
 
@@ -194,6 +198,7 @@ def build_journal_entries(
                 status="closed",
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes="active trade close executed",
+                lifecycle_id=f"{symbol}_{synced_active_trade.opened_at or timestamp}",
             )
         )
 

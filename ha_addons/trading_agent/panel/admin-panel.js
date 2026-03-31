@@ -1,7 +1,7 @@
 const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
 const HOME_URL = "/lovelace";
-const PANEL_VERSION = "2026-03-31-v0.3.8";
+const PANEL_VERSION = "2026-03-31-v0.3.9";
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -59,13 +59,10 @@ const TRADE_COLUMNS = [
   { key: "source_signal_type", label: "Signalquelle", sortable: true, filter: "select", optionKey: "signal_sources" },
   { key: "position_size", label: "Groesse", sortable: true, filter: "text" },
   { key: "entry_price", label: "Entry", sortable: true, filter: "text" },
-  { key: "stop_loss", label: "Stop Loss", sortable: true, filter: "text" },
-  { key: "take_profit", label: "Take Profit", sortable: true, filter: "text" },
+  { key: "stop_loss", label: "SL", sortable: true, filter: "text" },
+  { key: "take_profit", label: "TP", sortable: true, filter: "text" },
   { key: "close_price", label: "Close", sortable: true, filter: "text" },
   { key: "pnl", label: "PnL", sortable: true, filter: "text" },
-  { key: "fill_timestamp", label: "Fill-Zeit", sortable: true, filter: "text" },
-  { key: "close_timestamp", label: "Close-Zeit", sortable: true, filter: "text" },
-  { key: "notes", label: "Notizen", filter: "text" },
 ];
 
 const BASE_TABLE_STATE = {
@@ -137,6 +134,64 @@ function decisionBadgeClass(value) {
   if (v === "close_trend_trade") return "close";
   if (v.startsWith("adjust_")) return "info";
   return "neutral";
+}
+
+function buildLifecycleChains(tradeRows) {
+  const byId = new Map();
+  const ungrouped = [];
+  for (const row of tradeRows) {
+    if (row.lifecycle_id) {
+      if (!byId.has(row.lifecycle_id)) byId.set(row.lifecycle_id, []);
+      byId.get(row.lifecycle_id).push(row);
+    } else {
+      ungrouped.push(row);
+    }
+  }
+  const bySymbol = new Map();
+  for (const row of [...ungrouped].sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""))) {
+    const sym = row.symbol || "_";
+    if (!bySymbol.has(sym)) bySymbol.set(sym, [[]]);
+    const chains = bySymbol.get(sym);
+    chains[chains.length - 1].push(row);
+    if (row.status === "closed") chains.push([]);
+  }
+  const lifecycles = [];
+  for (const chain of byId.values()) {
+    lifecycles.push(chain.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || "")));
+  }
+  for (const chains of bySymbol.values()) {
+    for (const chain of chains) {
+      if (chain.length > 0) lifecycles.push(chain);
+    }
+  }
+  return lifecycles;
+}
+
+function buildTradeDetail(row, allTradeRows) {
+  const details = `<div class="detail-grid">
+    <div><span class="detail-label">Fill-Zeit</span> ${formatValue(row.fill_timestamp)}</div>
+    <div><span class="detail-label">Close-Zeit</span> ${formatValue(row.close_timestamp)}</div>
+    <div><span class="detail-label">Notizen</span> ${escapeHtml(row.notes ?? "-")}</div>
+  </div>`;
+  const chains = buildLifecycleChains(allTradeRows);
+  const chain = chains.find((c) => c.some((r) =>
+    r.timestamp === row.timestamp && r.symbol === row.symbol && r.entry_type === row.entry_type && r.status === row.status
+  )) || [];
+  const related = chain.filter((r) =>
+    !(r.timestamp === row.timestamp && r.entry_type === row.entry_type && r.status === row.status)
+  );
+  if (!related.length) return details;
+  const events = related.map((r) => `<div class="event-item">
+    <span class="event-time">${formatValue(r.timestamp)}</span>
+    <span class="pill ${badgeClass(r.status)}">${escapeHtml(r.entry_type ?? "")}: ${escapeHtml(r.status ?? "")}</span>
+    ${r.entry_price != null ? `<span>Entry: ${escapeHtml(String(r.entry_price))}</span>` : ""}
+    ${r.stop_loss != null ? `<span>SL: ${escapeHtml(String(r.stop_loss))}</span>` : ""}
+    ${r.take_profit != null ? `<span>TP: ${escapeHtml(String(r.take_profit))}</span>` : ""}
+    ${r.close_price != null ? `<span>Close: ${escapeHtml(String(r.close_price))}</span>` : ""}
+    ${r.pnl != null ? `<span>PnL: ${formatPnl(r.pnl)}</span>` : ""}
+    ${r.notes ? `<span class="event-note">${escapeHtml(r.notes)}</span>` : ""}
+  </div>`).join("");
+  return `${details}<div class="event-log"><h4>Ereignis-Verlauf</h4>${events}</div>`;
 }
 
 function compareValues(left, right) {
@@ -243,6 +298,7 @@ function snapshotFallback(journalState) {
       stop_loss: entry.stop_loss ?? null,
       take_profit: entry.take_profit ?? null,
       close_price: entry.close_price ?? null,
+      lifecycle_id: entry.lifecycle_id ?? null,
       pnl: entry.pnl ?? null,
       fill_timestamp: entry.fill_timestamp || null,
       close_timestamp: entry.close_timestamp || null,
@@ -302,6 +358,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._directLiveStatus = null;
     this._liveStatusInterval = null;
     this._lastJournalRefresh = 0;
+    this._expandedTradeRows = new Set();
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
@@ -650,8 +707,11 @@ class TradingAgentAdminPanel extends HTMLElement {
               ${pageRows.length
                 ? pageRows
                     .map(
-                      (row) =>
-                        `<tr>${columns
+                      (row, idx) => {
+                        const isTradesTable = (name === "trades");
+                        const globalIdx = (page - 1) * state.pageSize + idx;
+                        const isExpanded = isTradesTable && this._expandedTradeRows.has(globalIdx);
+                        const cells = columns
                           .map((column) => {
                             const value = cellValue(row, column);
                             if (column.key === "pnl") return `<td>${formatPnl(value)}</td>`;
@@ -664,7 +724,13 @@ class TradingAgentAdminPanel extends HTMLElement {
                             if (column.boolean) return `<td>${value ? "Ja" : "Nein"}</td>`;
                             return `<td>${formatValue(value)}</td>`;
                           })
-                          .join("")}</tr>`
+                          .join("");
+                        let html = `<tr class="${isTradesTable ? "expandable" : ""} ${isExpanded ? "expanded" : ""}" ${isTradesTable ? `data-action="toggle-trade" data-row-index="${globalIdx}"` : ""}>${cells}</tr>`;
+                        if (isExpanded) {
+                          html += `<tr class="detail-row"><td colspan="${columns.length}">${buildTradeDetail(row, journal.trade_rows || [])}</td></tr>`;
+                        }
+                        return html;
+                      }
                     )
                     .join("")
                 : `<tr><td colspan="${columns.length}" class="empty">Keine Eintraege fuer die aktuelle Ansicht gefunden.</td></tr>`}
@@ -700,6 +766,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       } else {
         this.render();
       }
+      return;
+    }
+    if (action === "toggle-trade" && target.dataset.rowIndex != null) {
+      const idx = Number(target.dataset.rowIndex);
+      if (this._expandedTradeRows.has(idx)) {
+        this._expandedTradeRows.delete(idx);
+      } else {
+        this._expandedTradeRows.add(idx);
+      }
+      this.render();
       return;
     }
     if (action === "refresh") {
@@ -837,6 +913,17 @@ class TradingAgentAdminPanel extends HTMLElement {
       .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
       .pager-btns { display: flex; gap: 8px; flex-wrap: wrap; }
       .empty { text-align: center; color: #6a7890; padding: 24px 16px; }
+      tr.expandable { cursor: pointer; }
+      tr.expandable:hover { background: #f0f4f8; }
+      tr.expanded { background: #f7f9fc; }
+      .detail-row td { padding: 16px 20px; background: #fafbfd; border-left: 3px solid #1f7a8c; }
+      .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+      .detail-label { color: #5d6b81; font-size: 12px; display: block; margin-bottom: 2px; }
+      .event-log { border-top: 1px solid #edf1f6; padding-top: 12px; }
+      .event-log h4 { margin: 0 0 10px; font-size: 14px; color: #324057; }
+      .event-item { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
+      .event-time { color: #5d6b81; min-width: 140px; }
+      .event-note { color: #6a7890; font-style: italic; }
       @media (max-width: 900px) {
         .page { padding: 16px; }
         .hero { flex-direction: column; }

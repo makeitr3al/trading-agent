@@ -154,6 +154,7 @@ def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "stop_loss": entry.get("stop_loss"),
                 "take_profit": entry.get("take_profit"),
                 "close_price": entry.get("close_price"),
+                "lifecycle_id": entry.get("lifecycle_id"),
                 "pnl": entry.get("pnl"),
                 "fill_timestamp": entry.get("fill_timestamp"),
                 "close_timestamp": entry.get("close_timestamp"),
