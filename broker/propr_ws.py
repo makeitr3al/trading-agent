@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
+
+logger = logging.getLogger(__name__)
 
 try:
     import websockets as _websockets
@@ -29,8 +32,9 @@ class ProprWsEvent(BaseModel):
 
 
 class ProprWebSocketClient:
-    def __init__(self, config: ProprConfig) -> None:
+    def __init__(self, config: ProprConfig, *, send_subscribe: bool = True) -> None:
         self.config = config
+        self.send_subscribe = send_subscribe
 
     def build_ws_url(self) -> str:
         return self.config.websocket_url
@@ -48,8 +52,14 @@ class ProprWebSocketClient:
         ]
 
     def parse_event(self, payload: dict[str, Any]) -> ProprWsEvent:
+        event_type_raw = payload.get("type")
+        if event_type_raw is None:
+            logger.warning(
+                "parse_event: payload missing 'type' field, using fallback — keys: %s",
+                list(payload.keys()),
+            )
         event_type = str(
-            payload.get("type")
+            event_type_raw
             or payload.get("event")
             or payload.get("channel")
             or payload.get("topic")
@@ -59,10 +69,15 @@ class ProprWebSocketClient:
 
     def is_relevant_event(self, event: ProprWsEvent) -> bool:
         normalized = event.event_type.lower()
-        return any(
+        relevant = any(
             token in normalized
-            for token in ["position", "account", "trade", "order.filled"]
+            for token in ["position", "account", "trade", "order"]
         )
+        if not relevant:
+            logger.debug(
+                "is_relevant_event: skipping unrecognized event type %r", event.event_type
+            )
+        return relevant
 
     def extract_live_status_payload(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         candidates: list[dict[str, Any] | list[dict[str, Any]]] = []
@@ -142,9 +157,15 @@ class ProprWebSocketClient:
         if websockets.connect is None:
             raise RuntimeError("websockets dependency is not installed")
 
-        async with websockets.connect(self.build_ws_url(), additional_headers=self.build_auth_headers()) as websocket:
-            for message in self.build_subscribe_messages(account_id):
-                await websocket.send(json.dumps(message))
+        async with websockets.connect(
+            self.build_ws_url(),
+            additional_headers=self.build_auth_headers(),
+            ping_interval=20,
+            ping_timeout=10,
+        ) as websocket:
+            if self.send_subscribe:
+                for message in self.build_subscribe_messages(account_id):
+                    await websocket.send(json.dumps(message))
 
             await self._emit_status(
                 {

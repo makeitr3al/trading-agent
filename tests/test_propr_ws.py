@@ -1,7 +1,10 @@
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from broker.propr_ws import ProprWebSocketClient
 from config.propr_config import ProprConfig
@@ -106,3 +109,78 @@ def test_run_forever_persists_disconnect_error(monkeypatch: pytest.MonkeyPatch, 
     payload = load_live_status(output_path)
     assert payload["websocket_connected"] is False
     assert payload["last_error"] == "socket unavailable"
+
+
+def test_connect_passes_ping_interval_and_timeout_to_websockets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = ProprWebSocketClient(
+        ProprConfig(environment="beta", api_key="key", websocket_url="wss://example.test/ws")
+    )
+    captured: dict[str, object] = {}
+
+    def fake_connect(*args: object, **kwargs: object) -> FakeWebSocket:
+        captured.update(kwargs)
+        return FakeWebSocket([])
+
+    monkeypatch.setattr("broker.propr_ws.websockets.connect", fake_connect)
+    asyncio.run(client.connect("account-1", path=tmp_path / "status.json"))
+
+    assert captured.get("ping_interval") == 20
+    assert captured.get("ping_timeout") == 10
+
+
+def test_parse_event_uses_type_field_from_official_format() -> None:
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
+    event = client.parse_event({"type": "order.filled", "data": {"orderId": "abc"}})
+    assert event.event_type == "order.filled"
+
+
+def test_parse_event_warns_when_type_field_missing(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
+    with caplog.at_level(logging.WARNING, logger="broker.propr_ws"):
+        event = client.parse_event({"channel": "orders", "data": {}})
+    assert "missing 'type' field" in caplog.text
+    assert event.event_type == "orders"
+
+
+def test_connect_skips_subscribe_messages_when_send_subscribe_is_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client = ProprWebSocketClient(
+        ProprConfig(environment="beta", api_key="key", websocket_url="wss://example.test/ws"),
+        send_subscribe=False,
+    )
+    fake_websocket = FakeWebSocket([])
+    monkeypatch.setattr("broker.propr_ws.websockets.connect", lambda *a, **kw: fake_websocket)
+    asyncio.run(client.connect("account-1", path=tmp_path / "status.json"))
+    assert len(fake_websocket.sent_messages) == 0
+
+
+# All 13 relevant + 1 non-relevant documented event types
+_DOCUMENTED_EVENT_TYPES: list[tuple[str, bool]] = [
+    ("connected",                  False),  # initial handshake — not actionable
+    ("account.updated",            True),
+    ("order.created",              True),
+    ("order.updated",              True),
+    ("order.cancelled",            True),
+    ("order.triggered",            True),
+    ("order.filled",               True),
+    ("position.updated",           True),
+    ("position.closed",            True),
+    ("position.liquidated",        True),
+    ("position.take_profit.hit",   True),
+    ("position.stop_loss.hit",     True),
+    ("trade.created",              True),
+]
+
+
+@pytest.mark.parametrize("event_type,expected_relevant", _DOCUMENTED_EVENT_TYPES)
+def test_is_relevant_event_covers_all_documented_types(
+    event_type: str, expected_relevant: bool
+) -> None:
+    from broker.propr_ws import ProprWsEvent
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
+    event = ProprWsEvent(event_type=event_type, raw_payload={"type": event_type})
+    assert client.is_relevant_event(event) is expected_relevant
