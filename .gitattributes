@@ -1,0 +1,7 @@
+# Normalize line endings: store LF in repo, use LF on checkout.
+# Primary runtime is Linux (Raspberry Pi / Home Assistant add-on).
+* text=auto eol=lf
+
+# Windows batch files must stay CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
