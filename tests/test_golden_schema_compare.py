@@ -4,6 +4,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+
 from models.candle import Candle
 from scripts.golden_schema_compare import (
     check_candle_consistency,
@@ -95,14 +97,10 @@ def test_candle_consistency_check_passes_for_valid_candles() -> None:
 
 
 def test_candle_consistency_check_fails_for_invalid_candles() -> None:
-    candles = [
-        _make_candle(datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), 1, 0.8, 0.5, 1.5),
-    ]
-
-    result = check_candle_consistency(candles)
-
-    assert result["ok"] is False
-    assert result["invalid_count"] == 1
+    # Candle model now validates OHLC constraints at construction time,
+    # so an invalid candle (high < close) raises a ValidationError.
+    with pytest.raises(Exception):
+        _make_candle(datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), 1, 0.8, 0.5, 1.5)
 
 
 

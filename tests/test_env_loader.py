@@ -36,7 +36,7 @@ def test_defaults_to_beta_when_propr_env_is_missing(monkeypatch: pytest.MonkeyPa
     config = load_propr_config_from_env()
 
     assert config.environment == "beta"
-    assert config.api_key == "beta-key"
+    assert config.api_key.get_secret_value() == "beta-key"
 
 
 
@@ -50,7 +50,7 @@ def test_loads_beta_config_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
     config = load_propr_config_from_env()
 
     assert config.environment == "beta"
-    assert config.api_key == "beta-key"
+    assert config.api_key.get_secret_value() == "beta-key"
     assert config.base_url == "https://beta.example/v1"
     assert config.websocket_url == "wss://beta.example/ws"
 
@@ -118,7 +118,7 @@ def test_loads_prod_config_when_confirm_is_yes(monkeypatch: pytest.MonkeyPatch) 
     config = load_propr_config_from_env()
 
     assert config.environment == "prod"
-    assert config.api_key == "prod-key"
+    assert config.api_key.get_secret_value() == "prod-key"
     assert config.base_url == "https://prod.example/v1"
     assert config.websocket_url == "wss://prod.example/ws"
 

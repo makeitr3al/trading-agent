@@ -33,7 +33,7 @@ class ProprClient:
     def get_auth_headers(self) -> dict[str, str]:
         if not self.config.api_key:
             return {}
-        return {"X-API-Key": self.config.api_key}
+        return {"X-API-Key": self.config.api_key.get_secret_value()}
 
     def _require_auth_headers(self) -> dict[str, str]:
         headers = self.get_auth_headers()

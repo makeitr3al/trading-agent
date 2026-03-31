@@ -38,7 +38,7 @@ class ProprWebSocketClient:
     def build_auth_headers(self) -> dict[str, str]:
         if not self.config.api_key:
             return {}
-        return {"X-API-Key": self.config.api_key}
+        return {"X-API-Key": self.config.api_key.get_secret_value()}
 
     def build_subscribe_messages(self, account_id: str) -> list[dict[str, Any]]:
         return [

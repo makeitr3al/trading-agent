@@ -88,14 +88,14 @@ class ProprClient:
         self.config = config
         sdk_client_class = _load_sdk_client_class()
         self.sdk_client = sdk_client_class(
-            api_key=config.api_key,
+            api_key=config.api_key.get_secret_value() if config.api_key else None,
             base_url=config.base_url,
         )
 
     def get_auth_headers(self) -> dict[str, str]:
         if not self.config.api_key:
             return {}
-        return {"X-API-Key": self.config.api_key}
+        return {"X-API-Key": self.config.api_key.get_secret_value()}
 
     def _set_account(self, account_id: str) -> None:
         if not account_id or not account_id.strip():
