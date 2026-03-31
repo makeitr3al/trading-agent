@@ -852,3 +852,115 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_bound_exit_or
             positions_payload={"data": []},
             symbol="BTC/USDC",
         )
+
+
+# ---------------------------------------------------------------------------
+# Schema-Logging tests
+# ---------------------------------------------------------------------------
+
+
+def test_map_propr_order_missing_core_fields_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+        result = map_propr_order_to_internal({"side": "buy", "type": "stop_limit", "status": "open"})
+
+    assert result is None
+    assert any("missing required price fields" in r.message for r in caplog.records)
+
+
+def test_map_propr_order_missing_side_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+        result = map_propr_order_to_internal(
+            {"price": 110, "stopLoss": 100, "takeProfit": 130, "status": "open"}
+        )
+
+    assert result is None
+    assert any("missing required fields" in r.message for r in caplog.records)
+
+
+def test_map_propr_order_strict_raises_on_missing_fields() -> None:
+    with pytest.raises(ValueError, match="Missing required"):
+        map_propr_order_to_internal(
+            {"side": "buy", "type": "stop_limit", "status": "open"},
+            strict=True,
+        )
+
+
+def test_map_propr_order_strict_raises_on_missing_price_fields() -> None:
+    with pytest.raises(ValueError, match="Missing required price fields"):
+        map_propr_order_to_internal(
+            {
+                "side": "buy",
+                "type": "stop_limit",
+                "status": "open",
+                # entry/stop_loss/take_profit all missing
+            },
+            strict=True,
+        )
+
+
+def test_map_propr_position_missing_fields_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+        result = map_propr_position_to_internal(
+            {"status": "open", "positionSide": "long", "entryPrice": "100.0"}
+        )
+
+    assert result is None
+    assert any("missing required fields" in r.message for r in caplog.records)
+
+
+def test_map_propr_position_strict_raises_on_missing_fields() -> None:
+    with pytest.raises(ValueError, match="Missing required position fields"):
+        map_propr_position_to_internal(
+            {"status": "open", "positionSide": "long", "entryPrice": "100.0"},
+            strict=True,
+        )
+
+
+def test_map_propr_order_empty_payload_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+        result = map_propr_order_to_internal({})
+
+    assert result is None
+    assert len(caplog.records) >= 1
+
+
+def test_map_propr_order_unknown_keys_are_ignored() -> None:
+    order = map_propr_order_to_internal(
+        {
+            "side": "buy",
+            "type": "stop_limit",
+            "price": 110,
+            "stopLoss": 100,
+            "takeProfit": 130,
+            "status": "open",
+            "unknownField1": "foo",
+            "unknownField2": 42,
+        }
+    )
+    assert order is not None
+
+
+def test_map_propr_order_wrong_type_values_return_none(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+        result = map_propr_order_to_internal(
+            {
+                "side": [1, 2, 3],  # wrong type
+                "type": {"nested": "dict"},  # wrong type
+                "price": "not-a-number",
+                "stopLoss": 100,
+                "takeProfit": 130,
+                "status": "open",
+            }
+        )
+
+    assert result is None

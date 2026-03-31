@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from broker.propr_client import ProprClient
+
+logger = logging.getLogger(__name__)
 from models.agent_state import AgentState
 from models.order import Order, OrderStatus, OrderType
 from models.trade import Trade, TradeDirection, TradeType
@@ -187,7 +190,7 @@ def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
 
 
 
-def map_propr_order_to_internal(order_payload: dict) -> Order | None:
+def map_propr_order_to_internal(order_payload: dict, *, strict: bool = False) -> Order | None:
     side = _normalize_side(_get_first(order_payload, ["side", "direction", "positionSide"]))
     order_type = _normalize_order_type(_get_first(order_payload, ["order_type", "type"]))
     entry = _to_decimal(
@@ -199,8 +202,24 @@ def map_propr_order_to_internal(order_payload: dict) -> Order | None:
     status = _map_order_status(_get_first(order_payload, ["status"]))
 
     if side is None or order_type is None or status is None:
+        missing = [f for f, v in [("side", side), ("order_type", order_type), ("status", status)] if v is None]
+        logger.warning(
+            "map_propr_order_to_internal: missing required fields %s — payload keys: %s",
+            missing,
+            list(order_payload.keys()),
+        )
+        if strict:
+            raise ValueError(f"Missing required order fields: {missing}")
         return None
     if entry is None or stop_loss is None or take_profit is None:
+        missing = [f for f, v in [("entry", entry), ("stop_loss", stop_loss), ("take_profit", take_profit)] if v is None]
+        logger.warning(
+            "map_propr_order_to_internal: missing required price fields %s — payload keys: %s",
+            missing,
+            list(order_payload.keys()),
+        )
+        if strict:
+            raise ValueError(f"Missing required price fields: {missing}")
         return None
 
     if side == "long" and order_type == "stop":
@@ -212,6 +231,14 @@ def map_propr_order_to_internal(order_payload: dict) -> Order | None:
     elif side == "short" and order_type == "limit":
         internal_order_type = OrderType.SELL_LIMIT
     else:
+        logger.warning(
+            "map_propr_order_to_internal: unrecognized side/type combination side=%r order_type=%r — payload keys: %s",
+            side,
+            order_type,
+            list(order_payload.keys()),
+        )
+        if strict:
+            raise ValueError(f"Unrecognized side/type combination: side={side!r}, order_type={order_type!r}")
         return None
 
     return Order(
@@ -227,7 +254,7 @@ def map_propr_order_to_internal(order_payload: dict) -> Order | None:
 
 
 
-def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
+def map_propr_position_to_internal(position_payload: dict, *, strict: bool = False) -> Trade | None:
     status = _get_first(position_payload, ["status"])
     if not _is_open_position_status(status):
         return None
@@ -244,6 +271,17 @@ def map_propr_position_to_internal(position_payload: dict) -> Trade | None:
     take_profit = _to_decimal(_get_first(position_payload, ["take_profit", "takeProfit", "tp", "internal_take_profit"]))
 
     if side is None or entry is None or stop_loss is None or take_profit is None:
+        missing = [
+            f for f, v in [("side", side), ("entry", entry), ("stop_loss", stop_loss), ("take_profit", take_profit)]
+            if v is None
+        ]
+        logger.warning(
+            "map_propr_position_to_internal: missing required fields %s — payload keys: %s",
+            missing,
+            list(position_payload.keys()),
+        )
+        if strict:
+            raise ValueError(f"Missing required position fields: {missing}")
         return None
 
     signal_source = str(position_payload.get("signal_source") or position_payload.get("signalSource") or "")
