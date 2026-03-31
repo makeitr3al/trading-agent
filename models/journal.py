@@ -28,6 +28,10 @@ class JournalEntry(BaseModel):
     fill_timestamp: str | None = None
     close_timestamp: str | None = None
     position_size: float | None = None
+    entry_price: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    close_price: float | None = None
     pnl: float | None = None
     status: str | None = None
     source_signal_type: str | None = None

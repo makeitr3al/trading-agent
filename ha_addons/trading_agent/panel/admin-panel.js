@@ -1,7 +1,7 @@
 const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
 const HOME_URL = "/lovelace";
-const PANEL_VERSION = "2026-03-31";
+const PANEL_VERSION = "2026-03-31-v0.3.8";
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -58,6 +58,10 @@ const TRADE_COLUMNS = [
   { key: "direction", label: "Richtung", sortable: true, filter: "select", optionKey: "directions", badge: true },
   { key: "source_signal_type", label: "Signalquelle", sortable: true, filter: "select", optionKey: "signal_sources" },
   { key: "position_size", label: "Groesse", sortable: true, filter: "text" },
+  { key: "entry_price", label: "Entry", sortable: true, filter: "text" },
+  { key: "stop_loss", label: "Stop Loss", sortable: true, filter: "text" },
+  { key: "take_profit", label: "Take Profit", sortable: true, filter: "text" },
+  { key: "close_price", label: "Close", sortable: true, filter: "text" },
   { key: "pnl", label: "PnL", sortable: true, filter: "text" },
   { key: "fill_timestamp", label: "Fill-Zeit", sortable: true, filter: "text" },
   { key: "close_timestamp", label: "Close-Zeit", sortable: true, filter: "text" },
@@ -104,11 +108,13 @@ function formatPnl(value) {
   if (value === null || value === undefined || value === "") return "-";
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return escapeHtml(value);
-  return new Intl.NumberFormat("de-CH", {
+  const formatted = new Intl.NumberFormat("de-CH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
     signDisplay: "always",
   }).format(numeric);
+  const cls = numeric > 0 ? "pnl-pos" : numeric < 0 ? "pnl-neg" : "";
+  return cls ? `<span class="${cls}">${formatted}</span>` : formatted;
 }
 
 function badgeClass(value) {
@@ -122,6 +128,14 @@ function badgeClass(value) {
   if (["prepared", "preflight", "beta_write", "replaced", "long", "short"].some((token) => normalized.includes(token))) {
     return "info";
   }
+  return "neutral";
+}
+
+function decisionBadgeClass(value) {
+  const v = String(value ?? "").toLowerCase();
+  if (v.startsWith("prepare_") || v === "close_trend_and_prepare_countertrend") return "action";
+  if (v === "close_trend_trade") return "close";
+  if (v.startsWith("adjust_")) return "info";
   return "neutral";
 }
 
@@ -225,6 +239,10 @@ function snapshotFallback(journalState) {
       direction: entry.direction || null,
       source_signal_type: entry.source_signal_type || null,
       position_size: entry.position_size ?? null,
+      entry_price: entry.entry_price ?? null,
+      stop_loss: entry.stop_loss ?? null,
+      take_profit: entry.take_profit ?? null,
+      close_price: entry.close_price ?? null,
       pnl: entry.pnl ?? null,
       fill_timestamp: entry.fill_timestamp || null,
       close_timestamp: entry.close_timestamp || null,
@@ -281,13 +299,59 @@ class TradingAgentAdminPanel extends HTMLElement {
       scans: { ...BASE_TABLE_STATE },
       trades: { ...BASE_TABLE_STATE },
     };
+    this._directLiveStatus = null;
+    this._liveStatusInterval = null;
+    this._lastJournalRefresh = 0;
+    this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
     this.shadowRoot.addEventListener("click", (event) => this.onClick(event));
     this.shadowRoot.addEventListener("change", (event) => this.onChange(event));
     this.shadowRoot.addEventListener("input", (event) => this.onInput(event));
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
     this.refreshJournal();
     this.render();
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    this._stopLivePolling();
+  }
+
+  _startLivePolling() {
+    if (this._liveStatusInterval) return;
+    this._fetchLiveStatus();
+    this._liveStatusInterval = setInterval(() => { if (!document.hidden) this._fetchLiveStatus(); }, 10_000);
+  }
+
+  _stopLivePolling() {
+    if (!this._liveStatusInterval) return;
+    clearInterval(this._liveStatusInterval);
+    this._liveStatusInterval = null;
+  }
+
+  async _fetchLiveStatus() {
+    try {
+      const resp = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
+      if (resp.ok) {
+        this._directLiveStatus = await resp.json();
+        this.render();
+      }
+    } catch (_) {}
+  }
+
+  _effectiveLiveData() {
+    if (this._directLiveStatus) return this._directLiveStatus;
+    const entity = this.entity(ENTITIES.liveStatus);
+    if (!entity) return null;
+    return {
+      account_unrealized_pnl: entity.attributes?.account_unrealized_pnl,
+      account_open_positions_count: entity.attributes?.account_open_positions_count,
+      websocket_connected: entity.attributes?.websocket_connected,
+      source: entity.state,
+      last_error: entity.attributes?.last_error,
+      updated_at: entity.attributes?.updated_at,
+    };
   }
 
   set hass(value) {
@@ -337,6 +401,7 @@ class TradingAgentAdminPanel extends HTMLElement {
   async refreshJournal() {
     this.loading = true;
     this.loadError = null;
+    this._lastJournalRefresh = Date.now();
     this.render();
     try {
       const response = await fetch(`${JOURNAL_URL}?ts=${Date.now()}`, { cache: "no-store" });
@@ -424,12 +489,50 @@ class TradingAgentAdminPanel extends HTMLElement {
   statusTab() {
     const journal = this.effectiveJournal();
     const operator = this.entity(ENTITIES.operatorConfig);
-    const liveStatus = this.entity(ENTITIES.liveStatus);
+    const ld = this._effectiveLiveData();
     const runSummary = this.entity(ENTITIES.runSummary);
     const tests = this.entity(ENTITIES.tests);
     const journalSensor = this.entity(ENTITIES.journal);
     const summaryLines = runSummary?.attributes?.summary_lines || [];
+
+    // Active position: latest "filled" trade row
+    const openTrade = (journal.trade_rows || []).find((r) => r.entry_type === "trade" && r.status === "filled");
+    const openPositions = Number(ld?.account_open_positions_count ?? 0);
+    const activePositionCard = (openPositions > 0 || openTrade)
+      ? `<section class="card card-highlight">
+          <h3>Aktive Position ${openPositions > 1 ? `(${openPositions})` : ""}</h3>
+          <div class="status-list">
+            <div class="status-row"><span class="label">Unrealisiertes PnL</span><span class="value pnl-live">${formatPnl(ld?.account_unrealized_pnl)}</span></div>
+            ${openTrade ? `
+            <div class="status-row"><span class="label">Richtung</span><span class="value"><span class="pill ${badgeClass(openTrade.direction)}">${escapeHtml(openTrade.direction ?? "-")}</span></span></div>
+            <div class="status-row"><span class="label">Groesse</span><span class="value">${escapeHtml(String(openTrade.position_size ?? "-"))}</span></div>
+            <div class="status-row"><span class="label">Entry</span><span class="value">${openTrade.entry_price != null ? escapeHtml(String(openTrade.entry_price)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Stop Loss</span><span class="value">${openTrade.stop_loss != null ? escapeHtml(String(openTrade.stop_loss)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Take Profit</span><span class="value">${openTrade.take_profit != null ? escapeHtml(String(openTrade.take_profit)) : "-"}</span></div>
+            ` : ""}
+            <div class="status-row"><span class="label">Quelle</span><span class="value"><span class="pill ${badgeClass(ld?.source)}">${escapeHtml(ld?.source ?? "-")}</span></span></div>
+            <div class="status-row"><span class="label">Aktualisiert</span><span class="value">${formatValue(ld?.updated_at)}</span></div>
+          </div>
+        </section>`
+      : "";
+
+    // Stats from journal
+    const closedTrades = (journal.trade_rows || []).filter((r) => r.entry_type === "trade" && r.status === "closed");
+    const winningTrades = closedTrades.filter((r) => r.pnl != null && Number(r.pnl) > 0);
+    const totalPnl = closedTrades.reduce((sum, r) => sum + (Number(r.pnl) || 0), 0);
+    const winRate = closedTrades.length ? (winningTrades.length / closedTrades.length * 100).toFixed(1) : null;
+    const statsStrip = closedTrades.length > 0
+      ? `<div class="stats-strip">
+          <div class="stat-tile"><div class="stat-value">${closedTrades.length}</div><div class="stat-label">Abgeschl. Trades</div></div>
+          <div class="stat-tile"><div class="stat-value">${winningTrades.length}</div><div class="stat-label">Gewinner</div></div>
+          <div class="stat-tile"><div class="stat-value">${winRate}%</div><div class="stat-label">Trefferquote</div></div>
+          <div class="stat-tile"><div class="stat-value ${totalPnl > 0 ? "pnl-pos" : totalPnl < 0 ? "pnl-neg" : ""}">${formatPnl(totalPnl)}</div><div class="stat-label">Realisiertes PnL</div></div>
+        </div>`
+      : "";
+
     return `<div class="stack">
+      ${activePositionCard}
+      ${statsStrip}
       <div class="grid cards">
         ${this.statusCard("Operator Config", [
           ["Modus", operator?.state, true],
@@ -440,12 +543,12 @@ class TradingAgentAdminPanel extends HTMLElement {
           ["Zeit", operator?.attributes?.schedule_time],
         ])}
         ${this.statusCard("Live-Status", [
-          ["PnL", liveStatus?.attributes?.account_unrealized_pnl, false, formatPnl],
-          ["Offene Positionen", liveStatus?.attributes?.account_open_positions_count],
-          ["Quelle", liveStatus?.state, true],
-          ["WebSocket verbunden", liveStatus?.attributes?.websocket_connected, true],
-          ["Letztes Update", liveStatus?.attributes?.updated_at],
-          ["Letzter Fehler", liveStatus?.attributes?.last_error],
+          ["PnL", ld?.account_unrealized_pnl, false, formatPnl],
+          ["Offene Positionen", ld?.account_open_positions_count],
+          ["Quelle", ld?.source, true],
+          ["WebSocket verbunden", ld?.websocket_connected, true],
+          ["Letztes Update", ld?.updated_at],
+          ["Letzter Fehler", ld?.last_error],
         ])}
         ${this.statusCard("Letzter Lauf", [
           ["Run ID", runSummary?.state],
@@ -552,7 +655,11 @@ class TradingAgentAdminPanel extends HTMLElement {
                           .map((column) => {
                             const value = cellValue(row, column);
                             if (column.key === "pnl") return `<td>${formatPnl(value)}</td>`;
+                            if (["entry_price","stop_loss","take_profit","close_price","position_size"].includes(column.key)) {
+                              return `<td>${value != null ? escapeHtml(String(value)) : "-"}</td>`;
+                            }
                             if (column.key.includes("timestamp")) return `<td>${formatValue(value)}</td>`;
+                            if (column.key === "decision_action") return `<td><span class="pill ${decisionBadgeClass(value)}">${formatValue(value)}</span></td>`;
                             if (column.badge) return `<td><span class="pill ${badgeClass(value)}">${formatValue(value)}</span></td>`;
                             if (column.boolean) return `<td>${value ? "Ja" : "Nein"}</td>`;
                             return `<td>${formatValue(value)}</td>`;
@@ -583,7 +690,16 @@ class TradingAgentAdminPanel extends HTMLElement {
     const { action, tab, script, table, key, page } = target.dataset;
     if (action === "tab" && tab) {
       this.currentTab = tab;
-      this.render();
+      if (tab === "status") {
+        this._startLivePolling();
+      } else {
+        this._stopLivePolling();
+      }
+      if ((tab === "scans" || tab === "trades") && Date.now() - this._lastJournalRefresh > 60_000) {
+        this.refreshJournal();
+      } else {
+        this.render();
+      }
       return;
     }
     if (action === "refresh") {
@@ -649,7 +765,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
   }
   render() {
-    const liveStatus = this.entity(ENTITIES.liveStatus);
+    const ld = this._effectiveLiveData();
     const journal = this.effectiveJournal();
     const title = this.panelConfig?.config?.title || "Trading Agent";
     const body =
@@ -706,6 +822,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       .pill.bad { background: #fde4e4; color: #b42318; }
       .pill.info { background: #dceeff; color: #175cd3; }
       .pill.neutral { background: #edf2f7; color: #475467; }
+      .pill.action { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+      .pill.close { background: #fff1d6; color: #8a5a00; border: 1px solid #fcd98a; }
+      .pnl-pos { color: #146c43; font-weight: 600; }
+      .pnl-neg { color: #b42318; font-weight: 600; }
+      .pnl-live { font-size: 20px; font-weight: 700; }
+      .card-highlight { border-color: #6ee7b7; background: linear-gradient(135deg, rgba(209,250,229,0.4) 0%, rgba(255,255,255,0.95) 60%); }
+      .stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+      .stat-tile { background: rgba(255,255,255,0.95); border: 1px solid #dce4ef; border-radius: 16px; padding: 14px 16px; text-align: center; box-shadow: 0 8px 16px rgba(22,33,51,0.05); }
+      .stat-value { font-size: 22px; font-weight: 700; color: #162133; margin-bottom: 4px; }
+      .stat-label { font-size: 12px; color: #5d6b81; }
       .warn { border-radius: 16px; background: #fff1d6; color: #8a5a00; border: 1px solid #ffd28a; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
       .summary { margin: 0; padding-left: 20px; }
       .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
@@ -729,8 +855,8 @@ class TradingAgentAdminPanel extends HTMLElement {
         </div>
         <div class="chips">
           <span class="chip">Run ID: ${formatValue(this.entity(ENTITIES.runSummary)?.state)}</span>
-          <span class="chip">PnL: ${formatPnl(liveStatus?.attributes?.account_unrealized_pnl)}</span>
-          <span class="chip">Offene Positionen: ${formatValue(liveStatus?.attributes?.account_open_positions_count)}</span>
+          <span class="chip">PnL: ${formatPnl(ld?.account_unrealized_pnl)}</span>
+          <span class="chip">Offene Positionen: ${formatValue(ld?.account_open_positions_count)}</span>
           <span class="chip">Tests: ${formatValue(this.entity(ENTITIES.tests)?.state)}</span>
           <span class="chip">Panel: ${escapeHtml(PANEL_VERSION)}</span>
         </div>
