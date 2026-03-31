@@ -131,11 +131,6 @@ def _validate_pending_order_execution_size(
 
 
 
-def _derive_outside_band_sweet_spot(symbol_spec: SymbolSpec | None) -> float:
-    if symbol_spec is None or symbol_spec.price_decimals is None:
-        return 0.0
-    return 2 * (10 ** (-symbol_spec.price_decimals))
-
 
 class AppCycleResult(BaseModel):
     challenge_context: ActiveChallengeContext | None
@@ -524,7 +519,7 @@ def run_app_cycle(
         order_service=order_service,
         symbol=symbol,
         candles=candles,
-        config=config.model_copy(update={"outside_band_sweet_spot": _derive_outside_band_sweet_spot(symbol_spec)}),
+        config=config,
         account_balance=account_balance,
         previous_state=previous_state,
         max_allowed_drawdown=max_allowed_drawdown,

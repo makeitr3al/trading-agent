@@ -136,7 +136,7 @@ def build_strategy_diagnostics_rows(
                 "macd_signal_period": config.macd_signal_period,
                 "inside_buffer_pct": config.inside_buffer_pct,
                 "outside_buffer_pct": config.outside_buffer_pct,
-                "outside_band_sweet_spot": config.outside_band_sweet_spot,
+                "outside_band_sweet_spot_pct": config.outside_band_sweet_spot_pct,
                 "min_bandwidth_avg_period": config.min_bandwidth_avg_period,
                 "min_bandwidth_ratio": config.min_bandwidth_ratio,
                 "regime": diagnostics["latest_regime"],

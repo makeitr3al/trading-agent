@@ -701,7 +701,7 @@ def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outsi
 
     _, new_state = run_agent_cycle(
         candles=candles,
-        config=StrategyConfig(outside_band_sweet_spot=1.0),
+        config=StrategyConfig(outside_band_sweet_spot_pct=1.0),
         account_balance=10000.0,
         state=AgentState(),
     )
@@ -739,7 +739,7 @@ def test_run_agent_cycle_does_not_set_middle_band_retest_lock_for_sweet_spot_clo
 
     _, new_state = run_agent_cycle(
         candles=candles,
-        config=StrategyConfig(outside_band_sweet_spot=1.0),
+        config=StrategyConfig(outside_band_sweet_spot_pct=1.0),
         account_balance=10000.0,
         state=AgentState(),
     )

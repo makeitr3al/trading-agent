@@ -60,8 +60,9 @@ def _should_trigger_active_trend_exit(
         close=latest_close,
         regime=trade_regime,
         bb_upper=latest_bb_upper,
+        bb_middle=latest_bb_middle,
         bb_lower=latest_bb_lower,
-        sweet_spot=config.outside_band_sweet_spot,
+        sweet_spot_pct=config.outside_band_sweet_spot_pct,
     )
 
 

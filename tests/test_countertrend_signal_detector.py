@@ -17,7 +17,7 @@ def _make_config(**overrides) -> StrategyConfig:
     defaults = {
         "min_bandwidth_avg_period": 3,
         "outside_buffer_pct": 0.20,
-        "outside_band_sweet_spot": 0.0,
+        "outside_band_sweet_spot_pct": 0.0,
     }
     defaults.update(overrides)
     return StrategyConfig(**defaults)
@@ -106,7 +106,7 @@ def test_detect_countertrend_signal_valid_countertrend_long_signal() -> None:
 
 
 def test_detect_countertrend_signal_invalid_when_only_in_sweet_spot() -> None:
-    config = _make_config(outside_band_sweet_spot=0.2)
+    config = _make_config(outside_band_sweet_spot_pct=0.2)
     candles = _make_candles(final_open=10.05, final_close=9.85)
     bollinger_df = _make_bollinger_df(last_row=(10.0, 8.0, 6.0))
     regime_states = _make_regime_states(RegimeType.BULLISH, bars_since_regime_start=1)

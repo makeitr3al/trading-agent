@@ -197,7 +197,7 @@ LIVE_TREND_REGIME_TOO_OLD_CLOSES = LIVE_TREND_LONG_CLOSES[:175]
 
 ALLOWED_GOLDEN_CONFIG_OVERRIDES = {
     "max_bars_since_regime_start_for_trend_signal",
-    "outside_band_sweet_spot",
+    "outside_band_sweet_spot_pct",
 }
 
 
@@ -359,7 +359,7 @@ def sweet_spot_should_manage_active_trend_without_countertrend_signal_scenario()
     return _state_scenario(
         name="sweet spot manages active trend without countertrend signal",
         closes=LIVE_SWEET_SPOT_CLOSES,
-        config=make_config(outside_band_sweet_spot=0.2),
+        config=make_config(outside_band_sweet_spot_pct=0.2),
         active_trade=_make_trade(
             TradeType.TREND,
             TradeDirection.LONG,

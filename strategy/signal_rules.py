@@ -95,13 +95,16 @@ def is_close_in_outer_band_sweet_spot(
     close: float,
     regime: RegimeType,
     bb_upper: float,
+    bb_middle: float,
     bb_lower: float,
-    sweet_spot: float,
+    sweet_spot_pct: float,
 ) -> bool:
     if regime == RegimeType.NEUTRAL:
         return False
 
-    tolerance = max(0.0, float(sweet_spot))
+    half_bandwidth = get_relevant_half_bandwidth(regime, bb_upper, bb_middle, bb_lower)
+    tolerance = max(0.0, float(sweet_spot_pct)) * half_bandwidth
+
     if regime == RegimeType.BULLISH:
         return close >= bb_upper - tolerance
 

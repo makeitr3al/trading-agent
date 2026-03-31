@@ -19,9 +19,9 @@ def test_build_strategy_config_applies_runtime_overrides_without_losing_defaults
 
 
 def test_golden_make_config_allows_only_targeted_non_indicator_overrides() -> None:
-    config = make_config(outside_band_sweet_spot=0.2)
+    config = make_config(outside_band_sweet_spot_pct=0.2)
 
-    assert config.outside_band_sweet_spot == 0.2
+    assert config.outside_band_sweet_spot_pct == 0.2
     assert config.bollinger_period == StrategyConfig().bollinger_period
 
 
