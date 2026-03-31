@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class StrategyConfig(BaseModel):
@@ -22,6 +22,26 @@ class StrategyConfig(BaseModel):
     buy_spread: float = 0.0
     outside_band_sweet_spot: float = 0.0
     trading_times: list[str] = ["07:00"]
+
+    @model_validator(mode="after")
+    def _validate_constraints(self) -> StrategyConfig:
+        if self.bollinger_period <= 0:
+            raise ValueError("bollinger_period must be > 0")
+        if self.bollinger_std_dev <= 0:
+            raise ValueError("bollinger_std_dev must be > 0")
+        if self.macd_fast_period <= 0:
+            raise ValueError("macd_fast_period must be > 0")
+        if self.macd_slow_period <= 0:
+            raise ValueError("macd_slow_period must be > 0")
+        if self.macd_signal_period <= 0:
+            raise ValueError("macd_signal_period must be > 0")
+        if self.macd_fast_period >= self.macd_slow_period:
+            raise ValueError("macd_fast_period must be < macd_slow_period")
+        if not (0.0 <= self.min_bandwidth_ratio <= 1.0):
+            raise ValueError("min_bandwidth_ratio must be in [0, 1]")
+        if not (0.0 < self.risk_per_trade_pct <= 1.0):
+            raise ValueError("risk_per_trade_pct must be in (0, 1]")
+        return self
 
 
 def build_strategy_config(**overrides: Any) -> StrategyConfig:
