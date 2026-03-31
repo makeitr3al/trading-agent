@@ -9,6 +9,7 @@ from models.decision import DecisionAction, DecisionResult
 from models.order import Order, OrderType
 from models.runner_result import StrategyRunResult
 from models.signal import SignalState, SignalType
+from models.signal_reason import SignalReason
 from models.trade import Trade, TradeDirection, TradeType
 from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
@@ -124,7 +125,7 @@ def _apply_middle_band_retest_lock(
             {
                 "decision": DecisionResult(
                     action=DecisionAction.NO_ACTION,
-                    reason="waiting for middle band retest",
+                    reason=SignalReason.WAITING_FOR_MIDDLE_BAND_RETEST,
                     selected_signal_type=None,
                 ),
                 "order": None,
@@ -230,7 +231,7 @@ def run_agent_cycle(
             update={
                 "decision": DecisionResult(
                     action=DecisionAction.NO_ACTION,
-                    reason="trend signal already consumed in regime",
+                    reason=SignalReason.TREND_SIGNAL_ALREADY_CONSUMED_IN_REGIME,
                     selected_signal_type=None,
                 ),
                 "order": None,
@@ -256,7 +257,7 @@ def run_agent_cycle(
             update={
                 "decision": DecisionResult(
                     action=DecisionAction.NO_ACTION,
-                    reason="countertrend signal already consumed in regime direction",
+                    reason=SignalReason.COUNTERTREND_SIGNAL_ALREADY_CONSUMED_IN_REGIME,
                     selected_signal_type=None,
                 ),
                 "order": None,
@@ -290,7 +291,7 @@ def run_agent_cycle(
                 build_order_from_decision(
                     decision=DecisionResult(
                         action=DecisionAction.PREPARE_TREND_ORDER,
-                        reason="refresh trend pending order",
+                        reason=SignalReason.REFRESH_TREND_PENDING_ORDER,
                         selected_signal_type=result.trend_signal.signal_type.value,
                     ),
                     trend_signal=result.trend_signal,

@@ -6,6 +6,7 @@ from config.strategy_config import StrategyConfig
 from models.candle import Candle
 from models.regime import RegimeState, RegimeType
 from models.signal import SignalState, SignalType
+from models.signal_reason import SignalReason
 from strategy.signal_rules import (
     has_sufficient_bandwidth,
 )
@@ -116,7 +117,7 @@ def detect_countertrend_signal(
             return SignalState(
                 signal_type=signal_type,
                 is_valid=False,
-                reason="not first regime bar",
+                reason=SignalReason.NOT_FIRST_REGIME_BAR,
             )
     elif regime == RegimeType.BEARISH:
         signal_type = SignalType.COUNTERTREND_LONG
@@ -124,7 +125,7 @@ def detect_countertrend_signal(
             return SignalState(
                 signal_type=signal_type,
                 is_valid=False,
-                reason="not first regime bar",
+                reason=SignalReason.NOT_FIRST_REGIME_BAR,
             )
     else:
         close_above_upper = _is_close_deep_outside_for_signal_type(
@@ -166,7 +167,7 @@ def detect_countertrend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="close not outside bands",
+            reason=SignalReason.CLOSE_NOT_OUTSIDE_BANDS,
         )
 
     historical_rows = bollinger_df.iloc[
@@ -200,7 +201,7 @@ def detect_countertrend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="insufficient bandwidth",
+            reason=SignalReason.INSUFFICIENT_BANDWIDTH,
         )
 
     entry = latest_candle.close
@@ -212,7 +213,7 @@ def detect_countertrend_signal(
     return SignalState(
         signal_type=signal_type,
         is_valid=True,
-        reason="countertrend signal detected",
+        reason=SignalReason.COUNTERTREND_SIGNAL_DETECTED,
         entry=entry,
         stop_loss=stop_loss,
         take_profit=bb_middle,

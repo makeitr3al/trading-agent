@@ -6,6 +6,7 @@ from config.strategy_config import StrategyConfig
 from models.candle import Candle
 from models.regime import RegimeState, RegimeType
 from models.signal import SignalState, SignalType
+from models.signal_reason import SignalReason
 from strategy.signal_rules import (
     get_relevant_half_bandwidth,
     has_sufficient_bandwidth,
@@ -67,7 +68,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=SignalType.TREND_LONG,
             is_valid=False,
-            reason="too few bars since data start",
+            reason=SignalReason.TOO_FEW_BARS_SINCE_DATA_START,
         )
 
     regime = latest_regime_state.regime
@@ -75,7 +76,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=SignalType.TREND_LONG,
             is_valid=False,
-            reason="neutral regime",
+            reason=SignalReason.NEUTRAL_REGIME,
         )
 
     signal_type = (
@@ -90,7 +91,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="regime too old",
+            reason=SignalReason.REGIME_TOO_OLD,
         )
 
     if not is_candle_in_trend_direction(
@@ -101,7 +102,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="candle not in trend direction",
+            reason=SignalReason.CANDLE_NOT_IN_TREND_DIRECTION,
         )
 
     bb_upper = float(latest_bollinger["bb_upper"])
@@ -119,7 +120,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="close not deep inside bands",
+            reason=SignalReason.CLOSE_NOT_DEEP_INSIDE_BANDS,
         )
 
     historical_rows = bollinger_df.iloc[
@@ -150,7 +151,7 @@ def detect_trend_signal(
         return SignalState(
             signal_type=signal_type,
             is_valid=False,
-            reason="insufficient bandwidth",
+            reason=SignalReason.INSUFFICIENT_BANDWIDTH,
         )
 
     if regime == RegimeType.BULLISH:
@@ -167,7 +168,7 @@ def detect_trend_signal(
     return SignalState(
         signal_type=signal_type,
         is_valid=True,
-        reason="trend signal detected",
+        reason=SignalReason.TREND_SIGNAL_DETECTED,
         entry=entry,
         stop_loss=stop_loss,
         take_profit=take_profit,

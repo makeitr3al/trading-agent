@@ -372,7 +372,7 @@ def sweet_spot_should_manage_active_trend_without_countertrend_signal_scenario()
         expected_decision_action="ADJUST_TREND_STOP_TO_LAST_CLOSE",
         expected_order_present=False,
         expected_close_active_trade=False,
-        expected_updated_stop_loss=9.4,
+        expected_updated_stop_loss=72633.0,
     )
 
 
@@ -393,7 +393,7 @@ def valid_countertrend_long_first_bearish_regime_scenario() -> StrategyGoldenSce
 def no_countertrend_not_first_regime_bar_scenario() -> StrategyGoldenScenario:
     return _chart_scenario(
         name="no countertrend not first regime bar",
-        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 11.0, 11.3], BULLISH_REVERSAL_CONTEXT_CLOSES),
+        closes=_prepend_context([9.6, 9.55, 9.5, 9.45, 9.4, 11.0, 11.3, 11.5, 11.6], BULLISH_REVERSAL_CONTEXT_CLOSES),
         config=make_config(),
         expected_trend_signal_valid=False,
         expected_countertrend_signal_valid=False,

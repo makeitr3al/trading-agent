@@ -2,6 +2,8 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+from models.signal_reason import SignalReason
+
 
 class SignalType(str, Enum):
     TREND_LONG = "TREND_LONG"
@@ -13,7 +15,7 @@ class SignalType(str, Enum):
 class SignalState(BaseModel):
     signal_type: SignalType
     is_valid: bool
-    reason: str
+    reason: str | SignalReason
     entry: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
