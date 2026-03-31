@@ -13,6 +13,7 @@ class JournalUnusedSignalRecord(BaseModel):
 
 
 class JournalEntry(BaseModel):
+    schema_version: int = 1
     entry_type: str
     entry_date: str
     entry_timestamp: str

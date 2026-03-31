@@ -308,26 +308,18 @@ def run_agent_cycle(
     else:
         pending_order = old_pending_order
 
-    trend_signal_consumed_in_regime = (
-        False if regime_changed else state.trend_signal_consumed_in_regime
-    )
-    countertrend_long_signal_consumed_in_regime = (
-        False if regime_changed else state.countertrend_long_signal_consumed_in_regime
-    )
-    countertrend_short_signal_consumed_in_regime = (
-        False if regime_changed else state.countertrend_short_signal_consumed_in_regime
-    )
+    consumed_signals: set[str] = set() if regime_changed else set(state.consumed_signals)
     if result.decision.action in {
         DecisionAction.PREPARE_TREND_ORDER,
         DecisionAction.CLOSE_TREND_TRADE,
         DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
     }:
-        trend_signal_consumed_in_regime = True
+        consumed_signals.add("trend")
     if result.countertrend_signal is not None and result.countertrend_signal.is_valid:
         if result.countertrend_signal.signal_type == SignalType.COUNTERTREND_LONG:
-            countertrend_long_signal_consumed_in_regime = True
+            consumed_signals.add("countertrend_long")
         elif result.countertrend_signal.signal_type == SignalType.COUNTERTREND_SHORT:
-            countertrend_short_signal_consumed_in_regime = True
+            consumed_signals.add("countertrend_short")
 
     active_trade = (
         None
@@ -349,9 +341,7 @@ def run_agent_cycle(
             else None,
             "last_regime": last_regime,
             "middle_band_retest_required": middle_band_retest_required,
-            "trend_signal_consumed_in_regime": trend_signal_consumed_in_regime,
-            "countertrend_long_signal_consumed_in_regime": countertrend_long_signal_consumed_in_regime,
-            "countertrend_short_signal_consumed_in_regime": countertrend_short_signal_consumed_in_regime,
+            "consumed_signals": consumed_signals,
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),
         }
     )
