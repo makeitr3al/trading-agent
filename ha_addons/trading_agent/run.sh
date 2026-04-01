@@ -75,16 +75,10 @@ ADDON_VERSION=$(sed -n 's/^version: "\([^"]*\)".*/\1/p' "$APP_PATH/ha_addons/tra
 
 mkdir -p "$PANEL_DIR"
 if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
-    # Copy actual panel to versioned filename (browser fetches new URL each version)
-    cp "$PANEL_ASSET_SOURCE" "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js"
-
-    # Create tiny loader at the original URL (what HA configuration.yaml points to)
-    cat > "$PANEL_ASSET_TARGET" << LOADER
-(function(){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-${ADDON_VERSION}.js";document.currentScript.parentNode.insertBefore(s,document.currentScript.nextSibling);})();
-LOADER
-
-    # Remove old versioned panel files (keep current only)
-    find "$PANEL_DIR" -name "admin-panel-*.js" ! -name "admin-panel-${ADDON_VERSION}.js" -delete 2>/dev/null || true
+    # Inject addon version into panel JS and copy directly (no versioned-loader indirection)
+    sed "s/__PANEL_VERSION__/${ADDON_VERSION}/g" "$PANEL_ASSET_SOURCE" > "$PANEL_ASSET_TARGET"
+    # Clean up any leftover versioned files from old deployment mechanism
+    find "$PANEL_DIR" -name "admin-panel-*.js" -delete 2>/dev/null || true
 fi
 
 bashio::log.info "Starting Trading Agent one-shot run"

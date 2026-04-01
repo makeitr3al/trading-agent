@@ -1,7 +1,7 @@
 const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
 const HOME_URL = "/lovelace";
-const PANEL_VERSION = "2026-03-31-v0.3.9";
+const PANEL_VERSION = "__PANEL_VERSION__";
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -36,20 +36,8 @@ const TABS = [
   ["trades", "Journal Orders & Trades"],
 ];
 
-const SCAN_COLUMNS = [
-  { key: "timestamp", label: "Zeit", sortable: true, filter: "text" },
-  { key: "symbol", label: "Markt", sortable: true, filter: "select", optionKey: "symbols" },
-  { key: "environment", label: "Umgebung", sortable: true, filter: "select", optionKey: "environments" },
-  { key: "decision_action", label: "Decision", sortable: true, filter: "select", optionKey: "decision_actions", badge: true },
-  { key: "selected_signal_type", label: "Verwendetes Signal", sortable: true, filter: "select", optionKey: "scan_signals" },
-  { key: "received_signals", label: "Empfangene Signale", filter: "text" },
-  { key: "order_created", label: "Order erstellt", sortable: true, filter: "select", boolean: true },
-  { key: "follow_up", label: "Order/Trade-Folge", filter: "text" },
-  { key: "skip_reason", label: "Skip-Grund", filter: "text" },
-  { key: "notes", label: "Notizen", filter: "text" },
-];
-
 const TRADE_COLUMNS = [
+  { key: "_expand", label: "", sortable: false },
   { key: "timestamp", label: "Zeit", sortable: true, filter: "text" },
   { key: "entry_type", label: "Typ", sortable: true, filter: "select", optionKey: "entry_types", badge: true },
   { key: "symbol", label: "Markt", sortable: true, filter: "select", optionKey: "symbols" },
@@ -264,25 +252,46 @@ function filterRows(rows, columns, tableState) {
   }
   return sorted;
 }
+function _deriveScanSignalType(signalType) {
+  if (!signalType) return "Kein Signal";
+  const upper = String(signalType).toUpperCase();
+  if (upper.startsWith("TREND_")) return "Trend";
+  if (upper.startsWith("COUNTERTREND_")) return "Gegentrend";
+  return "Kein Signal";
+}
+
 function snapshotFallback(journalState) {
   const recentEntries = journalState?.attributes?.recent_entries || [];
-  const scanRows = recentEntries
-    .filter((entry) => entry.entry_type === "cycle")
-    .map((entry) => ({
-      timestamp: entry.entry_timestamp || null,
-      entry_date: entry.entry_date || null,
+  // Build grouped scan_rows (one per run) from snapshot fallback
+  const runs = new Map();
+  for (const entry of recentEntries) {
+    if (entry.entry_type !== "cycle") continue;
+    const runTime = entry.executed_at || entry.entry_timestamp || null;
+    const runKey = `${runTime}_${entry.environment}`;
+    if (!runs.has(runKey)) {
+      runs.set(runKey, {
+        executed_at: runTime,
+        environment: entry.environment || null,
+        orders_created: 0,
+        trades_managed: 0,
+        markets: [],
+      });
+    }
+    const run = runs.get(runKey);
+    run.markets.push({
       symbol: entry.symbol || null,
-      environment: entry.environment || null,
+      signal_type: _deriveScanSignalType(entry.source_signal_type),
       decision_action: entry.decision_action || null,
-      selected_signal_type: entry.source_signal_type || null,
-      received_signals: entry.source_signal_type || null,
-      order_created: false,
-      order_status_summary: null,
-      trade_status_summary: null,
-      trade_pnl_summary: entry.pnl ?? null,
-      skip_reason: entry.skipped_reason || null,
-      notes: entry.notes || null,
-    }));
+      reason: entry.notes || entry.skipped_reason || null,
+      entry_price: null,
+      fill_time: null,
+      tp: null,
+      sl: null,
+      exit_price: null,
+      exit_time: null,
+    });
+  }
+  const scanRows = [...runs.values()].sort((a, b) => (b.executed_at || "").localeCompare(a.executed_at || ""));
   const tradeRows = recentEntries
     .filter((entry) => entry.entry_type && entry.entry_type !== "cycle")
     .map((entry) => ({
@@ -359,6 +368,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._liveStatusInterval = null;
     this._lastJournalRefresh = 0;
     this._expandedTradeRows = new Set();
+    this._expandedScanRuns = new Set();
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
@@ -644,6 +654,115 @@ class TradingAgentAdminPanel extends HTMLElement {
       </section>
     </div>`;
   }
+  scansTab() {
+    const journal = this.effectiveJournal();
+    const scanRows = journal.scan_rows || [];
+    const state = this.tableState.scans;
+    const search = (state.search || "").trim().toLowerCase();
+    const envFilter = (state.filters.environment || "").toLowerCase();
+    const filtered = scanRows.filter((run) => {
+      if (envFilter && (run.environment || "").toLowerCase() !== envFilter) return false;
+      if (search) {
+        const haystack = [
+          formatValue(run.executed_at),
+          run.environment,
+          ...((run.markets || []).flatMap((m) => [m.symbol, m.signal_type, m.decision_action, m.reason])),
+        ].join(" ").toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+      return true;
+    });
+    const sorted = [...filtered].sort((a, b) => {
+      const result = (a.executed_at || "").localeCompare(b.executed_at || "");
+      return state.sortDirection === "asc" ? result : -result;
+    });
+    const totalPages = Math.max(1, Math.ceil(sorted.length / state.pageSize));
+    const page = Math.min(state.page, totalPages);
+    const pageRows = sorted.slice((page - 1) * state.pageSize, page * state.pageSize);
+    const environments = journal.filter_options?.environments || [];
+    return `<div class="stack">
+      <section class="card">
+        <div class="toolbar">
+          <div>
+            <h3>Journal Scans</h3>
+            <p class="muted">Gesamt: ${filtered.length} Runs von ${scanRows.length}. Letztes Update: ${formatValue(journal.generated_at)}</p>
+          </div>
+          <div class="toolbar-actions">
+            <input class="search" type="search" placeholder="Globale Textsuche" data-table="scans" data-search="1" value="${escapeHtml(state.search)}">
+            <select data-table="scans" data-filter="environment">
+              <option value="">Alle Umgebungen</option>
+              ${environments.map((e) => `<option value="${escapeHtml(e)}" ${state.filters.environment === e ? "selected" : ""}>${escapeHtml(e)}</option>`).join("")}
+            </select>
+            <select data-table="scans" data-pagesize="1">${[10, 25, 50, 100].map((s) => `<option value="${s}" ${s === state.pageSize ? "selected" : ""}>${s} / Seite</option>`).join("")}</select>
+            <button class="ghost" data-action="reset" data-table="scans">Filter zuruecksetzen</button>
+            <button class="ghost" data-action="refresh">Neu laden</button>
+          </div>
+        </div>
+        ${this.loading ? `<p class="muted">Journal wird geladen...</p>` : ""}
+        ${this.loadError ? `<div class="warn">Journal konnte nicht geladen werden: ${escapeHtml(this.loadError)}</div>` : ""}
+        ${journal.warnings?.length ? `<div class="warn">${journal.warnings.map((w) => `<div>${escapeHtml(w)}</div>`).join("")}</div>` : ""}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><button class="sort" data-action="sort" data-table="scans" data-key="executed_at">Zeit${state.sortKey === "executed_at" ? ` ${state.sortDirection === "asc" ? "↑" : "↓"}` : ""}</button></th>
+                <th>Umgebung</th>
+                <th>Orders erstellt</th>
+                <th>Trades gemanaged</th>
+                <th></th>
+              </tr>
+              <tr><th></th><th></th><th></th><th></th><th></th></tr>
+            </thead>
+            <tbody>
+              ${pageRows.length ? pageRows.map((run) => {
+                const runId = `${run.executed_at}_${run.environment}`;
+                const isExpanded = this._expandedScanRuns.has(runId);
+                const markets = run.markets || [];
+                let html = `<tr class="expandable ${isExpanded ? "expanded" : ""}" data-action="toggle-scan" data-run-id="${escapeHtml(runId)}">
+                  <td>${formatValue(run.executed_at)}</td>
+                  <td>${escapeHtml(run.environment ?? "-")}</td>
+                  <td>${run.orders_created || 0}</td>
+                  <td>${run.trades_managed || 0}</td>
+                  <td class="expand-icon">${isExpanded ? "▼" : "▶"}</td>
+                </tr>`;
+                if (isExpanded) {
+                  html += `<tr class="detail-row"><td colspan="5"><table class="sub-table">
+                    <thead><tr>
+                      <th>Markt</th><th>Signal-Art</th><th>Entscheidung</th><th>Grund</th>
+                      <th>Entry</th><th>Fill-Zeit</th><th>TP</th><th>SL</th><th>Exit</th><th>Exit-Zeit</th>
+                    </tr></thead>
+                    <tbody>${markets.map((m) => `<tr>
+                      <td>${escapeHtml(m.symbol ?? "-")}</td>
+                      <td><span class="pill ${m.signal_type === "Trend" ? "info" : m.signal_type === "Gegentrend" ? "action" : "neutral"}">${escapeHtml(m.signal_type ?? "-")}</span></td>
+                      <td><span class="pill ${decisionBadgeClass(m.decision_action)}">${escapeHtml(m.decision_action ?? "-")}</span></td>
+                      <td class="reason-cell">${escapeHtml(m.reason ?? "-")}</td>
+                      <td>${m.entry_price != null ? escapeHtml(String(m.entry_price)) : "-"}</td>
+                      <td>${formatValue(m.fill_time)}</td>
+                      <td>${m.tp != null ? escapeHtml(String(m.tp)) : "-"}</td>
+                      <td>${m.sl != null ? escapeHtml(String(m.sl)) : "-"}</td>
+                      <td>${m.exit_price != null ? escapeHtml(String(m.exit_price)) : "-"}</td>
+                      <td>${formatValue(m.exit_time)}</td>
+                    </tr>`).join("")}</tbody>
+                  </table></td></tr>`;
+                }
+                return html;
+              }).join("") : `<tr><td colspan="5" class="empty">Keine Scan-Runs gefunden.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span>Seite ${page} / ${totalPages}</span>
+          <div class="pager-btns">
+            <button class="ghost" data-action="page" data-table="scans" data-page="1" ${page === 1 ? "disabled" : ""}>Erste</button>
+            <button class="ghost" data-action="page" data-table="scans" data-page="${Math.max(1, page - 1)}" ${page === 1 ? "disabled" : ""}>Zurueck</button>
+            <button class="ghost" data-action="page" data-table="scans" data-page="${Math.min(totalPages, page + 1)}" ${page === totalPages ? "disabled" : ""}>Weiter</button>
+            <button class="ghost" data-action="page" data-table="scans" data-page="${totalPages}" ${page === totalPages ? "disabled" : ""}>Letzte</button>
+          </div>
+        </div>
+      </section>
+    </div>`;
+  }
+
   tableTab(name, columns, rows) {
     const journal = this.effectiveJournal();
     const state = this.tableState[name];
@@ -713,6 +832,9 @@ class TradingAgentAdminPanel extends HTMLElement {
                         const isExpanded = isTradesTable && this._expandedTradeRows.has(globalIdx);
                         const cells = columns
                           .map((column) => {
+                            if (column.key === "_expand") {
+                              return isExpanded ? `<td class="expand-icon">▼</td>` : `<td class="expand-icon">▶</td>`;
+                            }
                             const value = cellValue(row, column);
                             if (column.key === "pnl") return `<td>${formatPnl(value)}</td>`;
                             if (["entry_price","stop_loss","take_profit","close_price","position_size"].includes(column.key)) {
@@ -766,6 +888,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       } else {
         this.render();
       }
+      return;
+    }
+    if (action === "toggle-scan" && target.dataset.runId != null) {
+      const id = target.dataset.runId;
+      if (this._expandedScanRuns.has(id)) {
+        this._expandedScanRuns.delete(id);
+      } else {
+        this._expandedScanRuns.add(id);
+      }
+      this.render();
       return;
     }
     if (action === "toggle-trade" && target.dataset.rowIndex != null) {
@@ -850,7 +982,7 @@ class TradingAgentAdminPanel extends HTMLElement {
         : this.currentTab === "status"
           ? this.statusTab()
           : this.currentTab === "scans"
-            ? this.tableTab("scans", SCAN_COLUMNS, journal.scan_rows || [])
+            ? this.scansTab()
             : this.tableTab("trades", TRADE_COLUMNS, journal.trade_rows || []);
 
     this.shadowRoot.innerHTML = `<style>
@@ -916,7 +1048,14 @@ class TradingAgentAdminPanel extends HTMLElement {
       tr.expandable { cursor: pointer; }
       tr.expandable:hover { background: #f0f4f8; }
       tr.expanded { background: #f7f9fc; }
+      .expand-icon { width: 28px; text-align: center; color: #5d6b81; user-select: none; }
+      tr.expandable:hover .expand-icon { color: #1f7a8c; }
       .detail-row td { padding: 16px 20px; background: #fafbfd; border-left: 3px solid #1f7a8c; }
+      .sub-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .sub-table th { background: #eef3f8; padding: 6px 10px; text-align: left; font-weight: 600; color: #324057; white-space: nowrap; }
+      .sub-table td { padding: 6px 10px; border-bottom: 1px solid #edf1f6; vertical-align: top; }
+      .sub-table tr:last-child td { border-bottom: none; }
+      .reason-cell { max-width: 280px; color: #5d6b81; font-size: 12px; }
       .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
       .detail-label { color: #5d6b81; font-size: 12px; display: block; margin-bottom: 2px; }
       .event-log { border-top: 1px solid #edf1f6; padding-top: 12px; }

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -78,6 +78,17 @@ def _format_signal_list(values: list[Any]) -> str | None:
     return " | ".join(distinct)
 
 
+def _derive_signal_type(selected_signal_type: str | None) -> str:
+    if not selected_signal_type:
+        return "Kein Signal"
+    upper = selected_signal_type.upper()
+    if upper.startswith("TREND_"):
+        return "Trend"
+    if upper.startswith("COUNTERTREND_"):
+        return "Gegentrend"
+    return "Kein Signal"
+
+
 def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped_orders: dict[tuple[str | None, str | None, str | None], list[dict[str, Any]]] = {}
     grouped_trades: dict[tuple[str | None, str | None, str | None], list[dict[str, Any]]] = {}
@@ -89,7 +100,8 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif entry.get("entry_type") == "trade":
             grouped_trades.setdefault(key, []).append(entry)
 
-    scan_rows: list[dict[str, Any]] = []
+    # Build per-market scan details
+    per_market: list[dict[str, Any]] = []
     for entry in entries:
         if entry.get("entry_type") != "cycle":
             continue
@@ -97,38 +109,74 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = _group_key(entry)
         related_orders = grouped_orders.get(key, [])
         related_trades = grouped_trades.get(key, [])
-        order_statuses = [order.get("status") for order in related_orders]
-        trade_statuses = [trade.get("status") for trade in related_trades]
-        trade_pnls = [
-            trade.get("pnl")
-            for trade in related_trades
-            if trade.get("pnl") is not None
-        ]
 
-        scan_rows.append(
+        # Pull entry/fill/close info from related order + trade
+        first_order = related_orders[0] if related_orders else None
+        first_trade = related_trades[0] if related_trades else None
+        # Prefer filled/closed trade for exit info
+        closed_trade = next((t for t in related_trades if t.get("status") == "closed"), None)
+
+        per_market.append(
             {
+                "executed_at": entry.get("executed_at"),
                 "timestamp": entry.get("entry_timestamp"),
                 "entry_date": entry.get("entry_date"),
                 "symbol": entry.get("symbol"),
                 "environment": entry.get("environment"),
                 "decision_action": entry.get("decision_action"),
                 "selected_signal_type": _join_distinct(entry.get("used_signals") or []),
-                "received_signals": _format_signal_list(entry.get("received_signals") or []),
-                "unused_signals": _format_signal_list(entry.get("unused_signals") or []),
-                "order_created": bool(related_orders),
-                "order_status_summary": _join_distinct(order_statuses),
-                "trade_status_summary": _join_distinct(trade_statuses),
-                "trade_pnl_summary": _join_distinct([str(pnl) for pnl in trade_pnls]),
+                "signal_type": _derive_signal_type(_join_distinct(entry.get("used_signals") or [])),
+                "reason": entry.get("notes"),
                 "skip_reason": entry.get("skipped_reason"),
-                "notes": entry.get("notes"),
-                "related_order_count": len(related_orders),
-                "related_trade_count": len(related_trades),
+                "order_created": bool(related_orders),
+                "order_created_count": len(related_orders),
+                "trade_count": len(related_trades),
+                "entry_price": first_order.get("entry_price") if first_order else None,
+                "fill_time": first_trade.get("fill_timestamp") if first_trade else None,
+                "tp": first_order.get("take_profit") if first_order else None,
+                "sl": first_order.get("stop_loss") if first_order else None,
+                "exit_price": closed_trade.get("close_price") if closed_trade else None,
+                "exit_time": closed_trade.get("close_timestamp") if closed_trade else None,
             }
         )
 
+    # Group per-market rows into runs: (run_time, environment)
+    runs: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+    for scan in per_market:
+        run_time = scan["executed_at"] or scan["timestamp"]
+        run_key = (run_time, scan["environment"])
+        if run_key not in runs:
+            runs[run_key] = {
+                "executed_at": run_time,
+                "environment": scan["environment"],
+                "orders_created": 0,
+                "trades_managed": 0,
+                "markets": [],
+            }
+        runs[run_key]["orders_created"] += scan["order_created_count"]
+        runs[run_key]["trades_managed"] += scan["trade_count"]
+        runs[run_key]["markets"].append(
+            {
+                "symbol": scan["symbol"],
+                "signal_type": scan["signal_type"],
+                "decision_action": scan["decision_action"],
+                "reason": scan["reason"] or scan["skip_reason"],
+                "entry_price": scan["entry_price"],
+                "fill_time": scan["fill_time"],
+                "tp": scan["tp"],
+                "sl": scan["sl"],
+                "exit_price": scan["exit_price"],
+                "exit_time": scan["exit_time"],
+            }
+        )
+
+    # Sort markets within each run by symbol
+    for run in runs.values():
+        run["markets"].sort(key=lambda m: m["symbol"] or "")
+
     return sorted(
-        scan_rows,
-        key=lambda row: (row.get("timestamp") or "", row.get("symbol") or ""),
+        runs.values(),
+        key=lambda r: r["executed_at"] or "",
         reverse=True,
     )
 
@@ -141,7 +189,7 @@ def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         trade_rows.append(
             {
-                "timestamp": entry.get("entry_timestamp"),
+                "timestamp": entry.get("executed_at") or entry.get("entry_timestamp"),
                 "entry_date": entry.get("entry_date"),
                 "entry_type": entry_type,
                 "symbol": entry.get("symbol"),
@@ -173,16 +221,16 @@ def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _filter_options(scan_rows: list[dict[str, Any]], trade_rows: list[dict[str, Any]]) -> dict[str, list[str]]:
-    all_rows = [*scan_rows, *trade_rows]
+    all_markets = [m for run in scan_rows for m in run.get("markets", [])]
     return {
-        "symbols": sorted({str(row["symbol"]) for row in all_rows if row.get("symbol")}),
-        "environments": sorted({str(row["environment"]) for row in all_rows if row.get("environment")}),
-        "decision_actions": sorted({str(row["decision_action"]) for row in scan_rows if row.get("decision_action")}),
-        "scan_signals": sorted({str(row["selected_signal_type"]) for row in scan_rows if row.get("selected_signal_type")}),
+        "environments": sorted({str(r["environment"]) for r in scan_rows if r.get("environment")}),
+        "signal_types": sorted({str(m["signal_type"]) for m in all_markets if m.get("signal_type")}),
+        "decision_actions": sorted({str(m["decision_action"]) for m in all_markets if m.get("decision_action")}),
         "entry_types": sorted({str(row["entry_type"]) for row in trade_rows if row.get("entry_type")}),
         "trade_statuses": sorted({str(row["status"]) for row in trade_rows if row.get("status")}),
         "directions": sorted({str(row["direction"]) for row in trade_rows if row.get("direction")}),
         "signal_sources": sorted({str(row["source_signal_type"]) for row in trade_rows if row.get("source_signal_type")}),
+        "symbols": sorted({str(row["symbol"]) for row in trade_rows if row.get("symbol")}),
     }
 
 
@@ -197,14 +245,14 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
         "scan_rows": [],
         "trade_rows": [],
         "filter_options": {
-            "symbols": [],
             "environments": [],
+            "signal_types": [],
             "decision_actions": [],
-            "scan_signals": [],
             "entry_types": [],
             "trade_statuses": [],
             "directions": [],
             "signal_sources": [],
+            "symbols": [],
         },
         "warnings": [],
     }
@@ -237,7 +285,3 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
             f"Journal-Export ist derzeit {payload_bytes} Bytes gross. Die Anzeige bleibt vollstaendig, kann aber langsamer werden."
         )
     return payload
-
-
-
-

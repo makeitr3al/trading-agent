@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -193,10 +194,12 @@ def _build_app_cycle_result(
         return result
 
     cycle_timestamp = candles[-1].timestamp.isoformat()
+    executed_at = datetime.now(timezone.utc).isoformat()
     journal_entries = build_journal_entries(
         symbol=symbol,
         environment=environment,
         cycle_timestamp=cycle_timestamp,
+        executed_at=executed_at,
         strategy_result=strategy_result,
         synced_active_trade=synced_state.active_trade if synced_state is not None else None,
         pending_order=post_cycle_state.pending_order if post_cycle_state is not None else None,

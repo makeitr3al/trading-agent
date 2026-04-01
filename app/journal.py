@@ -102,6 +102,7 @@ def build_journal_entries(
     closed_trade: bool,
     skipped_reason: str | None,
     exit_price: float | None,
+    executed_at: str | None = None,
 ) -> list[JournalEntry]:
     timestamp = cycle_timestamp
     entry_date = _entry_date(timestamp)
@@ -112,6 +113,7 @@ def build_journal_entries(
             entry_type="cycle",
             entry_date=entry_date,
             entry_timestamp=timestamp,
+            executed_at=executed_at,
             symbol=symbol,
             environment=environment,
             decision_action=strategy_result.decision.action.value if strategy_result is not None else None,
@@ -138,6 +140,7 @@ def build_journal_entries(
                 entry_type="order",
                 entry_date=entry_date,
                 entry_timestamp=timestamp,
+                executed_at=executed_at,
                 symbol=symbol,
                 environment=environment,
                 direction=_direction_from_order(pending_order),
@@ -161,6 +164,7 @@ def build_journal_entries(
                 entry_type="trade",
                 entry_date=entry_date,
                 entry_timestamp=timestamp,
+                executed_at=executed_at,
                 symbol=symbol,
                 environment=environment,
                 direction=strategy_result.filled_trade.direction.value,
@@ -184,6 +188,7 @@ def build_journal_entries(
                 entry_type="trade",
                 entry_date=entry_date,
                 entry_timestamp=timestamp,
+                executed_at=executed_at,
                 symbol=symbol,
                 environment=environment,
                 direction=synced_active_trade.direction.value,

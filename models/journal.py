@@ -17,6 +17,7 @@ class JournalEntry(BaseModel):
     entry_type: str
     entry_date: str
     entry_timestamp: str
+    executed_at: str | None = None
     symbol: str
     environment: str | None = None
     decision_action: str | None = None
