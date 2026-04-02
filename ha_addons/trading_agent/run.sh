@@ -97,6 +97,20 @@ LOADER
         -delete 2>/dev/null || true
 fi
 
+# Auto-update panel cache-buster in HA configuration
+HA_CONFIG="/config/configuration.yaml"
+if [[ -f "$HA_CONFIG" ]]; then
+    CURRENT_V=$(grep -oP 'admin-panel\.js\?v=\K[^"'"'"' ]*' "$HA_CONFIG" 2>/dev/null || echo "")
+    if [[ -n "$CURRENT_V" && "$CURRENT_V" != "$ADDON_VERSION" ]]; then
+        sed -i "s|admin-panel\.js?v=[^\"]*|admin-panel.js?v=${ADDON_VERSION}|g" "$HA_CONFIG"
+        bashio::log.info "Panel cache-buster updated in configuration.yaml ($CURRENT_V → $ADDON_VERSION)"
+        bashio::log.info "Requesting HA restart to apply new panel version..."
+        curl -s -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            http://supervisor/homeassistant/restart || true
+        exit 0
+    fi
+fi
+
 bashio::log.info "Starting Trading Agent one-shot run"
 bashio::log.info "Mode: $OPERATOR_MODE"
 bashio::log.info "Environment: $OPERATOR_ENVIRONMENT"

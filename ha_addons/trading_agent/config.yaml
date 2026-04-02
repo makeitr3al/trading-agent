@@ -1,5 +1,5 @@
 name: Trading Agent
-version: "0.4.2"
+version: "0.4.3"
 slug: trading_agent
 description: One-shot Trading Agent with integrated Journal
 url: https://github.com/makeitr3al/trading-agent
@@ -11,6 +11,8 @@ startup: once
 boot: auto
 init: false
 map:
+  - type: config
+    read_only: false
   - type: share
     read_only: false
   - type: addon_config

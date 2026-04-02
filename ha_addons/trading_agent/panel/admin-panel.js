@@ -412,6 +412,9 @@ class TradingAgentAdminPanel extends HTMLElement {
       if (!resp.ok) return;
       const latest = (await resp.text()).trim();
       if (latest && PANEL_VERSION !== "__PANEL_VERSION__" && latest !== PANEL_VERSION) {
+        const reloadKey = `__ta_panel_reload_${latest}`;
+        if (sessionStorage.getItem(reloadKey)) return;
+        sessionStorage.setItem(reloadKey, "1");
         console.info("[Trading Agent] Panel update:", PANEL_VERSION, "\u2192", latest);
         window.location.reload();
       }
