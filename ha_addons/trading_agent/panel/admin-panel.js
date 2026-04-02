@@ -37,6 +37,7 @@ const TABS = [
 ];
 
 const TRADE_COLUMNS = [
+  { key: "_select", label: "", sortable: false },
   { key: "_expand", label: "", sortable: false },
   { key: "timestamp", label: "Zeit", sortable: true, filter: "text" },
   { key: "entry_type", label: "Typ", sortable: true, filter: "select", optionKey: "entry_types", badge: true },
@@ -366,6 +367,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._liveStatusInterval = null;
     this._lastJournalRefresh = 0;
     this._expandedTradeRows = new Set();
+    this._selectedTradeRows = new Set();
     this._expandedScanRuns = new Set();
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
@@ -495,6 +497,35 @@ class TradingAgentAdminPanel extends HTMLElement {
     } finally {
       this.loading = false;
       this.render();
+    }
+  }
+
+  async _deleteSelectedTrades() {
+    const journal = this.effectiveJournal();
+    const tradeRows = journal.trade_rows || [];
+    const entries = [];
+    for (const idx of this._selectedTradeRows) {
+      const row = tradeRows[idx];
+      if (row) {
+        entries.push({
+          entry_timestamp: row.timestamp,
+          symbol: row.symbol,
+          entry_type: row.entry_type,
+          status: row.status,
+        });
+      }
+    }
+    if (!entries.length) return;
+    try {
+      await this.hass.callService("shell_command", "trading_agent_delete_journal_entries_haos", {
+        entries: JSON.stringify(entries),
+      });
+      this._selectedTradeRows.clear();
+      this._expandedTradeRows.clear();
+      await new Promise((r) => setTimeout(r, 1000));
+      await this.refreshJournal();
+    } catch (err) {
+      console.error("[Trading Agent] Delete failed:", err);
     }
   }
 
@@ -684,25 +715,22 @@ class TradingAgentAdminPanel extends HTMLElement {
         runMap.set(runKey, {
           executed_at: runTime,
           environment: row.environment,
+          signals: 0,
           orders_created: 0,
           trades_managed: 0,
           markets: [],
         });
       }
       const run = runMap.get(runKey);
+      const sigType = row.signal_type || _deriveScanSignalType(row.selected_signal_type);
+      if (sigType && sigType !== "Kein Signal") run.signals += 1;
       if (row.order_created) run.orders_created += 1;
       run.trades_managed += (row.related_trade_count || 0);
       run.markets.push({
         symbol: row.symbol,
-        signal_type: row.signal_type || _deriveScanSignalType(row.selected_signal_type),
+        signal_type: sigType,
         decision_action: row.decision_action,
         reason: row.notes || row.skip_reason,
-        entry_price: row.entry_price,
-        fill_time: row.fill_time,
-        tp: row.tp,
-        sl: row.sl,
-        exit_price: row.exit_price,
-        exit_time: row.exit_time,
       });
     }
     for (const run of runMap.values()) {
@@ -757,11 +785,12 @@ class TradingAgentAdminPanel extends HTMLElement {
               <tr>
                 <th><button class="sort" data-action="sort" data-table="scans" data-key="executed_at">Zeit${state.sortKey === "executed_at" ? ` ${state.sortDirection === "asc" ? "↑" : "↓"}` : ""}</button></th>
                 <th>Umgebung</th>
+                <th>Signale</th>
                 <th>Orders erstellt</th>
                 <th>Trades gemanaged</th>
                 <th></th>
               </tr>
-              <tr><th></th><th></th><th></th><th></th><th></th></tr>
+              <tr><th></th><th></th><th></th><th></th><th></th><th></th></tr>
             </thead>
             <tbody>
               ${pageRows.length ? pageRows.map((run) => {
@@ -771,32 +800,26 @@ class TradingAgentAdminPanel extends HTMLElement {
                 let html = `<tr class="expandable ${isExpanded ? "expanded" : ""}" data-action="toggle-scan" data-run-id="${escapeHtml(runId)}">
                   <td>${formatValue(run.executed_at)}</td>
                   <td>${escapeHtml(run.environment ?? "-")}</td>
+                  <td>${run.signals || 0}</td>
                   <td>${run.orders_created || 0}</td>
                   <td>${run.trades_managed || 0}</td>
                   <td class="expand-icon">${isExpanded ? "▼" : "▶"}</td>
                 </tr>`;
                 if (isExpanded) {
-                  html += `<tr class="detail-row"><td colspan="5"><table class="sub-table">
+                  html += `<tr class="detail-row"><td colspan="6"><table class="sub-table">
                     <thead><tr>
                       <th>Markt</th><th>Signal-Art</th><th>Entscheidung</th><th>Grund</th>
-                      <th>Entry</th><th>Fill-Zeit</th><th>TP</th><th>SL</th><th>Exit</th><th>Exit-Zeit</th>
                     </tr></thead>
                     <tbody>${markets.map((m) => `<tr>
                       <td>${escapeHtml(m.symbol ?? "-")}</td>
                       <td><span class="pill ${m.signal_type === "Trend" ? "info" : m.signal_type === "Gegentrend" ? "action" : "neutral"}">${escapeHtml(m.signal_type ?? "-")}</span></td>
                       <td><span class="pill ${decisionBadgeClass(m.decision_action)}">${escapeHtml(m.decision_action ?? "-")}</span></td>
                       <td class="reason-cell">${escapeHtml(m.reason ?? "-")}</td>
-                      <td>${m.entry_price != null ? escapeHtml(String(m.entry_price)) : "-"}</td>
-                      <td>${formatValue(m.fill_time)}</td>
-                      <td>${m.tp != null ? escapeHtml(String(m.tp)) : "-"}</td>
-                      <td>${m.sl != null ? escapeHtml(String(m.sl)) : "-"}</td>
-                      <td>${m.exit_price != null ? escapeHtml(String(m.exit_price)) : "-"}</td>
-                      <td>${formatValue(m.exit_time)}</td>
                     </tr>`).join("")}</tbody>
                   </table></td></tr>`;
                 }
                 return html;
-              }).join("") : `<tr><td colspan="5" class="empty">Keine Scan-Runs gefunden.</td></tr>`}
+              }).join("") : `<tr><td colspan="6" class="empty">Keine Scan-Runs gefunden.</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -835,6 +858,7 @@ class TradingAgentAdminPanel extends HTMLElement {
               .join("")}</select>
             <button class="ghost" data-action="reset" data-table="${name}">Filter zuruecksetzen</button>
             <button class="ghost" data-action="refresh">Neu laden</button>
+            ${name === "trades" && this._selectedTradeRows.size > 0 ? `<button class="ghost danger" data-action="delete-selected-trades">Loeschen (${this._selectedTradeRows.size})</button>` : ""}
           </div>
         </div>
         ${this.loading ? `<p class="muted">Journal wird geladen...</p>` : ""}
@@ -882,6 +906,11 @@ class TradingAgentAdminPanel extends HTMLElement {
                         const isExpanded = isTradesTable && this._expandedTradeRows.has(globalIdx);
                         const cells = columns
                           .map((column) => {
+                            if (column.key === "_select" && isTradesTable) {
+                              const isSelected = this._selectedTradeRows.has(globalIdx);
+                              return `<td><input type="checkbox" data-action="select-trade" data-row-index="${globalIdx}" ${isSelected ? "checked" : ""}></td>`;
+                            }
+                            if (column.key === "_select") return `<td></td>`;
                             if (column.key === "_expand") {
                               return isExpanded ? `<td class="expand-icon">▼</td>` : `<td class="expand-icon">▶</td>`;
                             }
@@ -948,6 +977,20 @@ class TradingAgentAdminPanel extends HTMLElement {
         this._expandedScanRuns.add(id);
       }
       this.render();
+      return;
+    }
+    if (action === "select-trade" && target.dataset.rowIndex != null) {
+      const idx = Number(target.dataset.rowIndex);
+      if (this._selectedTradeRows.has(idx)) {
+        this._selectedTradeRows.delete(idx);
+      } else {
+        this._selectedTradeRows.add(idx);
+      }
+      this.render();
+      return;
+    }
+    if (action === "delete-selected-trades") {
+      this._deleteSelectedTrades();
       return;
     }
     if (action === "toggle-trade" && target.dataset.rowIndex != null) {
@@ -1050,6 +1093,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       .tab.active { background: #162133; color: #fff; box-shadow: 0 10px 22px rgba(22, 33, 51, 0.2); }
       .btn { background: #1f7a8c; color: #fff; padding: 12px 14px; font-weight: 600; }
       .ghost { background: #fff; color: #34445d; border: 1px solid #d6deea; padding: 10px 14px; }
+      .ghost.danger { color: #b42318; border-color: #b42318; }
       .sort { background: none; color: inherit; padding: 0; font: inherit; text-align: left; }
       .tab:hover, .btn:hover, .ghost:hover { transform: translateY(-1px); }
       .stack { display: flex; flex-direction: column; gap: 16px; }

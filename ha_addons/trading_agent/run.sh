@@ -97,6 +97,36 @@ LOADER
         -delete 2>/dev/null || true
 fi
 
+# Deploy journal delete helper script to /share (called by HA shell_command)
+cat > "$DATA_PATH/delete_journal_entries.py" << 'DELETEPY'
+import json, sys
+from pathlib import Path
+
+targets = json.loads(sys.argv[1])
+for env in ("beta", "prod"):
+    p = Path(f"/share/trading-agent-data/trading_journal_{env}.jsonl")
+    if not p.exists():
+        continue
+    kept = []
+    for line in p.read_text("utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            kept.append(line)
+            continue
+        if not any(
+            e.get("entry_timestamp") == t.get("entry_timestamp")
+            and e.get("symbol") == t.get("symbol")
+            and e.get("entry_type") == t.get("entry_type")
+            and e.get("status") == t.get("status")
+            for t in targets
+        ):
+            kept.append(line)
+    p.write_text("\n".join(kept) + "\n", "utf-8")
+DELETEPY
+
 # Also copy panel assets to /share for host-side sync (proven path)
 PANEL_SHARE_DIR="$DATA_PATH/panel"
 mkdir -p "$PANEL_SHARE_DIR"

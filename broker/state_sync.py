@@ -497,8 +497,16 @@ def build_agent_state_from_propr_data(
     active_trade = mapped_positions[0] if mapped_positions else None
     active_position_id = active_trade.position_id if active_trade is not None else None
 
-    stop_loss_order_ids = _resolve_exit_order_ids_for_active_position("stop_loss", stop_loss_exit_entries, active_position_id)
-    take_profit_order_ids = _resolve_exit_order_ids_for_active_position("take_profit", take_profit_exit_entries, active_position_id)
+    account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
+    account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
+
+    try:
+        stop_loss_order_ids = _resolve_exit_order_ids_for_active_position("stop_loss", stop_loss_exit_entries, active_position_id)
+        take_profit_order_ids = _resolve_exit_order_ids_for_active_position("take_profit", take_profit_exit_entries, active_position_id)
+    except ValueError as exc:
+        print(f"Warning: {exc}")
+        stop_loss_order_ids = []
+        take_profit_order_ids = []
 
     pending_order: Order | None = None
     pending_order_id: str | None = None
@@ -506,9 +514,6 @@ def build_agent_state_from_propr_data(
     take_profit_order_id: str | None = take_profit_order_ids[0] if take_profit_order_ids else None
     if valid_order_entries:
         pending_order, pending_order_id = valid_order_entries[0]
-
-    account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
-    account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
 
     if previous_state is None:
         return AgentState(
