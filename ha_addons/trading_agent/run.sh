@@ -97,10 +97,18 @@ LOADER
         -delete 2>/dev/null || true
 fi
 
+# Also copy panel assets to /share for host-side sync (proven path)
+PANEL_SHARE_DIR="$DATA_PATH/panel"
+mkdir -p "$PANEL_SHARE_DIR"
+if [[ -d "$PANEL_DIR" ]]; then
+    cp "$PANEL_DIR"/*.js "$PANEL_SHARE_DIR/" 2>/dev/null || true
+    cp "$PANEL_DIR/panel_version.txt" "$PANEL_SHARE_DIR/" 2>/dev/null || true
+fi
+
 # Auto-update panel cache-buster in HA configuration
 HA_CONFIG="/config/configuration.yaml"
 if [[ -f "$HA_CONFIG" ]]; then
-    CURRENT_V=$(grep -oP 'admin-panel\.js\?v=\K[^"'"'"' ]*' "$HA_CONFIG" 2>/dev/null || echo "")
+    CURRENT_V=$(sed -n 's/.*admin-panel\.js?v=\([^"'"'"' ]*\).*/\1/p' "$HA_CONFIG" 2>/dev/null | head -1)
     if [[ -n "$CURRENT_V" && "$CURRENT_V" != "$ADDON_VERSION" ]]; then
         sed -i "s|admin-panel\.js?v=[^\"]*|admin-panel.js?v=${ADDON_VERSION}|g" "$HA_CONFIG"
         bashio::log.info "Panel cache-buster updated in configuration.yaml ($CURRENT_V → $ADDON_VERSION)"
