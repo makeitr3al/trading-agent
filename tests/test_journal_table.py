@@ -52,20 +52,25 @@ def test_build_journal_table_splits_scan_and_trade_rows(tmp_path: Path) -> None:
     payload = build_journal_table(path=journal_path)
 
     assert payload["entry_count_total"] == 3
-    # scan_rows is now grouped: one run per (executed_at, environment)
+    # scan_rows is flat: one per-market row per cycle
     assert len(payload["scan_rows"]) == 1
-    run = payload["scan_rows"][0]
-    assert run["orders_created"] == 1
-    assert run["trades_managed"] == 1
-    assert len(run["markets"]) == 1
-    market = run["markets"][0]
-    assert market["symbol"] == "BTC/USDC"
-    assert market["signal_type"] == "Trend"
-    assert market["decision_action"] == "PREPARE_TREND_ORDER"
+    row = payload["scan_rows"][0]
+    assert row["symbol"] == "BTC/USDC"
+    assert row["order_created"] is True
+    assert row["order_status_summary"] == "submitted"
+    assert row["trade_status_summary"] == "filled"
+    assert row["decision_action"] == "PREPARE_TREND_ORDER"
+    assert row["selected_signal_type"] == "TREND_LONG"
+    assert row["signal_type"] == "Trend"
+    assert row["notes"] == "cycle note"
+    assert row["related_order_count"] == 1
+    assert row["related_trade_count"] == 1
     assert len(payload["trade_rows"]) == 2
     assert payload["trade_rows"][0]["entry_type"] == "trade"
     assert payload["trade_rows"][1]["entry_type"] == "order"
     assert payload["filter_options"]["symbols"] == ["BTC/USDC"]
+    assert "signal_types" in payload["filter_options"]
+    assert "scan_signals" in payload["filter_options"]
 
 
 def test_build_journal_table_warns_for_large_entry_count(tmp_path: Path) -> None:

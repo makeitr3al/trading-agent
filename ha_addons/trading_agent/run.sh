@@ -75,10 +75,26 @@ ADDON_VERSION=$(sed -n 's/^version: "\([^"]*\)".*/\1/p' "$APP_PATH/ha_addons/tra
 
 mkdir -p "$PANEL_DIR"
 if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
-    # Inject addon version into panel JS and copy directly (no versioned-loader indirection)
-    sed "s/__PANEL_VERSION__/${ADDON_VERSION}/g" "$PANEL_ASSET_SOURCE" > "$PANEL_ASSET_TARGET"
-    # Clean up any leftover versioned files from old deployment mechanism
-    find "$PANEL_DIR" -name "admin-panel-*.js" -delete 2>/dev/null || true
+    # 1. Inject version into versioned file (new URL each version → no cache hit)
+    sed "s/__PANEL_VERSION__/${ADDON_VERSION}/g" "$PANEL_ASSET_SOURCE" \
+        > "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js"
+
+    # 2. Create latest-alias (fallback for loader when version file is missing)
+    cp "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js" "$PANEL_DIR/admin-panel-latest.js"
+
+    # 3. Write version file (read by loader + auto-reload check)
+    printf '%s' "$ADDON_VERSION" > "$PANEL_DIR/panel_version.txt"
+
+    # 4. Write stable loader at original URL (content never changes — caching is harmless)
+    cat > "$PANEL_ASSET_TARGET" << 'LOADER'
+(function(){fetch("/local/trading-agent/panel_version.txt?_="+Date.now(),{cache:"no-store"}).then(function(r){return r.text()}).then(function(v){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-"+v.trim()+".js";document.head.appendChild(s)}).catch(function(){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-latest.js";document.head.appendChild(s)})})();
+LOADER
+
+    # 5. Remove old versioned files (keep current + latest)
+    find "$PANEL_DIR" -name "admin-panel-*.js" \
+        ! -name "admin-panel-${ADDON_VERSION}.js" \
+        ! -name "admin-panel-latest.js" \
+        -delete 2>/dev/null || true
 fi
 
 bashio::log.info "Starting Trading Agent one-shot run"

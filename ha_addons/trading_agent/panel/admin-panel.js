@@ -207,6 +207,7 @@ function buildFilterOptions(scanRows, tradeRows) {
     environments: uniqueValues(allRows, "environment"),
     decision_actions: uniqueValues(scanRows, "decision_action"),
     scan_signals: uniqueValues(scanRows, "selected_signal_type"),
+    signal_types: uniqueValues(scanRows, "signal_type"),
     entry_types: uniqueValues(tradeRows, "entry_type"),
     trade_statuses: uniqueValues(tradeRows, "status"),
     directions: uniqueValues(tradeRows, "direction"),
@@ -262,36 +263,33 @@ function _deriveScanSignalType(signalType) {
 
 function snapshotFallback(journalState) {
   const recentEntries = journalState?.attributes?.recent_entries || [];
-  // Build grouped scan_rows (one per run) from snapshot fallback
-  const runs = new Map();
-  for (const entry of recentEntries) {
-    if (entry.entry_type !== "cycle") continue;
-    const runTime = entry.executed_at || entry.entry_timestamp || null;
-    const runKey = `${runTime}_${entry.environment}`;
-    if (!runs.has(runKey)) {
-      runs.set(runKey, {
-        executed_at: runTime,
-        environment: entry.environment || null,
-        orders_created: 0,
-        trades_managed: 0,
-        markets: [],
-      });
-    }
-    const run = runs.get(runKey);
-    run.markets.push({
+  const scanRows = recentEntries
+    .filter((entry) => entry.entry_type === "cycle")
+    .map((entry) => ({
+      executed_at: entry.executed_at || null,
+      timestamp: entry.entry_timestamp || null,
+      entry_date: entry.entry_date || null,
       symbol: entry.symbol || null,
-      signal_type: _deriveScanSignalType(entry.source_signal_type),
+      environment: entry.environment || null,
       decision_action: entry.decision_action || null,
-      reason: entry.notes || entry.skipped_reason || null,
+      selected_signal_type: entry.source_signal_type || null,
+      signal_type: _deriveScanSignalType(entry.source_signal_type),
+      received_signals: entry.source_signal_type || null,
+      order_created: false,
+      order_status_summary: null,
+      trade_status_summary: null,
+      trade_pnl_summary: entry.pnl ?? null,
+      skip_reason: entry.skipped_reason || null,
+      notes: entry.notes || null,
+      related_order_count: 0,
+      related_trade_count: 0,
       entry_price: null,
       fill_time: null,
       tp: null,
       sl: null,
       exit_price: null,
       exit_time: null,
-    });
-  }
-  const scanRows = [...runs.values()].sort((a, b) => (b.executed_at || "").localeCompare(a.executed_at || ""));
+    }));
   const tradeRows = recentEntries
     .filter((entry) => entry.entry_type && entry.entry_type !== "cycle")
     .map((entry) => ({
@@ -403,6 +401,19 @@ class TradingAgentAdminPanel extends HTMLElement {
       if (resp.ok) {
         this._directLiveStatus = await resp.json();
         this.render();
+      }
+    } catch (_) {}
+    this._checkPanelVersion();
+  }
+
+  async _checkPanelVersion() {
+    try {
+      const resp = await fetch(`/local/trading-agent/panel_version.txt?_=${Date.now()}`, { cache: "no-store" });
+      if (!resp.ok) return;
+      const latest = (await resp.text()).trim();
+      if (latest && PANEL_VERSION !== "__PANEL_VERSION__" && latest !== PANEL_VERSION) {
+        console.info("[Trading Agent] Panel update:", PANEL_VERSION, "\u2192", latest);
+        window.location.reload();
       }
     } catch (_) {}
   }
@@ -656,10 +667,46 @@ class TradingAgentAdminPanel extends HTMLElement {
   }
   scansTab() {
     const journal = this.effectiveJournal();
-    const scanRows = journal.scan_rows || [];
+    const flatScanRows = journal.scan_rows || [];
     const state = this.tableState.scans;
     const search = (state.search || "").trim().toLowerCase();
     const envFilter = (state.filters.environment || "").toLowerCase();
+
+    // Group flat per-market rows into runs: (runTime, environment)
+    const runMap = new Map();
+    for (const row of flatScanRows) {
+      const runTime = row.executed_at || row.timestamp || "";
+      const runKey = `${runTime}_${row.environment}`;
+      if (!runMap.has(runKey)) {
+        runMap.set(runKey, {
+          executed_at: runTime,
+          environment: row.environment,
+          orders_created: 0,
+          trades_managed: 0,
+          markets: [],
+        });
+      }
+      const run = runMap.get(runKey);
+      if (row.order_created) run.orders_created += 1;
+      run.trades_managed += (row.related_trade_count || 0);
+      run.markets.push({
+        symbol: row.symbol,
+        signal_type: row.signal_type || _deriveScanSignalType(row.selected_signal_type),
+        decision_action: row.decision_action,
+        reason: row.notes || row.skip_reason,
+        entry_price: row.entry_price,
+        fill_time: row.fill_time,
+        tp: row.tp,
+        sl: row.sl,
+        exit_price: row.exit_price,
+        exit_time: row.exit_time,
+      });
+    }
+    for (const run of runMap.values()) {
+      run.markets.sort((a, b) => (a.symbol || "").localeCompare(b.symbol || ""));
+    }
+    const scanRows = [...runMap.values()];
+
     const filtered = scanRows.filter((run) => {
       if (envFilter && (run.environment || "").toLowerCase() !== envFilter) return false;
       if (search) {
