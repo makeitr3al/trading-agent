@@ -116,8 +116,14 @@ class ProprClient:
     def get_user_profile(self) -> dict[str, Any]:
         return self.sdk_client.get_user()
 
+    def get_challenges(self, **kwargs: Any) -> dict[str, Any]:
+        return self._wrap_list_response(self.sdk_client.get_challenges(**kwargs))
+
     def get_challenge_attempts(self, **kwargs: Any) -> dict[str, Any]:
         return self._wrap_list_response(self.sdk_client.get_challenge_attempts(**kwargs))
+
+    def get_challenge_attempt(self, attempt_id: str) -> dict[str, Any]:
+        return self.sdk_client.get_challenge_attempt(attempt_id)
 
     def get_orders(self, account_id: str) -> dict[str, Any]:
         self._set_account(account_id)
@@ -139,6 +145,12 @@ class ProprClient:
         if hasattr(self.sdk_client, "get_leverage_limits"):
             return self.sdk_client.get_leverage_limits()
         raise AttributeError("SDK client does not expose get_leverage_limits")
+
+    def update_margin_config(
+        self, account_id: str, config_id: str, asset: str, leverage: int, margin_mode: str = "cross",
+    ) -> dict[str, Any]:
+        self._set_account(account_id)
+        return self.sdk_client.update_margin_config(config_id, asset, leverage, margin_mode)
 
     def get_leverage_limits(self) -> dict[str, Any]:
         return self.get_effective_leverage_limits()

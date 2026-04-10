@@ -26,6 +26,15 @@ from config.propr_config import ProprConfig
 from utils.live_status import load_live_status, write_live_status
 
 
+def _safe_ws_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ProprWsEvent(BaseModel):
     event_type: str
     raw_payload: dict[str, Any]
@@ -106,10 +115,22 @@ class ProprWebSocketClient:
                 if maybe_count and open_positions_count is None:
                     open_positions_count = maybe_count
 
-        if pnl_value is None and open_positions_count is None:
+        balance_fields: dict[str, Any] = {}
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                if "balance" in candidate and "balance" not in balance_fields:
+                    balance_fields["balance"] = _safe_ws_float(candidate.get("balance"))
+                if "marginBalance" in candidate and "margin_balance" not in balance_fields:
+                    balance_fields["margin_balance"] = _safe_ws_float(candidate.get("marginBalance"))
+                if "availableBalance" in candidate and "available_balance" not in balance_fields:
+                    balance_fields["available_balance"] = _safe_ws_float(candidate.get("availableBalance"))
+                if "totalUnrealizedPnl" in candidate and "balance" not in balance_fields:
+                    pass  # pnl already handled above
+
+        if pnl_value is None and open_positions_count is None and not balance_fields:
             return None
 
-        return {
+        result: dict[str, Any] = {
             "environment": self.config.environment,
             "account_unrealized_pnl": pnl_value,
             "account_open_positions_count": int(open_positions_count or 0),
@@ -117,6 +138,8 @@ class ProprWebSocketClient:
             "source": "websocket",
             "last_error": None,
         }
+        result.update(balance_fields)
+        return result
 
     def persist_live_status(self, payload: dict[str, Any], path: str | Path | None = None) -> Path:
         existing = load_live_status(path)

@@ -173,6 +173,7 @@ def _run_single_cycle(
         symbol_spec=symbol_spec,
         data_source=runner_settings.data_source,
         journal_path=runner_settings.journal_path,
+        challenge_id=runner_settings.challenge_id,
     )
     _print_result_summary(result)
     if result.skipped_reason == "missing symbol spec for live execution":

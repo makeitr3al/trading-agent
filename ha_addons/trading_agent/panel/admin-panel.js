@@ -4,12 +4,15 @@ const REGISTRY_URL = "/local/trading-agent/asset_registry.json";
 const HOME_URL = "/lovelace";
 const PANEL_VERSION = "__PANEL_VERSION__";
 
+const CHALLENGES_URL = "/local/trading-agent/challenges.json";
+
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
   mode: "input_select.trading_agent_mode",
   environment: "input_select.trading_agent_environment",
   leverage: "input_number.trading_agent_leverage",
   markets: "input_text.trading_agent_markets",
+  challengeId: "input_text.trading_agent_challenge_id",
   scheduleEnabled: "input_boolean.trading_agent_scheduling_aktiv",
   scheduleTime: "input_datetime.trading_agent_schedule_time",
   pushEnabled: "input_boolean.trading_agent_push_aktiv",
@@ -89,6 +92,16 @@ function formatValue(value) {
     }
   }
   return escapeHtml(value);
+}
+
+function formatCurrency(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return escapeHtml(value);
+  return "$" + new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric);
 }
 
 function formatPnl(value) {
@@ -371,6 +384,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._selectedTradeRows = new Set();
     this._expandedScanRuns = new Set();
     this.assetRegistry = null;
+    this.challengesList = null;
     this._marketGroupsExpanded = {};
     this._marketFilter = "";
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
@@ -382,6 +396,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     document.addEventListener("visibilitychange", this._onVisibilityChange);
     this.refreshJournal();
     this.fetchAssetRegistry();
+    this.fetchChallenges();
     this.render();
   }
 
@@ -439,6 +454,13 @@ class TradingAgentAdminPanel extends HTMLElement {
       source: entity.state,
       last_error: entity.attributes?.last_error,
       updated_at: entity.attributes?.updated_at,
+      challenge_name: entity.attributes?.challenge_name,
+      challenge_id: entity.attributes?.challenge_id,
+      initial_balance: entity.attributes?.initial_balance,
+      balance: entity.attributes?.balance,
+      margin_balance: entity.attributes?.margin_balance,
+      available_balance: entity.attributes?.available_balance,
+      high_water_mark: entity.attributes?.high_water_mark,
     };
   }
 
@@ -514,6 +536,34 @@ class TradingAgentAdminPanel extends HTMLElement {
         this.render();
       }
     } catch (_) {}
+  }
+
+  async fetchChallenges() {
+    try {
+      const resp = await fetch(`${CHALLENGES_URL}?ts=${Date.now()}`, { cache: "no-store" });
+      if (resp.ok) {
+        this.challengesList = await resp.json();
+        this.render();
+      }
+    } catch (_) {}
+  }
+
+  challengeSelector() {
+    const challenges = this.challengesList;
+    const currentId = this.entity(ENTITIES.challengeId)?.state || "";
+    if (!challenges || !challenges.length) {
+      return this.field(ENTITIES.challengeId, "text", { label: "Challenge ID" });
+    }
+    const options = [
+      `<option value="" ${!currentId ? "selected" : ""}>-- Automatisch (erste aktive) --</option>`,
+      ...challenges.map((c) => {
+        const bal = c.initial_balance ? ` ($${Number(c.initial_balance).toLocaleString("en-US")})` : "";
+        const label = `${escapeHtml(c.name || c.challenge_id)}${bal}`;
+        const selected = c.challenge_id === currentId ? "selected" : "";
+        return `<option value="${escapeHtml(c.challenge_id)}" ${selected}>${label}</option>`;
+      }),
+    ].join("");
+    return `<label class="field"><span>Challenge</span><select data-entity="${ENTITIES.challengeId}">${options}</select></label>`;
   }
 
   _currentMarketSelection() {
@@ -657,6 +707,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           ${this.field(ENTITIES.environment, "select")}
           ${this.field(ENTITIES.leverage, "number")}
           ${this.field(ENTITIES.scheduleTime, "time")}
+          ${this.challengeSelector()}
           ${this.field(ENTITIES.addonSlug)}
         </div>
         ${this.marketsSelector()}
@@ -702,6 +753,25 @@ class TradingAgentAdminPanel extends HTMLElement {
         </section>`
       : "";
 
+    // Challenge account card
+    const hasBalanceData = ld?.margin_balance != null || ld?.balance != null;
+    const challengeReturn = (ld?.margin_balance != null && ld?.initial_balance)
+      ? ((ld.margin_balance - ld.initial_balance) / ld.initial_balance * 100).toFixed(2) : null;
+    const challengeAccountCard = hasBalanceData
+      ? `<section class="card">
+          <h3>Challenge Konto</h3>
+          <div class="status-list">
+            ${ld?.challenge_name ? `<div class="status-row"><span class="label">Challenge</span><span class="value">${escapeHtml(ld.challenge_name)}</span></div>` : ""}
+            <div class="status-row"><span class="label">Saldo</span><span class="value">${formatCurrency(ld?.balance)}</span></div>
+            <div class="status-row"><span class="label">Margin Balance</span><span class="value">${formatCurrency(ld?.margin_balance)}</span></div>
+            <div class="status-row"><span class="label">Verfuegbar</span><span class="value">${formatCurrency(ld?.available_balance)}</span></div>
+            <div class="status-row"><span class="label">High Water Mark</span><span class="value">${formatCurrency(ld?.high_water_mark)}</span></div>
+            <div class="status-row"><span class="label">Startkapital</span><span class="value">${formatCurrency(ld?.initial_balance)}</span></div>
+            ${challengeReturn != null ? `<div class="status-row"><span class="label">Rendite</span><span class="value ${Number(challengeReturn) >= 0 ? "pnl-pos" : "pnl-neg"}">${Number(challengeReturn) >= 0 ? "+" : ""}${challengeReturn}%</span></div>` : ""}
+          </div>
+        </section>`
+      : "";
+
     // Stats from journal
     const closedTrades = (journal.trade_rows || []).filter((r) => r.entry_type === "trade" && r.status === "closed");
     const winningTrades = closedTrades.filter((r) => r.pnl != null && Number(r.pnl) > 0);
@@ -718,6 +788,7 @@ class TradingAgentAdminPanel extends HTMLElement {
 
     return `<div class="stack">
       ${activePositionCard}
+      ${challengeAccountCard}
       ${statsStrip}
       <div class="grid cards">
         ${this.statusCard("Operator Config", [

@@ -241,6 +241,8 @@ class _CycleContext:
     journal_path: str | Path | None
     environment: str | None
     symbol_spec_loaded: bool
+    challenge_id: str | None = None
+    resolved_balance: float | None = None
 
     # Accumulated state — mutated by phases
     challenge_context: ActiveChallengeContext | None = None
@@ -296,13 +298,16 @@ def _phase_health_guard(ctx: _CycleContext) -> AppCycleResult | None:
 
 
 def _phase_challenge_validation(ctx: _CycleContext) -> AppCycleResult | None:
-    ctx.challenge_context = get_active_challenge_context(ctx.client)
+    ctx.challenge_context = get_active_challenge_context(ctx.client, challenge_id=ctx.challenge_id)
     if ctx.challenge_context is None:
         ctx.risk_guard_result = evaluate_execution_guards(
             None, max_allowed_drawdown=ctx.max_allowed_drawdown,
         )
         ctx.skipped_reason = "no active challenge"
         return ctx.build_result()
+
+    if ctx.challenge_context.account_balance is not None:
+        ctx.resolved_balance = ctx.challenge_context.account_balance.margin_balance
     return None
 
 
@@ -319,10 +324,12 @@ def _phase_strategy_execution(ctx: _CycleContext) -> AppCycleResult | None:
             ctx.client, account_id, ctx.previous_state,
         )
 
+    effective_balance = ctx.resolved_balance or ctx.account_balance
+
     ctx.strategy_result, ctx.post_cycle_state = run_agent_cycle(
         candles=ctx.candles,
         config=ctx.config,
-        account_balance=ctx.account_balance,
+        account_balance=effective_balance,
         state=ctx.synced_state,
     )
 
@@ -330,7 +337,7 @@ def _phase_strategy_execution(ctx: _CycleContext) -> AppCycleResult | None:
         resized_order = _apply_symbol_specific_position_size(
             order=ctx.post_cycle_state.pending_order,
             config=ctx.config,
-            account_balance=ctx.account_balance,
+            account_balance=effective_balance,
             desired_leverage=ctx.desired_leverage,
             symbol_spec=ctx.symbol_spec,
         )
@@ -460,10 +467,12 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
         ctx.skipped_reason = ctx.asset_guard_result.reason
         return ctx.build_result()
 
+    effective_balance = ctx.resolved_balance or ctx.account_balance
+    effective_leverage = ctx.asset_guard_result.effective_leverage
     pending_order_size_reason = _validate_pending_order_execution_size(
         order=ctx.post_cycle_state.pending_order,
-        account_balance=ctx.account_balance,
-        desired_leverage=ctx.desired_leverage,
+        account_balance=effective_balance,
+        desired_leverage=effective_leverage,
         symbol_spec=ctx.symbol_spec,
     )
     if pending_order_size_reason is not None:
@@ -521,6 +530,7 @@ def run_app_cycle(
     data_source: str = "live",
     journal_path: str | Path | None = None,
     executed_at: str | None = None,
+    challenge_id: str | None = None,
 ) -> AppCycleResult:
     ctx = _CycleContext(
         client=client,
@@ -540,6 +550,7 @@ def run_app_cycle(
         environment=getattr(getattr(client, "config", None), "environment", None),
         symbol_spec_loaded=symbol_spec is not None,
         executed_at=executed_at,
+        challenge_id=challenge_id,
     )
 
     for phase in [

@@ -1,12 +1,7 @@
 from models.decision import DecisionAction, DecisionResult
 from models.order import Order, OrderType
 from models.signal import SignalState, SignalType
-
-# TODO: Later replace or cancel existing pending orders.
-# TODO: Later add repricing logic.
-# TODO: Later set created_at.
-# TODO: Later add symbol-specific contract, pip, and tick logic for live trading.
-# TODO: Later add broker-specific fields.
+from strategy.position_sizer import calculate_position_size
 
 
 def _normalize_buy_spread(buy_spread: float) -> float:
@@ -64,12 +59,15 @@ def build_order_from_decision(
         ):
             return None
 
-        risk_amount = account_balance * risk_per_trade_pct
-        risk_per_unit = abs(trend_signal.entry - trend_signal.stop_loss)
-        if risk_per_unit <= 0:
+        sizing = calculate_position_size(
+            entry=trend_signal.entry,
+            stop_loss=trend_signal.stop_loss,
+            account_balance=account_balance,
+            risk_per_trade_pct=risk_per_trade_pct,
+        )
+        if sizing.position_size is None:
             return None
-
-        position_size = risk_amount / risk_per_unit
+        position_size = sizing.position_size
 
         if trend_signal.signal_type == SignalType.TREND_LONG:
             order_type = OrderType.BUY_STOP
@@ -109,12 +107,15 @@ def build_order_from_decision(
         ):
             return None
 
-        risk_amount = account_balance * risk_per_trade_pct
-        risk_per_unit = abs(countertrend_signal.entry - countertrend_signal.stop_loss)
-        if risk_per_unit <= 0:
+        sizing = calculate_position_size(
+            entry=countertrend_signal.entry,
+            stop_loss=countertrend_signal.stop_loss,
+            account_balance=account_balance,
+            risk_per_trade_pct=risk_per_trade_pct,
+        )
+        if sizing.position_size is None:
             return None
-
-        position_size = risk_amount / risk_per_unit
+        position_size = sizing.position_size
 
         if countertrend_signal.signal_type == SignalType.COUNTERTREND_SHORT:
             order_type = (

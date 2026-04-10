@@ -13,11 +13,15 @@ from models.propr_challenge import ActiveChallengeContext, ProprChallengeAttempt
 
 
 class FakeProprClient:
-    def __init__(self, payload: dict | list[dict]) -> None:
+    def __init__(self, payload: dict | list[dict], attempt_details: dict | None = None) -> None:
         self.payload = payload
+        self.attempt_details = attempt_details or {}
 
     def get_challenge_attempts(self) -> dict | list[dict]:
         return self.payload
+
+    def get_challenge_attempt(self, attempt_id: str) -> dict:
+        return self.attempt_details.get(attempt_id, {})
 
 
 def test_parse_challenge_attempts_with_empty_data_list() -> None:
@@ -187,7 +191,7 @@ def test_get_active_challenge_context_returns_normalized_active_challenge_contex
     assert context.attempt.current_phase == "phase-2"
 
 
-def test_get_active_challenge_context_raises_value_error_for_multiple_active_attempts() -> None:
+def test_get_active_challenge_context_picks_first_for_multiple_active_attempts() -> None:
     client = FakeProprClient(
         {
             "data": [
@@ -205,5 +209,71 @@ def test_get_active_challenge_context_raises_value_error_for_multiple_active_att
         }
     )
 
-    with pytest.raises(ValueError, match="Multiple active challenge attempts found"):
-        get_active_challenge_context(client)
+    context = get_active_challenge_context(client)
+    assert context is not None
+    assert context.attempt.attempt_id == "attempt-1"
+    assert context.account_id == "account-1"
+
+
+def test_get_active_challenge_context_filters_by_challenge_id() -> None:
+    client = FakeProprClient(
+        {
+            "data": [
+                {
+                    "attemptId": "attempt-1",
+                    "accountId": "account-1",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+                {
+                    "attemptId": "attempt-2",
+                    "accountId": "account-2",
+                    "challengeId": "challenge-B",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+
+    context = get_active_challenge_context(client, challenge_id="challenge-B")
+    assert context is not None
+    assert context.attempt.attempt_id == "attempt-2"
+    assert context.account_id == "account-2"
+    assert context.challenge_id == "challenge-B"
+
+
+def test_get_active_challenge_context_parses_balance() -> None:
+    detail = {
+        "account": {
+            "balance": "101967.53",
+            "totalUnrealizedPnl": "68.40",
+            "marginBalance": "102035.93",
+            "availableBalance": "97925.84",
+            "highWaterMark": "100000",
+        },
+        "challenge": {
+            "name": "Bronze Challenge",
+            "initialBalance": "100000",
+        },
+    }
+    client = FakeProprClient(
+        {
+            "data": [
+                {
+                    "attemptId": "attempt-1",
+                    "accountId": "account-1",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+            ]
+        },
+        attempt_details={"attempt-1": detail},
+    )
+
+    context = get_active_challenge_context(client)
+    assert context is not None
+    assert context.account_balance is not None
+    assert context.account_balance.balance == 101967.53
+    assert context.account_balance.margin_balance == 102035.93
+    assert context.account_balance.initial_balance == 100000.0
+    assert context.challenge_name == "Bronze Challenge"

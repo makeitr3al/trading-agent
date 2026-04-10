@@ -48,6 +48,7 @@ fi
 eval "$operator_env_output"
 
 export PROPR_ENV="$OPERATOR_ENVIRONMENT"
+export PROPR_CHALLENGE_ID="$OPERATOR_CHALLENGE_ID"
 export PROPR_BETA_API_KEY="$(bashio::config 'propr_beta_api_key')"
 export PROPR_PROD_API_KEY="$(bashio::config 'propr_prod_api_key')"
 export PROPR_PROD_CONFIRM="$(bool_to_yes_no 'propr_prod_confirm')"
@@ -137,6 +138,42 @@ if [[ -f "$HA_CONFIG" ]]; then
         exit 0
     fi
 fi
+
+# Write challenges.json for admin panel challenge selector
+python -c "
+import json
+from broker.propr_client import ProprClient
+from config.propr_config import ProprConfig
+import os
+try:
+    env = os.environ.get('PROPR_ENV', 'beta')
+    key = os.environ.get('PROPR_BETA_API_KEY') if env == 'beta' else os.environ.get('PROPR_PROD_API_KEY')
+    url = os.environ.get('PROPR_BETA_API_URL', 'https://api.beta.propr.xyz/v1') if env == 'beta' else os.environ.get('PROPR_PROD_API_URL', 'https://api.propr.xyz/v1')
+    config = ProprConfig(environment=env, api_key=key, base_url=url)
+    client = ProprClient(config)
+    attempts_raw = client.get_challenge_attempts()
+    items = attempts_raw.get('data', []) if isinstance(attempts_raw, dict) else attempts_raw
+    active = [a for a in items if a.get('status') == 'active']
+    result = []
+    for a in active:
+        attempt_id = a.get('attemptId') or a.get('attempt_id') or a.get('id', '')
+        detail = client.get_challenge_attempt(attempt_id) if attempt_id else {}
+        challenge = detail.get('challenge', {}) or {}
+        result.append({
+            'challenge_id': a.get('challengeId') or a.get('challenge_id', ''),
+            'attempt_id': attempt_id,
+            'account_id': a.get('accountId') or a.get('account_id', ''),
+            'name': challenge.get('name') or challenge.get('title', ''),
+            'initial_balance': challenge.get('initialBalance', ''),
+        })
+    with open('$PANEL_DIR/challenges.json', 'w') as f:
+        json.dump(result, f, ensure_ascii=True)
+except Exception as e:
+    print(f'Challenges fetch failed (non-critical): {e}')
+    with open('$PANEL_DIR/challenges.json', 'w') as f:
+        f.write('[]')
+" 2>&1 || bashio::log.warning "Challenges fetch failed (non-critical)"
+cp "$PANEL_DIR/challenges.json" "$PANEL_SHARE_DIR/challenges.json" 2>/dev/null || true
 
 # Refresh asset registry (auto-discovers tradeable assets from Hyperliquid)
 ASSET_REGISTRY_PATH="$DATA_PATH/asset_registry.json"

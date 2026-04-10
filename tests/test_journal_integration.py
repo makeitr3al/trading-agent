@@ -87,7 +87,7 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, synced_state: AgentState, str
         "app.trading_app.fetch_and_check_core_service_health",
         lambda client: HealthGuardResult(allow_trading=True, core_status="OK"),
     )
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr(
         "app.trading_app.sync_agent_state_from_propr",
         lambda client, account_id, previous_state: synced_state,

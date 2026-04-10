@@ -210,9 +210,12 @@ def _persist_live_status(
     symbol: str | None,
     *,
     last_error: str | None = None,
+    challenge_id: str | None = None,
 ) -> None:
+    from utils.live_status import build_live_status_payload, write_live_status
+
     try:
-        challenge_context = get_active_challenge_context(client)
+        challenge_context = get_active_challenge_context(client, challenge_id=challenge_id)
         if challenge_context is None:
             write_live_status_from_state(
                 environment=environment,
@@ -227,12 +230,28 @@ def _persist_live_status(
             challenge_context.account_id,
             symbol=symbol,
         )
-        write_live_status_from_state(
+
+        balance_kwargs: dict[str, Any] = {}
+        if challenge_context.account_balance is not None:
+            ab = challenge_context.account_balance
+            balance_kwargs = {
+                "challenge_name": challenge_context.challenge_name,
+                "challenge_id": challenge_context.challenge_id,
+                "initial_balance": ab.initial_balance,
+                "balance": ab.balance,
+                "margin_balance": ab.margin_balance,
+                "available_balance": ab.available_balance,
+                "high_water_mark": ab.high_water_mark,
+            }
+
+        payload = build_live_status_payload(
             environment=environment,
             state=state,
             source="poll",
             last_error=last_error,
+            **balance_kwargs,
         )
+        write_live_status(payload)
     except Exception as exc:
         write_live_status_from_state(
             environment=environment,
@@ -318,6 +337,7 @@ def main() -> None:
                 data_source=data_source_settings.data_source,
                 journal_path=scan_settings.journal_path,
                 executed_at=scan_executed_at,
+                challenge_id=scan_settings.challenge_id,
             )
             scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
             market_contexts.append(
@@ -354,7 +374,7 @@ def main() -> None:
 
         if not effective_allow_submit:
             if client is not None:
-                _persist_live_status(client, environment, primary_symbol)
+                _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
             return
 
         reference_result = scan_results[0]["result"] if scan_results else None
@@ -368,13 +388,13 @@ def main() -> None:
         print(f"Execution slots available: {available_slots}")
         if available_slots <= 0:
             print("No execution slots available. Skipping submits.")
-            _persist_live_status(client, environment, primary_symbol)
+            _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
             return
 
         selected_candidates = _select_execution_candidates(scan_results, available_slots)
         if not selected_candidates:
             print("No executable signal candidates found.")
-            _persist_live_status(client, environment, primary_symbol)
+            _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
             return
 
         print("Executing markets:")
@@ -404,18 +424,19 @@ def main() -> None:
                 data_source=data_source_settings.data_source,
                 journal_path=scan_settings.journal_path,
                 executed_at=scan_executed_at,
+                challenge_id=scan_settings.challenge_id,
             )
             print(
                 f"Executed {symbol}: submitted={execution_result.submitted_order}, replaced={execution_result.replaced_order}, "
                 f"skipped_reason={execution_result.skipped_reason}"
             )
 
-        _persist_live_status(client, environment, primary_symbol)
+        _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
     except Exception as exc:
         print(f"Multi-market scan failed: {exc}")
         if client is not None:
             try:
-                _persist_live_status(client, environment, primary_symbol, last_error=str(exc))
+                _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id, last_error=str(exc))
             except Exception:
                 pass
 

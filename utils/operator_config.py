@@ -16,6 +16,7 @@ DEFAULT_OPERATOR_CONFIG = {
     "markets": "BTC,ETH,SOL,XRP,EUR,JPY",
     "scheduling_enabled": False,
     "schedule_time": "07:00",
+    "challenge_id": "",
 }
 SUPPORTED_MODES = ("scharf", "preflight", "beta_write")
 SUPPORTED_ENVIRONMENTS = ("beta", "prod")
@@ -92,6 +93,10 @@ def _normalize_scheduling_enabled(value: Any) -> bool:
     raise ValueError("scheduling_enabled must be true or false")
 
 
+def _normalize_challenge_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
 def _normalize_schedule_time(value: str | None) -> str:
     normalized = (value or DEFAULT_OPERATOR_CONFIG["schedule_time"]).strip()
     try:
@@ -114,6 +119,7 @@ def normalize_operator_config(payload: dict[str, Any]) -> dict[str, Any]:
         "markets": _normalize_markets(merged.get("markets")),
         "scheduling_enabled": _normalize_scheduling_enabled(merged.get("scheduling_enabled")),
         "schedule_time": _normalize_schedule_time(merged.get("schedule_time")),
+        "challenge_id": _normalize_challenge_id(merged.get("challenge_id")),
     }
 
 
@@ -208,6 +214,7 @@ def export_operator_env_shell(path: str | Path | None = None) -> str:
         "OPERATOR_MARKETS": config["markets"],
         "OPERATOR_SCHEDULING_ENABLED": "YES" if config["scheduling_enabled"] else "NO",
         "OPERATOR_SCHEDULE_TIME": config["schedule_time"],
+        "OPERATOR_CHALLENGE_ID": config.get("challenge_id", ""),
         "OPERATOR_PRIMARY_SYMBOL": derived["primary_symbol"],
         "OPERATOR_PRIMARY_COIN": derived["primary_coin"],
         "OPERATOR_JOURNAL_PATH": paths["journal_path"],

@@ -124,7 +124,7 @@ def _make_symbol_spec():
 
 def test_returns_skipped_result_when_no_active_challenge_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: None)
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: None)
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -148,7 +148,7 @@ def test_runs_full_app_cycle_when_active_challenge_exists(monkeypatch: pytest.Mo
     post_cycle_state = AgentState()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
 
@@ -174,7 +174,7 @@ def test_submits_new_order_when_no_synced_pending_order_exists_and_post_cycle_st
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -201,7 +201,7 @@ def test_replaces_existing_order_when_synced_pending_order_exists_and_post_cycle
 
     synced_state = AgentState(pending_order=order, pending_order_id="external-order-1")
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -224,7 +224,7 @@ def test_replaces_existing_order_when_synced_pending_order_exists_and_post_cycle
 
 def test_does_not_execute_when_post_cycle_state_has_no_pending_order(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(None), AgentState(pending_order=None)))
 
@@ -248,7 +248,7 @@ def test_propagates_value_error_when_replace_is_needed_but_synced_pending_order_
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState(pending_order=order, pending_order_id=None))
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -272,7 +272,7 @@ def test_propagates_value_error_when_replace_is_needed_but_synced_pending_order_
 
 def test_blocks_execution_when_risk_guard_says_no_active_challenge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: None)
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: None)
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -294,7 +294,7 @@ def test_blocks_execution_when_challenge_has_failure_reason(monkeypatch: pytest.
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context(failure_reason="breach"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context(failure_reason="breach"))
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -317,7 +317,7 @@ def test_blocks_execution_when_drawdown_threshold_is_reached(monkeypatch: pytest
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context(max_drawdown=100.0))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context(max_drawdown=100.0))
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -341,7 +341,7 @@ def test_still_allows_execution_when_guards_pass(monkeypatch: pytest.MonkeyPatch
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context(max_drawdown=50.0))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context(max_drawdown=50.0))
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=5))
@@ -366,7 +366,7 @@ def test_still_allows_execution_when_guards_pass(monkeypatch: pytest.MonkeyPatch
 
 def test_app_cycle_exposes_risk_guard_result_in_result(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(None), AgentState(pending_order=None)))
 
@@ -392,7 +392,7 @@ def test_app_cycle_replaces_using_synced_external_pending_order_id(monkeypatch: 
     captured: dict[str, object] = {}
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -422,7 +422,7 @@ def test_app_cycle_stores_new_pending_order_id_from_submit_response_when_availab
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -448,7 +448,7 @@ def test_app_cycle_stores_new_pending_order_id_from_replace_submit_response_when
 
     synced_state = AgentState(pending_order=order, pending_order_id="external-order-42")
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
@@ -502,7 +502,7 @@ def test_app_cycle_continues_when_core_service_is_healthy(monkeypatch: pytest.Mo
         return HealthGuardResult(allow_trading=True, core_status="OK")
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", _healthy)
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
 
@@ -527,7 +527,7 @@ def test_app_cycle_can_skip_health_check_when_require_healthy_core_is_false(monk
         raise AssertionError("health check should have been skipped")
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", _should_not_run)
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: None)
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: None)
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -549,7 +549,7 @@ def test_blocks_execution_when_asset_is_not_tradeable(monkeypatch: pytest.Monkey
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=False, reason="asset not tradeable", asset="EUR", desired_leverage=desired_leverage, max_leverage=None))
@@ -578,7 +578,7 @@ def test_blocks_execution_when_configured_leverage_exceeds_max(monkeypatch: pyte
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=False, reason="configured leverage exceeds max allowed", asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
@@ -605,7 +605,7 @@ def test_app_cycle_exposes_asset_guard_result_when_execution_is_allowed(monkeypa
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
@@ -638,7 +638,7 @@ def test_app_cycle_recalculates_pending_order_with_symbol_spec(monkeypatch: pyte
     )
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -675,7 +675,7 @@ def test_app_cycle_recalculates_pending_order_with_symbol_spec(monkeypatch: pyte
 def test_live_execution_is_blocked_when_symbol_spec_is_missing_and_order_would_be_submitted(monkeypatch: pytest.MonkeyPatch) -> None:
     order = _make_order()
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -704,7 +704,7 @@ def test_live_execution_is_blocked_when_symbol_spec_is_missing_and_order_would_b
 def test_live_dry_run_is_not_blocked_when_symbol_spec_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     order = _make_order()
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -730,7 +730,7 @@ def test_live_dry_run_is_not_blocked_when_symbol_spec_is_missing(monkeypatch: py
 def test_golden_mode_remains_blocked_from_submit_regardless(monkeypatch: pytest.MonkeyPatch) -> None:
     order = _make_order()
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -757,7 +757,7 @@ def test_execution_proceeds_when_symbol_spec_is_present_and_guards_pass(monkeypa
 
     order = _make_order()
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
@@ -800,7 +800,7 @@ def test_closes_active_trade_when_strategy_requests_market_close(monkeypatch: py
     post_cycle_state = AgentState(active_trade=None)
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
     monkeypatch.setattr("app.trading_app.submit_active_trade_close_if_allowed", lambda order_service, account_id, symbol, state, close_active_trade: {"data": [{"orderId": "urn:prp-order:close-1"}]})
@@ -829,7 +829,7 @@ def test_golden_mode_blocks_active_trade_close_execution(monkeypatch: pytest.Mon
     post_cycle_state = AgentState(active_trade=None)
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
 
@@ -867,7 +867,7 @@ def test_manages_exit_orders_for_active_trade_updates(monkeypatch: pytest.Monkey
     post_cycle_state = AgentState(active_trade=updated_trade)
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
     monkeypatch.setattr(
@@ -910,7 +910,7 @@ def test_golden_mode_blocks_active_trade_exit_order_updates(monkeypatch: pytest.
     post_cycle_state = AgentState(active_trade=updated_trade)
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (strategy_result, post_cycle_state))
 
@@ -943,7 +943,7 @@ def test_blocks_new_entry_when_three_open_order_trade_slots_already_exist(monkey
     )
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: synced_state)
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -968,7 +968,7 @@ def test_beta_blocks_standalone_stop_entry_execution_but_keeps_journalable_state
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
 
@@ -993,7 +993,7 @@ def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatc
     order = _make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
@@ -1026,7 +1026,7 @@ def test_app_cycle_blocks_pending_order_when_risk_based_size_exceeds_desired_lev
     )
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
-    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client: _make_challenge_context())
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: _make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))

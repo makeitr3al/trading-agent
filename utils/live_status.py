@@ -17,6 +17,13 @@ DEFAULT_LIVE_STATUS = {
     "websocket_connected": False,
     "source": "poll",
     "last_error": None,
+    "challenge_name": None,
+    "challenge_id": None,
+    "initial_balance": None,
+    "balance": None,
+    "margin_balance": None,
+    "available_balance": None,
+    "high_water_mark": None,
 }
 
 
@@ -48,6 +55,13 @@ def build_live_status_payload(
     updated_at: str | None = None,
     account_unrealized_pnl: float | None = None,
     account_open_positions_count: int | None = None,
+    challenge_name: str | None = None,
+    challenge_id: str | None = None,
+    initial_balance: float | None = None,
+    balance: float | None = None,
+    margin_balance: float | None = None,
+    available_balance: float | None = None,
+    high_water_mark: float | None = None,
 ) -> dict[str, Any]:
     effective_pnl = account_unrealized_pnl
     if effective_pnl is None and state is not None:
@@ -65,6 +79,13 @@ def build_live_status_payload(
         "websocket_connected": bool(websocket_connected),
         "source": source,
         "last_error": last_error,
+        "challenge_name": challenge_name,
+        "challenge_id": challenge_id,
+        "initial_balance": initial_balance,
+        "balance": balance,
+        "margin_balance": margin_balance,
+        "available_balance": available_balance,
+        "high_water_mark": high_water_mark,
     }
 
 

@@ -12,6 +12,7 @@ trading_agent_load_current_config_haos:
         operator_markets: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') or 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY' }}"
         operator_scheduling_enabled: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') }}"
         operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
+        operator_challenge_id: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') or '' }}"
         ui_mode: >-
           {% if operator_mode == 'preflight' %}
             Preflight-Test
@@ -57,6 +58,11 @@ trading_agent_load_current_config_haos:
         entity_id: input_datetime.trading_agent_schedule_time
       data:
         time: "{{ operator_schedule_time[:5] }}"
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.trading_agent_challenge_id
+      data:
+        value: "{{ operator_challenge_id }}"
 
 
 trading_agent_save_current_config_haos:
@@ -80,6 +86,7 @@ trading_agent_save_current_config_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
 
 trading_agent_jetzt_ausfuehren_haos:
   alias: Trading Agent Aktuellen Modus ausfuehren
@@ -102,6 +109,7 @@ trading_agent_preflight_test_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -118,6 +126,7 @@ trading_agent_beta_write_test_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -134,6 +143,7 @@ trading_agent_scharf_lauf_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
+        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
