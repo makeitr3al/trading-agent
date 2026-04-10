@@ -171,6 +171,7 @@ def _build_app_cycle_result(
     health_guard_result: HealthGuardResult | None = None,
     asset_guard_result: AssetGuardResult | None = None,
     symbol_spec_loaded: bool = False,
+    executed_at: str | None = None,
 ) -> AppCycleResult:
     result = AppCycleResult(
         challenge_context=challenge_context,
@@ -194,7 +195,8 @@ def _build_app_cycle_result(
         return result
 
     cycle_timestamp = candles[-1].timestamp.isoformat()
-    executed_at = datetime.now(timezone.utc).isoformat()
+    if executed_at is None:
+        executed_at = datetime.now(timezone.utc).isoformat()
     journal_entries = build_journal_entries(
         symbol=symbol,
         environment=environment,
@@ -257,6 +259,7 @@ class _CycleContext:
     close_requested: bool = False
     pending_order_requested: bool = False
     exit_order_update_requested: bool = False
+    executed_at: str | None = None
 
     def build_result(self) -> AppCycleResult:
         return _build_app_cycle_result(
@@ -278,6 +281,7 @@ class _CycleContext:
             health_guard_result=self.health_guard_result,
             asset_guard_result=self.asset_guard_result,
             symbol_spec_loaded=self.symbol_spec_loaded,
+            executed_at=self.executed_at,
         )
 
 
@@ -516,6 +520,7 @@ def run_app_cycle(
     symbol_spec: SymbolSpec | None = None,
     data_source: str = "live",
     journal_path: str | Path | None = None,
+    executed_at: str | None = None,
 ) -> AppCycleResult:
     ctx = _CycleContext(
         client=client,
@@ -534,6 +539,7 @@ def run_app_cycle(
         journal_path=journal_path,
         environment=getattr(getattr(client, "config", None), "environment", None),
         symbol_spec_loaded=symbol_spec is not None,
+        executed_at=executed_at,
     )
 
     for phase in [
