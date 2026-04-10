@@ -1,5 +1,6 @@
 const PANEL_NAME = "trading-agent-admin-panel";
 const JOURNAL_URL = "/local/trading-agent/journal_table.json";
+const REGISTRY_URL = "/local/trading-agent/asset_registry.json";
 const HOME_URL = "/lovelace";
 const PANEL_VERSION = "__PANEL_VERSION__";
 
@@ -369,6 +370,9 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._expandedTradeRows = new Set();
     this._selectedTradeRows = new Set();
     this._expandedScanRuns = new Set();
+    this.assetRegistry = null;
+    this._marketGroupsExpanded = {};
+    this._marketFilter = "";
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
@@ -377,6 +381,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.shadowRoot.addEventListener("input", (event) => this.onInput(event));
     document.addEventListener("visibilitychange", this._onVisibilityChange);
     this.refreshJournal();
+    this.fetchAssetRegistry();
     this.render();
   }
 
@@ -500,6 +505,75 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
   }
 
+  async fetchAssetRegistry() {
+    try {
+      const resp = await fetch(`${REGISTRY_URL}?ts=${Date.now()}`, { cache: "no-store" });
+      if (resp.ok) {
+        const data = await resp.json();
+        this.assetRegistry = data.assets || [];
+        this.render();
+      }
+    } catch (_) {}
+  }
+
+  _currentMarketSelection() {
+    const state = this.entity(ENTITIES.markets);
+    const raw = state?.state ?? "";
+    return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  }
+
+  _updateMarketSelection(selected) {
+    const value = [...selected].join(",");
+    this.setEntityValue(ENTITIES.markets, value);
+  }
+
+  marketsSelector() {
+    const registry = this.assetRegistry;
+    if (!registry || !registry.length) {
+      return this.field(ENTITIES.markets);
+    }
+    const selected = this._currentMarketSelection();
+    const filter = this._marketFilter.toLowerCase();
+
+    const crypto = registry.filter((a) => a.asset_type === "crypto");
+    const hip3 = registry.filter((a) => a.asset_type === "hip3");
+
+    const filteredCrypto = filter ? crypto.filter((a) => a.name.toLowerCase().includes(filter)) : crypto;
+    const filteredHip3 = filter ? hip3.filter((a) => a.name.toLowerCase().includes(filter) || a.propr_asset.toLowerCase().includes(filter)) : hip3;
+
+    const cryptoExpanded = this._marketGroupsExpanded.crypto;
+    const hip3Expanded = this._marketGroupsExpanded.hip3;
+
+    const selectedCryptoCount = crypto.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
+    const selectedHip3Count = hip3.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
+    const totalSelected = selectedCryptoCount + selectedHip3Count;
+
+    const checkboxGrid = (assets, useProprAsset) =>
+      assets.map((a) => {
+        const val = useProprAsset ? a.propr_asset : a.name;
+        const checked = selected.has(a.name) || selected.has(a.propr_asset) ? "checked" : "";
+        const label = useProprAsset ? `${a.name}` : a.name;
+        return `<label class="market-item"><input type="checkbox" data-market-asset="${escapeHtml(val)}" ${checked}><span>${escapeHtml(label)}</span></label>`;
+      }).join("");
+
+    return `<div class="market-selector">
+      <label class="field"><span>Maerkte (${totalSelected} ausgewaehlt)</span></label>
+      <input type="text" class="market-search" data-market-filter placeholder="Filter..." value="${escapeHtml(this._marketFilter)}">
+      <div class="market-group">
+        <div class="market-group-header" data-action="toggle-market-group" data-group="crypto">
+          <span>${cryptoExpanded ? "&#9660;" : "&#9654;"} Crypto Perps (${crypto.length})${selectedCryptoCount > 0 ? ` — ${selectedCryptoCount} ausgewaehlt` : ""}</span>
+        </div>
+        ${cryptoExpanded ? `<div class="market-checkbox-grid">${filteredCrypto.length ? checkboxGrid(filteredCrypto, false) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
+      </div>
+      <div class="market-group">
+        <div class="market-group-header" data-action="toggle-market-group" data-group="hip3">
+          <span>${hip3Expanded ? "&#9660;" : "&#9654;"} Stocks &amp; Commodities (${hip3.length})${selectedHip3Count > 0 ? ` — ${selectedHip3Count} ausgewaehlt` : ""}</span>
+        </div>
+        ${hip3Expanded ? `<div class="market-checkbox-grid">${filteredHip3.length ? checkboxGrid(filteredHip3, true) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
+      </div>
+    </div>`;
+  }
+
   async _deleteSelectedTrades() {
     const journal = this.effectiveJournal();
     const tradeRows = journal.trade_rows || [];
@@ -583,9 +657,9 @@ class TradingAgentAdminPanel extends HTMLElement {
           ${this.field(ENTITIES.environment, "select")}
           ${this.field(ENTITIES.leverage, "number")}
           ${this.field(ENTITIES.scheduleTime, "time")}
-          ${this.field(ENTITIES.markets)}
           ${this.field(ENTITIES.addonSlug)}
         </div>
+        ${this.marketsSelector()}
         <div class="toggle-row">
           ${this.field(ENTITIES.scheduleEnabled, "checkbox")}
           ${this.field(ENTITIES.pushEnabled, "checkbox")}
@@ -1003,6 +1077,14 @@ class TradingAgentAdminPanel extends HTMLElement {
       this.render();
       return;
     }
+    if (action === "toggle-market-group") {
+      const group = target.dataset.group || target.closest("[data-group]")?.dataset.group;
+      if (group) {
+        this._marketGroupsExpanded[group] = !this._marketGroupsExpanded[group];
+        this.render();
+      }
+      return;
+    }
     if (action === "refresh") {
       this.refreshJournal();
       return;
@@ -1036,6 +1118,17 @@ class TradingAgentAdminPanel extends HTMLElement {
   onChange(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.marketAsset) {
+      const selected = this._currentMarketSelection();
+      const asset = target.dataset.marketAsset;
+      if (target.checked) {
+        selected.add(asset);
+      } else {
+        selected.delete(asset);
+      }
+      this._updateMarketSelection(selected);
+      return;
+    }
     const entityId = target.dataset.entity;
     if (entityId) {
       this.setEntityValue(entityId, target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value);
@@ -1060,6 +1153,11 @@ class TradingAgentAdminPanel extends HTMLElement {
   onInput(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
+    if (target.dataset.marketFilter !== undefined) {
+      this._marketFilter = target.value;
+      this.render();
+      return;
+    }
     const { table, search } = target.dataset;
     if (table && search) {
       this.setTableState(table, { search: target.value, page: 1 });
@@ -1157,10 +1255,20 @@ class TradingAgentAdminPanel extends HTMLElement {
       .event-item { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
       .event-time { color: #5d6b81; min-width: 140px; }
       .event-note { color: #6a7890; font-style: italic; }
+      .market-selector { margin-top: 8px; }
+      .market-search { margin-bottom: 8px; }
+      .market-group { border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; overflow: hidden; }
+      .market-group-header { padding: 10px 14px; background: #f7f9fc; cursor: pointer; font-weight: 600; font-size: 13px; color: #324057; user-select: none; }
+      .market-group-header:hover { background: #eef3f8; }
+      .market-checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px 8px; padding: 10px 14px; max-height: 280px; overflow-y: auto; }
+      .market-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #162133; cursor: pointer; padding: 3px 0; }
+      .market-item input[type="checkbox"] { width: auto; margin: 0; cursor: pointer; }
+      .market-item:hover { color: #1f7a8c; }
       @media (max-width: 900px) {
         .page { padding: 16px; }
         .hero { flex-direction: column; }
         .search { min-width: 0; width: 100%; }
+        .market-checkbox-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
       }
     </style>
     <div class="page">

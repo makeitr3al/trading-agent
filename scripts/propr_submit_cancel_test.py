@@ -129,9 +129,7 @@ def main() -> None:
         )
 
         submission_preview = build_order_submission_preview(test_order, symbol)
-        submission_preview["asset"] = submission_preview["base"]
 
-        print("Using beta write-test asset override: asset=base")
         print("DRY-RUN internal order:")
         print(test_order.model_dump())
         print("DRY-RUN mapped Propr payload:")

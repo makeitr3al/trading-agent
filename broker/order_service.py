@@ -22,14 +22,9 @@ def _require_non_empty(value: str, field_name: str) -> str:
 
 def _parse_symbol(symbol: str) -> tuple[str, str, str]:
     normalized = _require_non_empty(symbol, "symbol")
-    parts = normalized.split("/")
-    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-        raise ValueError("symbol must be in BASE/QUOTE format")
-
-    base = parts[0].strip().upper()
-    quote = parts[1].strip().upper()
-    asset = f"{base}/{quote}"
-    return asset, base, quote
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(normalized)
+    return info.asset, info.base, info.quote
 
 
 
@@ -344,28 +339,6 @@ def _ensure_success_response(response: dict[str, Any] | None, operation: str) ->
     raise ValueError(f"Unexpected {operation} response status: {status}")
 
 
-def _extract_error_message(exc: Exception) -> str:
-    return str(exc).strip().lower()
-
-
-def _is_exchange_asset_not_found(exc: Exception) -> bool:
-    return "exchange_asset_not_found" in _extract_error_message(exc)
-
-
-def _prepare_beta_preview(preview: dict[str, Any]) -> dict[str, Any]:
-    adjusted = dict(preview)
-    base = adjusted.get("base")
-    asset = adjusted.get("asset")
-    if base is not None and asset != base:
-        adjusted["asset"] = base
-    return adjusted
-
-
-def _should_use_beta_asset_fallback(client: ProprClient, preview: dict[str, Any]) -> bool:
-    environment = str(getattr(getattr(client, "config", None), "environment", "")).strip().lower()
-    base = preview.get("base")
-    asset = preview.get("asset")
-    return environment == "beta" and base is not None and asset != base
 
 
 
@@ -400,14 +373,7 @@ class ProprOrderService:
     ) -> dict[str, Any]:
         normalized_account_id = _require_non_empty(account_id, "account_id")
         order_params = build_sdk_create_order_params(submission_preview)
-        try:
-            response = self.client.create_order(normalized_account_id, **order_params)
-        except Exception as exc:
-            if not _should_use_beta_asset_fallback(self.client, submission_preview) or not _is_exchange_asset_not_found(exc):
-                raise
-            fallback_preview = _prepare_beta_preview(submission_preview)
-            fallback_order_params = build_sdk_create_order_params(fallback_preview)
-            response = self.client.create_order(normalized_account_id, **fallback_order_params)
+        response = self.client.create_order(normalized_account_id, **order_params)
         ensured = _ensure_success_response(response, "create")
         if ensured is None:
             raise ValueError("Create order returned no response")

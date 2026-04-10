@@ -241,8 +241,7 @@ def test_multi_market_scan_settings_can_parse_combined_market_list(monkeypatch: 
 
     settings = load_multi_market_scan_settings_from_env()
 
-    assert settings.symbols == ["BTC/USDC", "ETH/USDC"]
-    assert settings.hyperliquid_coins == ["BTC", "ETH"]
+    assert settings.assets == ["BTC", "ETH"]
     assert settings.journal_path == "artifacts/scan-journal.jsonl"
 
 
@@ -305,17 +304,16 @@ def test_runtime_override_can_replace_propr_symbol(monkeypatch: pytest.MonkeyPat
 
 def test_runtime_override_can_replace_scan_markets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     runtime_path = tmp_path / "runtime_overrides.json"
-    runtime_path.write_text('{"SCAN_MARKETS": "BTC/USDC:BTC,ETH/USDC:ETH"}\n', encoding="utf-8")
+    runtime_path.write_text('{"SCAN_MARKETS": "BTC,ETH"}\n', encoding="utf-8")
     monkeypatch.setenv("TRADING_AGENT_RUNTIME_CONFIG_PATH", str(runtime_path))
     monkeypatch.setenv("SCAN_CONFIRM", "YES")
-    monkeypatch.setenv("SCAN_MARKETS", "BTC/USDC:BTC")
+    monkeypatch.setenv("SCAN_MARKETS", "SOL")
     monkeypatch.delenv("SCAN_SYMBOLS", raising=False)
     monkeypatch.delenv("SCAN_HYPERLIQUID_COINS", raising=False)
 
     settings = load_multi_market_scan_settings_from_env()
 
-    assert settings.symbols == ["BTC/USDC", "ETH/USDC"]
-    assert settings.hyperliquid_coins == ["BTC", "ETH"]
+    assert settings.assets == ["BTC", "ETH"]
 
 
 def test_live_app_cycle_settings_legacy_generic_journal_path_maps_to_environment_file(monkeypatch: pytest.MonkeyPatch) -> None:

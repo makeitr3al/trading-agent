@@ -17,11 +17,9 @@ class AssetGuardResult(BaseModel):
 
 
 def extract_base_asset(symbol: str) -> str:
-    normalized = (symbol or "").strip()
-    parts = normalized.split("/")
-    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-        raise ValueError("symbol must be in BASE/QUOTE format")
-    return parts[0].strip().upper()
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(symbol)
+    return info.base
 
 
 
@@ -49,10 +47,13 @@ def evaluate_asset_execution_guard(
     symbol: str,
     desired_leverage: int = 1,
 ) -> AssetGuardResult:
-    asset = extract_base_asset(symbol)
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(symbol)
+    asset = info.base
+    margin_config_asset = info.asset
 
     try:
-        client.get_margin_config(account_id, asset)
+        client.get_margin_config(account_id, margin_config_asset)
     except Exception:
         return AssetGuardResult(
             allow_execution=False,

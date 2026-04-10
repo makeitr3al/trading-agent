@@ -20,11 +20,9 @@ def _validate_propr_env(value: str) -> str:
 
 
 def _validate_symbol(value: str) -> str:
-    normalized = value.strip().upper()
-    parts = [part.strip() for part in normalized.split("/") if part.strip()]
-    if len(parts) != 2:
-        raise ValueError("PROPR_SYMBOL must use BASE/QUOTE format, for example BTC/USDC")
-    return f"{parts[0]}/{parts[1]}"
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(value)
+    return info.asset
 
 
 def _validate_leverage(value: int) -> str:
@@ -34,21 +32,9 @@ def _validate_leverage(value: int) -> str:
 
 
 def _validate_scan_markets(value: str) -> str:
-    entries = [item.strip() for item in value.split(",") if item.strip()]
-    if not entries:
-        raise ValueError("SCAN_MARKETS must not be empty")
-
-    normalized_entries: list[str] = []
-    for entry in entries:
-        if ":" not in entry:
-            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
-        symbol, coin = entry.split(":", 1)
-        normalized_symbol = _validate_symbol(symbol)
-        normalized_coin = coin.strip().upper()
-        if not normalized_coin:
-            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
-        normalized_entries.append(f"{normalized_symbol}:{normalized_coin}")
-    return ",".join(normalized_entries)
+    from utils.asset_normalizer import parse_market_list
+    infos = parse_market_list(value)
+    return ",".join(info.asset for info in infos)
 
 
 def _effective_payload() -> dict[str, object]:

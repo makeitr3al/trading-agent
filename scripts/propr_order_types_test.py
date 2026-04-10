@@ -67,11 +67,6 @@ def _extract_error_message(exc: Exception) -> str:
 
 
 
-def _is_exchange_asset_not_found(exc: Exception) -> bool:
-    return "exchange_asset_not_found" in _extract_error_message(exc)
-
-
-
 def _is_order_saga_load_failed(exc: Exception) -> bool:
     return "order_saga_load_account_and_order_failed" in _extract_error_message(exc)
 
@@ -105,10 +100,9 @@ def _load_reference_price(hyperliquid_config: HyperliquidConfig) -> Decimal:
 
 
 def _parse_symbol(symbol: str) -> tuple[str, str]:
-    parts = [part.strip().upper() for part in symbol.split("/") if part.strip()]
-    if len(parts) != 2:
-        raise ValueError("symbol must be in BASE/QUOTE format")
-    return parts[0], parts[1]
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(symbol)
+    return info.base, info.quote
 
 
 
@@ -228,11 +222,6 @@ def _confirm_position_closed(
 
 
 
-def _prepare_beta_preview(preview: dict[str, Any], use_beta_asset_fallback: bool = False) -> dict[str, Any]:
-    adjusted = dict(preview)
-    if use_beta_asset_fallback:
-        adjusted["asset"] = adjusted["base"]
-    return adjusted
 
 
 
@@ -268,18 +257,8 @@ def _submit_preview_with_beta_asset_fallback(
     account_id: str,
     preview: dict[str, Any],
 ) -> tuple[dict[str, Any], str | None, bool]:
-    try:
-        response, order_id = _submit_preview(order_service, account_id, preview)
-        return response, order_id, False
-    except Exception as exc:
-        if not _is_exchange_asset_not_found(exc):
-            raise
-        fallback_preview = _prepare_beta_preview(preview, use_beta_asset_fallback=True)
-        print("  beta asset fallback activated: retrying with asset set to base coin")
-        print("  fallback payload preview:")
-        _print_preview(fallback_preview)
-        response, order_id = _submit_preview(order_service, account_id, fallback_preview)
-        return response, order_id, True
+    response, order_id = _submit_preview(order_service, account_id, preview)
+    return response, order_id, False
 
 
 

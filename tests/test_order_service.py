@@ -107,7 +107,7 @@ def test_maps_buy_limit_order_to_documented_create_order_parameters(monkeypatch:
     assert params["position_side"] == "long"
     assert params["order_type"] == "limit"
     assert params["price"] == "110.0"
-    assert params["asset"] == "BTC/USDC"
+    assert params["asset"] == "BTC"
     assert params["intent_id"] == "ulid-fixed"
 
 
@@ -118,7 +118,7 @@ def test_maps_buy_stop_order_to_documented_stop_limit_parameters(monkeypatch: py
 
     assert params["order_type"] == "stop_limit"
     assert params["trigger_price"] == "110.0"
-    assert params["asset"] == "BTC/USDC"
+    assert params["asset"] == "BTC"
 
 
 
@@ -136,7 +136,7 @@ def test_includes_documented_asset_base_quote_time_in_force_and_execution_flags(
     monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
     params = map_internal_order_to_propr_payload(_make_order(OrderType.BUY_LIMIT), "BTC/USDC")
 
-    assert params["asset"] == "BTC/USDC"
+    assert params["asset"] == "BTC"
     assert params["base"] == "BTC"
     assert params["quote"] == "USDC"
     assert params["time_in_force"] == "GTC"
@@ -167,7 +167,7 @@ def test_build_manual_order_submission_preview_supports_market_and_exit_flags(mo
         close_position=True,
     )
 
-    assert params["asset"] == "BTC/USDC"
+    assert params["asset"] == "BTC"
     assert params["side"] == "sell"
     assert params["position_side"] == "long"
     assert params["order_type"] == "market"
@@ -260,7 +260,7 @@ def test_submit_pending_order_calls_sdk_adapter_with_documented_parameters(monke
     assert params["side"] == "buy"
     assert params["position_side"] == "long"
     assert params["order_type"] == "stop_limit"
-    assert params["asset"] == "BTC/USDC"
+    assert params["asset"] == "BTC"
     assert params["intent_id"] == "ulid-fixed"
     assert response["data"][0]["orderId"] == "urn:prp-order:123"
 
@@ -403,9 +403,9 @@ def test_reduce_only_and_close_position_are_correctly_mapped(monkeypatch: pytest
 
 
 
-def test_raises_value_error_for_invalid_symbol_format() -> None:
-    with pytest.raises(ValueError, match="symbol must be in BASE/QUOTE format"):
-        map_internal_order_to_propr_payload(_make_order(OrderType.BUY_LIMIT), "BTCUSDC")
+def test_raises_value_error_for_empty_symbol() -> None:
+    with pytest.raises(ValueError, match="symbol is required"):
+        map_internal_order_to_propr_payload(_make_order(OrderType.BUY_LIMIT), "")
 
 
 
@@ -448,55 +448,4 @@ def test_manual_preview_raises_value_error_for_non_positive_quantity(monkeypatch
         )
 
 
-def test_submit_order_preview_retries_with_beta_base_asset_on_exchange_asset_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    class BetaFallbackClient(FakeProprClient):
-        def create_order(self, account_id: str, **order_params: object) -> dict:
-            self.calls.append(("create_order", account_id, order_params))
-            if len(self.calls) == 1:
-                raise ValueError("[404] 13450: exchange_asset_not_found")
-            return {"status": 200, "data": [{"orderId": "urn:prp-order:beta-fallback"}]}
-
-    client = BetaFallbackClient(environment="beta")
-    service = ProprOrderService(client)
-    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
-
-    preview = build_manual_order_submission_preview(
-        symbol="BTC/USDC",
-        side="buy",
-        position_side="long",
-        order_type="limit",
-        quantity="0.001",
-        price="100000",
-    )
-    response = service.submit_order_preview("account-1", preview)
-
-    assert len(client.calls) == 2
-    assert client.calls[0][2]["asset"] == "BTC/USDC"
-    assert client.calls[1][2]["asset"] == "BTC"
-    assert response["data"][0]["orderId"] == "urn:prp-order:beta-fallback"
-
-
-def test_submit_order_preview_does_not_retry_outside_beta(monkeypatch: pytest.MonkeyPatch) -> None:
-    class NoFallbackClient(FakeProprClient):
-        def create_order(self, account_id: str, **order_params: object) -> dict:
-            self.calls.append(("create_order", account_id, order_params))
-            raise ValueError("[404] 13450: exchange_asset_not_found")
-
-    client = NoFallbackClient(environment="prod")
-    service = ProprOrderService(client)
-    monkeypatch.setattr("broker.order_service.generate_intent_id", lambda: "ulid-fixed")
-
-    preview = build_manual_order_submission_preview(
-        symbol="BTC/USDC",
-        side="buy",
-        position_side="long",
-        order_type="limit",
-        quantity="0.001",
-        price="100000",
-    )
-
-    with pytest.raises(ValueError, match="exchange_asset_not_found"):
-        service.submit_order_preview("account-1", preview)
-
-    assert len(client.calls) == 1
 

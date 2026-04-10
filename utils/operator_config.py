@@ -13,14 +13,17 @@ DEFAULT_OPERATOR_CONFIG = {
     "mode": "scharf",
     "environment": "beta",
     "leverage": 1,
-    "markets": "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY",
+    "markets": "BTC,ETH,SOL,XRP,EUR,JPY",
     "scheduling_enabled": False,
     "schedule_time": "07:00",
 }
 SUPPORTED_MODES = ("scharf", "preflight", "beta_write")
 SUPPORTED_ENVIRONMENTS = ("beta", "prod")
 DEFAULT_MARKETS = DEFAULT_OPERATOR_CONFIG["markets"]
-LEGACY_DEFAULT_MARKETS = "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL"
+LEGACY_DEFAULT_MARKETS = {
+    "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL",
+    "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY",
+}
 
 
 def resolve_operator_data_path() -> Path:
@@ -65,24 +68,17 @@ def _normalize_leverage(value: Any) -> int:
 
 
 def _normalize_markets(value: str | None) -> str:
+    from utils.asset_normalizer import parse_market_list
+
     raw_value = (value or DEFAULT_OPERATOR_CONFIG["markets"]).strip()
-    if raw_value.upper() == LEGACY_DEFAULT_MARKETS.upper():
+    if raw_value.upper() in {v.upper() for v in LEGACY_DEFAULT_MARKETS}:
         raw_value = DEFAULT_MARKETS
     entries = [item.strip() for item in raw_value.split(",") if item.strip()]
     if not entries:
         raise ValueError("markets must not be empty")
 
-    normalized_entries: list[str] = []
-    for entry in entries:
-        if ":" not in entry:
-            raise ValueError("markets entries must use SYMBOL:COIN format")
-        symbol, coin = entry.split(":", 1)
-        symbol_parts = [part.strip().upper() for part in symbol.split("/") if part.strip()]
-        normalized_coin = coin.strip().upper()
-        if len(symbol_parts) != 2 or not normalized_coin:
-            raise ValueError("markets entries must use SYMBOL:COIN format")
-        normalized_entries.append(f"{symbol_parts[0]}/{symbol_parts[1]}:{normalized_coin}")
-    return ",".join(normalized_entries)
+    infos = parse_market_list(raw_value)
+    return ",".join(info.asset for info in infos)
 
 
 def _normalize_scheduling_enabled(value: Any) -> bool:
@@ -154,9 +150,12 @@ def update_operator_config(
 
 
 def _first_market(markets: str) -> tuple[str, str]:
+    from utils.asset_normalizer import normalize_asset
     first_entry = markets.split(",", 1)[0].strip()
-    symbol, coin = first_entry.split(":", 1)
-    return symbol.strip(), coin.strip()
+    info = normalize_asset(first_entry)
+    pair = f"{info.base}/USDC" if not info.is_hip3 else info.asset
+    coin = info.coin or info.base
+    return pair, coin
 
 
 def resolve_operator_paths(

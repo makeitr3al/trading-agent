@@ -27,7 +27,7 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
             '--leverage',
             '3',
             '--markets',
-            'btc/usdc:btc,eth/usdc:eth',
+            'BTC,ETH',
             '--scheduling-enabled',
             'true',
             '--schedule-time',
@@ -45,7 +45,7 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
     assert persisted['mode'] == 'preflight'
     assert persisted['environment'] == 'beta'
     assert persisted['leverage'] == 3
-    assert persisted['markets'] == 'BTC/USDC:BTC,ETH/USDC:ETH'
+    assert persisted['markets'] == 'BTC,ETH'
     assert persisted['scheduling_enabled'] is True
     assert persisted['schedule_time'] == '07:15'
 
@@ -61,7 +61,7 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
     assert payload['config']['mode'] == 'preflight'
-    assert payload['derived']['primary_symbol'] == 'BTC/USDC'
+    assert payload['derived']['primary_symbol'] == 'BTC/USDC'  # derived pair from ticker
     assert payload['paths']['journal_path'].endswith('trading_journal_beta.jsonl')
     assert payload['paths']['journal_table_path'].endswith('journal_table.json')
     assert payload['paths']['live_status_path'].endswith('live_status.json')
@@ -77,7 +77,7 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
                 'mode': 'scharf',
                 'environment': 'prod',
                 'leverage': 2,
-                'markets': 'SOL/USDC:SOL',
+                'markets': 'SOL',
                 'scheduling_enabled': False,
                 'schedule_time': '07:00',
             }
@@ -100,7 +100,7 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
     assert export_result.returncode == 0
     assert 'export OPERATOR_MODE=scharf' in export_result.stdout
     assert 'export OPERATOR_ENVIRONMENT=prod' in export_result.stdout
-    assert 'export OPERATOR_PRIMARY_SYMBOL=SOL/USDC' in export_result.stdout
+    assert 'export OPERATOR_PRIMARY_SYMBOL=SOL/USDC' in export_result.stdout  # derived pair
     assert 'export OPERATOR_RUN_SUMMARY_PATH=' in export_result.stdout
     assert 'export OPERATOR_JOURNAL_TABLE_PATH=' in export_result.stdout
     assert 'export OPERATOR_LIVE_STATUS_PATH=' in export_result.stdout
@@ -126,7 +126,7 @@ def test_operator_config_missing_file_uses_new_six_market_default(tmp_path: Path
 
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
-    assert payload['config']['markets'] == 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY'
+    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'
 
 
 def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) -> None:
@@ -161,4 +161,4 @@ def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) ->
 
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
-    assert payload['config']['markets'] == 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY'
+    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'

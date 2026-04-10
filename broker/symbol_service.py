@@ -35,6 +35,18 @@ def split_symbol(symbol: str) -> tuple[str, str]:
     return base.strip().upper(), quote.strip().upper()
 
 
+def resolve_symbol_pair(asset_or_pair: str) -> tuple[str, str]:
+    normalized = (asset_or_pair or "").strip()
+    if not normalized:
+        raise ValueError("symbol must not be empty")
+    if "/" in normalized:
+        return split_symbol(normalized)
+    if normalized.lower().startswith("xyz:"):
+        ticker = normalized[4:].strip().upper()
+        return ticker, "USDC"
+    return normalized.upper(), "USDC"
+
+
 
 def round_quantity_to_symbol_spec(value: float | int | str | Decimal, symbol_spec: SymbolSpec) -> Decimal:
     decimal_value = _to_decimal(value)
@@ -59,7 +71,7 @@ class HyperliquidSymbolService:
         self._fetch_meta = fetch_meta or self._fetch_meta_from_http
 
     def get_symbol_spec(self, symbol: str) -> SymbolSpec:
-        base, quote = split_symbol(symbol)
+        base, quote = resolve_symbol_pair(symbol)
         payload = self._fetch_meta()
         universe = payload.get("universe")
         if not isinstance(universe, list):

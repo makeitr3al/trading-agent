@@ -16,7 +16,7 @@ BETA_WS_URL = "wss://api.beta.propr.xyz/ws"
 PROD_BASE_URL = "https://api.propr.xyz/v1"
 PROD_WS_URL = "wss://api.propr.xyz/ws"
 HYPERLIQUID_BASE_URL = "https://api.hyperliquid.xyz"
-DEFAULT_SYMBOL = "BTC/USDC"
+DEFAULT_SYMBOL = "BTC"
 DEFAULT_LEVERAGE = 1
 DEFAULT_TRADING_JOURNAL_PATH = "artifacts/trading_journal_beta.jsonl"
 DEFAULT_RUNNER_STATUS_PATH = "artifacts/runner_status_beta.json"
@@ -80,8 +80,7 @@ class DataSourceSettings(BaseModel):
 
 class MultiMarketScanSettings(BaseModel):
     confirm: str
-    symbols: list[str]
-    hyperliquid_coins: list[str]
+    assets: list[str]
     allow_submit: bool = False
     require_healthy_core: bool = True
     leverage: int = DEFAULT_LEVERAGE
@@ -144,19 +143,10 @@ def _resolve_runner_status_path() -> str:
 
 
 
-def _parse_scan_markets(value: str) -> list[tuple[str, str]]:
-    markets: list[tuple[str, str]] = []
-    for item in _parse_csv_list(value):
-        delimiter = ":" if ":" in item else "=" if "=" in item else None
-        if delimiter is None:
-            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
-        symbol, coin = item.split(delimiter, 1)
-        normalized_symbol = symbol.strip()
-        normalized_coin = coin.strip()
-        if not normalized_symbol or not normalized_coin:
-            raise ValueError("SCAN_MARKETS entries must use SYMBOL:COIN format")
-        markets.append((normalized_symbol, normalized_coin))
-    return markets
+def _parse_scan_markets(value: str) -> list[str]:
+    from utils.asset_normalizer import parse_market_list
+    infos = parse_market_list(value)
+    return [info.asset for info in infos]
 
 
 
@@ -221,7 +211,12 @@ def load_propr_config_from_env() -> ProprConfig:
 def load_hyperliquid_config_from_env() -> HyperliquidConfig:
     coin = _get_env("HYPERLIQUID_COIN")
     if not coin:
-        raise ValueError("Missing HYPERLIQUID_COIN")
+        symbol_raw = _get_env("PROPR_SYMBOL") or DEFAULT_SYMBOL
+        from utils.asset_normalizer import normalize_asset
+        info = normalize_asset(symbol_raw)
+        if info.coin is None:
+            raise ValueError("HYPERLIQUID_COIN is required for HIP-3 assets")
+        coin = info.coin
 
     lookback_raw = _get_env("HYPERLIQUID_LOOKBACK_BARS") or "200"
     try:
@@ -328,14 +323,13 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
 
     combined_markets = _get_env("SCAN_MARKETS")
     if combined_markets:
-        market_pairs = _parse_scan_markets(combined_markets)
-        symbols = [symbol for symbol, _ in market_pairs]
-        hyperliquid_coins = [coin for _, coin in market_pairs]
+        assets = _parse_scan_markets(combined_markets)
     else:
-        symbols = _parse_csv_list(_get_env("SCAN_SYMBOLS"))
-        hyperliquid_coins = _parse_csv_list(_get_env("SCAN_HYPERLIQUID_COINS"))
-        if len(symbols) != len(hyperliquid_coins):
-            raise ValueError("SCAN_SYMBOLS and SCAN_HYPERLIQUID_COINS length mismatch")
+        raw_symbols = _get_env("SCAN_SYMBOLS")
+        if raw_symbols:
+            assets = _parse_scan_markets(raw_symbols)
+        else:
+            raise ValueError("SCAN_MARKETS is required")
 
     allow_submit = _parse_yes_no(_get_env("SCAN_ALLOW_SUBMIT") or "NO", "SCAN_ALLOW_SUBMIT")
     require_healthy_core = _parse_yes_no(
@@ -346,8 +340,7 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
 
     return MultiMarketScanSettings(
         confirm=confirm,
-        symbols=symbols,
-        hyperliquid_coins=hyperliquid_coins,
+        assets=assets,
         allow_submit=allow_submit,
         require_healthy_core=require_healthy_core,
         leverage=leverage,

@@ -70,31 +70,20 @@ PANEL_ASSET_TARGET="$PANEL_DIR/admin-panel.js"
 PANEL_JOURNAL_TABLE_PATH="$PANEL_DIR/journal_table.json"
 PANEL_LIVE_STATUS_PATH="$PANEL_DIR/live_status.json"
 
-# Extract version for cache-busting loader
+# Extract version for cache-busting
 ADDON_VERSION=$(sed -n 's/^version: "\([^"]*\)".*/\1/p' "$APP_PATH/ha_addons/trading_agent/config.yaml" | tr -d '\r')
 
 mkdir -p "$PANEL_DIR"
 if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
-    # 1. Inject version into versioned file (new URL each version → no cache hit)
+    # Inject version placeholder and serve directly (HA needs synchronous customElements.define)
     sed "s/__PANEL_VERSION__/${ADDON_VERSION}/g" "$PANEL_ASSET_SOURCE" \
-        > "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js"
+        > "$PANEL_ASSET_TARGET"
 
-    # 2. Create latest-alias (fallback for loader when version file is missing)
-    cp "$PANEL_DIR/admin-panel-${ADDON_VERSION}.js" "$PANEL_DIR/admin-panel-latest.js"
-
-    # 3. Write version file (read by loader + auto-reload check)
+    # Write version file (used by _checkPanelVersion() in-panel auto-reload)
     printf '%s' "$ADDON_VERSION" > "$PANEL_DIR/panel_version.txt"
 
-    # 4. Write stable loader at original URL (content never changes — caching is harmless)
-    cat > "$PANEL_ASSET_TARGET" << 'LOADER'
-(function(){fetch("/local/trading-agent/panel_version.txt?_="+Date.now(),{cache:"no-store"}).then(function(r){return r.text()}).then(function(v){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-"+v.trim()+".js";document.head.appendChild(s)}).catch(function(){var s=document.createElement("script");s.src="/local/trading-agent/admin-panel-latest.js";document.head.appendChild(s)})})();
-LOADER
-
-    # 5. Remove old versioned files (keep current + latest)
-    find "$PANEL_DIR" -name "admin-panel-*.js" \
-        ! -name "admin-panel-${ADDON_VERSION}.js" \
-        ! -name "admin-panel-latest.js" \
-        -delete 2>/dev/null || true
+    # Remove old versioned files from previous loader approach
+    find "$PANEL_DIR" -name "admin-panel-*.js" -delete 2>/dev/null || true
 fi
 
 # Deploy journal delete helper script to /share (called by HA shell_command)
@@ -148,6 +137,12 @@ if [[ -f "$HA_CONFIG" ]]; then
         exit 0
     fi
 fi
+
+# Refresh asset registry (auto-discovers tradeable assets from Hyperliquid)
+ASSET_REGISTRY_PATH="$DATA_PATH/asset_registry.json"
+python -c "from broker.asset_registry import AssetRegistry; AssetRegistry(cache_path='$ASSET_REGISTRY_PATH').ensure_fresh()" 2>&1 || bashio::log.warning "Asset registry refresh failed (non-critical)"
+cp "$ASSET_REGISTRY_PATH" "$PANEL_DIR/asset_registry.json" 2>/dev/null || true
+cp "$ASSET_REGISTRY_PATH" "$PANEL_SHARE_DIR/asset_registry.json" 2>/dev/null || true
 
 bashio::log.info "Starting Trading Agent one-shot run"
 bashio::log.info "Mode: $OPERATOR_MODE"

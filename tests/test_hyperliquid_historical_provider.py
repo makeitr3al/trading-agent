@@ -155,11 +155,23 @@ def test_env_loader_loads_hyperliquid_config_correctly(monkeypatch: pytest.Monke
     assert config.lookback_bars == 123
 
 
-def test_env_loader_raises_error_when_hyperliquid_coin_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_loader_derives_hyperliquid_coin_from_propr_symbol(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HYPERLIQUID_COIN", raising=False)
+    monkeypatch.setenv("PROPR_SYMBOL", "ETH")
     monkeypatch.delenv("HYPERLIQUID_BASE_URL", raising=False)
     monkeypatch.delenv("HYPERLIQUID_INTERVAL", raising=False)
     monkeypatch.delenv("HYPERLIQUID_LOOKBACK_BARS", raising=False)
 
-    with pytest.raises(ValueError, match="Missing HYPERLIQUID_COIN"):
+    config = load_hyperliquid_config_from_env()
+    assert config.coin == "ETH"
+
+
+def test_env_loader_raises_error_when_hip3_asset_and_no_hyperliquid_coin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HYPERLIQUID_COIN", raising=False)
+    monkeypatch.setenv("PROPR_SYMBOL", "xyz:AAPL")
+    monkeypatch.delenv("HYPERLIQUID_BASE_URL", raising=False)
+    monkeypatch.delenv("HYPERLIQUID_INTERVAL", raising=False)
+    monkeypatch.delenv("HYPERLIQUID_LOOKBACK_BARS", raising=False)
+
+    with pytest.raises(ValueError, match="HYPERLIQUID_COIN is required for HIP-3"):
         load_hyperliquid_config_from_env()

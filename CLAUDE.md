@@ -83,7 +83,7 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 |---|---|
 | `PROPR_ENV` | `beta` oder `prod` |
 | `PROPR_BETA_*` / `PROPR_PROD_*` | API-Credentials je Umgebung |
-| `PROPR_SYMBOL` | z.B. `BTC/USDC` |
+| `PROPR_SYMBOL` | z.B. `BTC` oder `xyz:AAPL` (Legacy: `BTC/USDC` akzeptiert) |
 | `PROPR_LEVERAGE` | gewünschte Leverage (Fallback: `x1`) |
 | `PROPR_PROD_CONFIRM` | `YES` nötig für Prod-Zugriff |
 | `DATA_SOURCE` | `live` oder `golden` |
@@ -136,9 +136,12 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
 
 ## Multi-Market-Scan
 
-- `SCAN_MARKETS=BTC/USDC:BTC,ETH/USDC:ETH` — kanonisches Format `SYMBOL:COIN`
+- `SCAN_MARKETS=BTC,ETH,SOL` — einfache Ticker (neues Format)
+- HIP-3 Assets: `SCAN_MARKETS=BTC,ETH,xyz:AAPL` — `xyz:`-Prefix für Stocks/Commodities
+- Legacy-Format `BTC/USDC:BTC,ETH/USDC:ETH` wird noch akzeptiert (mit Deprecation-Warnung)
 - Max. 3 offene Entry-Orders oder Positionen kontoweit
 - Priorisierung nach `signal_strength` wenn mehr Kandidaten als freie Slots
+- Asset Registry: `broker/asset_registry.py` — auto-discovers tradeable assets from Hyperliquid, caches to `artifacts/asset_registry.json` (24h TTL)
 
 ---
 

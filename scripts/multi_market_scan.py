@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from typing import Any
@@ -252,16 +253,15 @@ def main() -> None:
         environment = propr_config.environment
         data_source_settings = load_data_source_settings_from_env()
         scan_settings = load_multi_market_scan_settings_from_env()
-        primary_symbol = scan_settings.symbols[0] if scan_settings.symbols else None
+        primary_symbol = scan_settings.assets[0] if scan_settings.assets else None
 
         effective_allow_submit = scan_settings.allow_submit and data_source_settings.data_source == "live"
-        markets = list(zip(scan_settings.symbols, scan_settings.hyperliquid_coins))
 
         print(f"Environment: {propr_config.environment}")
         print(f"Data source: {data_source_settings.data_source}")
         print(f"Submit allowed (configured): {scan_settings.allow_submit}")
         print(f"Effective submit allowed: {effective_allow_submit}")
-        print(f"Number of markets: {len(markets)}")
+        print(f"Number of markets: {len(scan_settings.assets)}")
 
         if scan_settings.allow_submit and data_source_settings.data_source != "live":
             print("Multi-market submit is only enabled for live data. Running as dry-run.")
@@ -273,7 +273,7 @@ def main() -> None:
 
         if data_source_settings.data_source not in {"live", "golden"}:
             raise ValueError("Invalid DATA_SOURCE")
-        if not markets:
+        if not scan_settings.assets:
             raise ValueError("No markets configured for multi-market scan")
 
         client = ProprClient(propr_config)
@@ -283,10 +283,16 @@ def main() -> None:
             load_hyperliquid_config_from_env() if data_source_settings.data_source == "live" else None
         )
 
+        from utils.asset_normalizer import normalize_asset
+
+        scan_executed_at = datetime.now(timezone.utc).isoformat()
         scan_results: list[dict[str, Any]] = []
         market_contexts: list[dict[str, Any]] = []
-        for symbol, coin in markets:
-            print(f"Scanning symbol={symbol} coin={coin}")
+        for asset_ticker in scan_settings.assets:
+            asset_info = normalize_asset(asset_ticker)
+            symbol = asset_info.asset
+            coin = asset_info.coin or asset_info.base
+            print(f"Scanning asset={asset_ticker} coin={coin}")
             data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
                 data_source=data_source_settings.data_source,
                 golden_scenario=data_source_settings.golden_scenario,
@@ -311,6 +317,7 @@ def main() -> None:
                 symbol_spec=None,
                 data_source=data_source_settings.data_source,
                 journal_path=scan_settings.journal_path,
+                executed_at=scan_executed_at,
             )
             scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
             market_contexts.append(
@@ -396,6 +403,7 @@ def main() -> None:
                 symbol_spec=symbol_spec,
                 data_source=data_source_settings.data_source,
                 journal_path=scan_settings.journal_path,
+                executed_at=scan_executed_at,
             )
             print(
                 f"Executed {symbol}: submitted={execution_result.submitted_order}, replaced={execution_result.replaced_order}, "

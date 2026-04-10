@@ -86,10 +86,9 @@ def _parse_numeric_status(response: dict[str, Any] | None) -> int | None:
 
 
 def _parse_symbol(symbol: str) -> tuple[str, str]:
-    parts = [part.strip().upper() for part in symbol.split("/") if part.strip()]
-    if len(parts) != 2:
-        raise ValueError("symbol must be in BASE/QUOTE format")
-    return parts[0], parts[1]
+    from utils.asset_normalizer import normalize_asset
+    info = normalize_asset(symbol)
+    return info.base, info.quote
 
 
 
@@ -317,7 +316,6 @@ def main() -> int:
             raise ValueError(execution_check.reason or "Position size is not executable")
 
         submission_preview = build_order_submission_preview(order, args.symbol)
-        submission_preview["asset"] = submission_preview["base"]
 
         print(f"environment: {config.environment}")
         print(f"account_id: {challenge_context.account_id}")
