@@ -125,15 +125,32 @@ if [[ -d "$PANEL_DIR" ]]; then
     cp "$PANEL_DIR/panel_version.txt" "$PANEL_SHARE_DIR/" 2>/dev/null || true
 fi
 
-# Auto-update panel cache-buster in HA configuration
+# Auto-update panel cache-buster in HA configuration.
+# panel_custom does not support hot-reload in HA — a core restart is required
+# whenever the module_url changes. This block detects a version mismatch,
+# patches configuration.yaml automatically, and triggers the restart.
 HA_CONFIG="/config/configuration.yaml"
-if [[ -f "$HA_CONFIG" ]]; then
+if [[ -f "$HA_CONFIG" ]] && grep -q "admin-panel\.js" "$HA_CONFIG" 2>/dev/null; then
+    # Extract existing ?v= value (empty string if no ?v= present yet)
     CURRENT_V=$(sed -n 's/.*admin-panel\.js?v=\([^"'"'"' ]*\).*/\1/p' "$HA_CONFIG" 2>/dev/null | head -1)
-    if [[ -n "$CURRENT_V" && "$CURRENT_V" != "$ADDON_VERSION" ]]; then
-        sed -i "s|admin-panel\.js?v=[^\"]*|admin-panel.js?v=${ADDON_VERSION}|g" "$HA_CONFIG"
-        bashio::log.info "Panel cache-buster updated in configuration.yaml ($CURRENT_V → $ADDON_VERSION)"
-        bashio::log.info "Requesting HA restart to apply new panel version..."
-        curl -s -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+    if [[ "$CURRENT_V" != "$ADDON_VERSION" ]]; then
+        if [[ -n "$CURRENT_V" ]]; then
+            # Replace existing ?v=X.Y.Z with new version
+            sed -i "s|admin-panel\.js?v=[^\"']*|admin-panel.js?v=${ADDON_VERSION}|g" "$HA_CONFIG"
+            bashio::log.info "Panel cache-buster updated ($CURRENT_V → $ADDON_VERSION)"
+        else
+            # No ?v= present yet — append it to the module_url line
+            sed -i "s|admin-panel\.js\([\"']\)|admin-panel.js?v=${ADDON_VERSION}\1|g" "$HA_CONFIG"
+            bashio::log.info "Panel cache-buster added (→ ${ADDON_VERSION})"
+        fi
+        bashio::log.info "Restarting HA core to apply new panel version (panel_custom requires restart)..."
+        curl -s -X POST \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            -H "Content-Type: application/json" \
+            http://supervisor/core/restart || \
+        curl -s -X POST \
+            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+            -H "Content-Type: application/json" \
             http://supervisor/homeassistant/restart || true
         exit 0
     fi
