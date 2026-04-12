@@ -34,6 +34,10 @@ Die Werte darin sind:
 - `markets`
 - `scheduling_enabled`
 - `schedule_time`
+- `challenge_id` (optional, leer fuer automatische Challenge)
+- `push_enabled` (optional, HA-Benachrichtigungen; wird vom Add-on nicht fuer Trading ausgewertet)
+
+Das Admin-Panel (Lovelace) schreibt Aenderungen an den Operator-Helpers mit kurzer Verzoegerung (Debouncing) automatisch ueber das Script `trading_agent_save_current_config_haos` in dieselbe Datei, damit ein HA-Neustart und die Konfiguration-Sync-Automation dieselben Werte wiederherstellen.
 
 ## Laufmodi
 
@@ -60,6 +64,7 @@ Die taegliche Bedienung passiert ueber Helpers, Scripts und Automationen in HA:
 - Leverage als Number
 - Maerkte als Textfeld
 - `Scheduling aktiv` als Boolean
+- `Push aktiv` als Boolean (persistiert in `operator_config.json` als `push_enabled`)
 - Zeithelper fuer den Tageslauf
 - Textfeld fuer den Add-on-Slug
 - Button `Jetzt ausfuehren`

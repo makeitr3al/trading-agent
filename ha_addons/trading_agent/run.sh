@@ -11,14 +11,16 @@ bool_to_yes_no() {
 }
 
 # Prefix each line of merged stdout/stderr with UTC ISO8601 for Home Assistant add-on logs.
-log_cmd_lines() {
-    local _ec
+# Run in a subshell with set +e so a failing pipeline does not skip the final exit code; then
+# exit with PIPESTATUS[0] (the wrapped command), not the pipeline's aggregate status.
+log_cmd_lines() (
+    set +e
+    set -o pipefail
     "$@" 2>&1 | while IFS= read -r line || [[ -n "${line}" ]]; do
         printf '%s %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${line}"
     done
-    _ec="${PIPESTATUS[0]}"
-    return "${_ec}"
-}
+    exit "${PIPESTATUS[0]:-1}"
+)
 
 APP_PATH="/opt/trading-agent"
 DATA_PATH="$(bashio::config 'data_path')"
@@ -44,18 +46,21 @@ export PYTHONPATH="$APP_PATH"
 export TRADING_AGENT_DATA_PATH="$DATA_PATH"
 export TRADING_AGENT_OPERATOR_CONFIG_PATH="$OPERATOR_CONFIG_PATH"
 
-operator_env_output="$($VIRTUAL_ENV/bin/python operator_config.py export-env --path "$OPERATOR_CONFIG_PATH")" || {
+# Merge stderr into the capture for debuggability on failure, but only eval lines that are
+# shell exports so log warnings (e.g. legacy market format) cannot be executed as commands.
+operator_env_raw="$($VIRTUAL_ENV/bin/python operator_config.py export-env --path "$OPERATOR_CONFIG_PATH" 2>&1)" || {
     bashio::log.fatal "Failed to resolve operator config"
-    bashio::log.fatal "$operator_env_output"
+    bashio::log.fatal "$operator_env_raw"
     exit 1
 }
 
-if [[ "$operator_env_output" == \{* ]]; then
+if printf '%s\n' "$operator_env_raw" | grep -q '^{"status": "error"'; then
     bashio::log.fatal "Operator config export returned an error payload"
-    bashio::log.fatal "$operator_env_output"
+    bashio::log.fatal "$operator_env_raw"
     exit 1
 fi
 
+operator_env_output="$(printf '%s\n' "$operator_env_raw" | grep '^export ' || true)"
 eval "$operator_env_output"
 
 export PROPR_ENV="$OPERATOR_ENVIRONMENT"

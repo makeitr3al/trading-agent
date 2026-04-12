@@ -5,6 +5,7 @@ const HOME_URL = "/lovelace";
 const PANEL_VERSION = "__PANEL_VERSION__";
 
 const CHALLENGES_URL = "/local/trading-agent/challenges.json";
+const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -387,6 +388,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.challengesList = null;
     this._marketGroupsExpanded = {};
     this._marketFilter = "";
+    this._persistOperatorTimer = null;
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
@@ -403,6 +405,10 @@ class TradingAgentAdminPanel extends HTMLElement {
   disconnectedCallback() {
     document.removeEventListener("visibilitychange", this._onVisibilityChange);
     this._stopLivePolling();
+    if (this._persistOperatorTimer != null) {
+      clearTimeout(this._persistOperatorTimer);
+      this._persistOperatorTimer = null;
+    }
   }
 
   _startLivePolling() {
@@ -572,13 +578,19 @@ class TradingAgentAdminPanel extends HTMLElement {
     return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
   }
 
-  _updateMarketSelection(selected) {
+  async _updateMarketSelection(selected) {
     const value = [...selected].join(",");
-    this.setEntityValue(ENTITIES.markets, value);
+    await this.setEntityValue(ENTITIES.markets, value);
   }
 
-  _autoSaveConfig() {
-    this.callService("script", "turn_on", { entity_id: "script.trading_agent_save_current_config_haos" });
+  _schedulePersistOperatorConfig() {
+    if (this._persistOperatorTimer != null) {
+      clearTimeout(this._persistOperatorTimer);
+    }
+    this._persistOperatorTimer = setTimeout(() => {
+      this._persistOperatorTimer = null;
+      this.callService("script", "turn_on", { entity_id: "script.trading_agent_save_current_config_haos" });
+    }, PERSIST_OPERATOR_DEBOUNCE_MS);
   }
 
   marketsSelector() {
@@ -1190,7 +1202,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
   }
 
-  onChange(event) {
+  async onChange(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
     if (target.dataset.marketAsset) {
@@ -1201,14 +1213,17 @@ class TradingAgentAdminPanel extends HTMLElement {
       } else {
         selected.delete(asset);
       }
-      this._updateMarketSelection(selected);
-      this._autoSaveConfig();
+      await this._updateMarketSelection(selected);
+      this._schedulePersistOperatorConfig();
       return;
     }
     const entityId = target.dataset.entity;
     if (entityId) {
-      this.setEntityValue(entityId, target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value);
-      this._autoSaveConfig();
+      await this.setEntityValue(
+        entityId,
+        target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value,
+      );
+      this._schedulePersistOperatorConfig();
       return;
     }
     const { table, filter, pagesize } = target.dataset;

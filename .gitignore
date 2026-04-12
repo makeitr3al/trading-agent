@@ -35,3 +35,16 @@ trading-agent.code-workspace
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Claude Code
+.claude/
+
+# Local reference docs (not project code)
+broker/propr_docs.txt
+
+# Artifacts (generated / cached data)
+artifacts/asset_registry.json
+artifacts/live_status.json
+artifacts/journal_snapshot.json
+artifacts/journal_table.json
+artifacts/run_summary.json

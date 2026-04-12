@@ -32,6 +32,10 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
             'true',
             '--schedule-time',
             '07:15',
+            '--challenge-id',
+            'ch-test-1',
+            '--push-enabled',
+            'true',
         ],
         cwd=PROJECT_ROOT,
         env=env,
@@ -48,6 +52,8 @@ def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
     assert persisted['markets'] == 'BTC,ETH'
     assert persisted['scheduling_enabled'] is True
     assert persisted['schedule_time'] == '07:15'
+    assert persisted['challenge_id'] == 'ch-test-1'
+    assert persisted['push_enabled'] is True
 
     show_result = subprocess.run(
         [sys.executable, 'operator_config.py', 'show'],
@@ -80,6 +86,7 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
                 'markets': 'SOL',
                 'scheduling_enabled': False,
                 'schedule_time': '07:00',
+                'push_enabled': True,
             }
         ) + '\n',
         encoding='utf-8',
@@ -100,6 +107,7 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
     assert export_result.returncode == 0
     assert 'export OPERATOR_MODE=scharf' in export_result.stdout
     assert 'export OPERATOR_ENVIRONMENT=prod' in export_result.stdout
+    assert 'export OPERATOR_PUSH_ENABLED=YES' in export_result.stdout
     assert 'export OPERATOR_PRIMARY_SYMBOL=SOL/USDC' in export_result.stdout  # derived pair
     assert 'export OPERATOR_RUN_SUMMARY_PATH=' in export_result.stdout
     assert 'export OPERATOR_JOURNAL_TABLE_PATH=' in export_result.stdout
@@ -127,6 +135,7 @@ def test_operator_config_missing_file_uses_new_six_market_default(tmp_path: Path
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
     assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'
+    assert payload['config']['push_enabled'] is False
 
 
 def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) -> None:
@@ -162,3 +171,4 @@ def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) ->
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
     assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'
+    assert payload['config']['push_enabled'] is False
