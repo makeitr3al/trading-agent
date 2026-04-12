@@ -38,3 +38,6 @@ class JournalEntry(BaseModel):
     source_signal_type: str | None = None
     notes: str | None = None
     lifecycle_id: str | None = None
+    external_order_id: str | None = None
+    broker_pending_order_id: str | None = None
+    order_lifecycle_id: str | None = None
