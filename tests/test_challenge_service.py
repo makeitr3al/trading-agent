@@ -7,6 +7,7 @@ import pytest
 
 from broker.challenge_service import (
     get_active_challenge_context,
+    list_active_challenge_contexts,
     parse_challenge_attempts,
 )
 from models.propr_challenge import ActiveChallengeContext, ProprChallengeAttempt
@@ -189,6 +190,28 @@ def test_get_active_challenge_context_returns_normalized_active_challenge_contex
     assert context.attempt.attempt_id == "attempt-normalized-1"
     assert context.attempt.account_id == "account-normalized-1"
     assert context.attempt.current_phase == "phase-2"
+
+
+def test_list_active_challenge_contexts_returns_all_active_attempts() -> None:
+    client = FakeProprClient(
+        {
+            "data": [
+                {
+                    "attemptId": "attempt-1",
+                    "accountId": "account-1",
+                    "status": "active",
+                },
+                {
+                    "attemptId": "attempt-2",
+                    "accountId": "account-2",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+    contexts = list_active_challenge_contexts(client)
+    assert len(contexts) == 2
+    assert {c.account_id for c in contexts} == {"account-1", "account-2"}
 
 
 def test_get_active_challenge_context_picks_first_for_multiple_active_attempts() -> None:

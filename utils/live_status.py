@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from models.agent_state import AgentState
 
@@ -24,6 +24,9 @@ DEFAULT_LIVE_STATUS = {
     "margin_balance": None,
     "available_balance": None,
     "high_water_mark": None,
+    "open_positions_summary": None,
+    "challenges_overview": None,
+    "active_challenges_count": None,
 }
 
 
@@ -62,6 +65,9 @@ def build_live_status_payload(
     margin_balance: float | None = None,
     available_balance: float | None = None,
     high_water_mark: float | None = None,
+    open_positions_summary: Sequence[dict[str, Any]] | None = None,
+    challenges_overview: Sequence[dict[str, Any]] | None = None,
+    active_challenges_count: int | None = None,
 ) -> dict[str, Any]:
     effective_pnl = account_unrealized_pnl
     if effective_pnl is None and state is not None:
@@ -86,6 +92,13 @@ def build_live_status_payload(
         "margin_balance": margin_balance,
         "available_balance": available_balance,
         "high_water_mark": high_water_mark,
+        "open_positions_summary": list(open_positions_summary)
+        if open_positions_summary is not None
+        else None,
+        "challenges_overview": list(challenges_overview)
+        if challenges_overview is not None
+        else None,
+        "active_challenges_count": active_challenges_count,
     }
 
 

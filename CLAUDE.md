@@ -94,6 +94,7 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 | `TRADING_JOURNAL_PATH` | optional, überschreibt Standardpfad |
 | `RUNNER_STATUS_PATH` | optional, überschreibt Standardpfad |
 | `TRADING_AGENT_RUNTIME_CONFIG_PATH` | optional, überschreibt Standardpfad |
+| `TRADING_AGENT_LIVE_STATUS_PATH` / `OPERATOR_LIVE_STATUS_PATH` | optional, Ziel für `live_status.json` (REST-Sync, WS-Daemon, HA-Panel) |
 | `PROPR_REQUIRE_HEALTHY_CORE` | `YES`/`NO` für Core-Health-Guard |
 
 ---
@@ -129,6 +130,7 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
 ## Runtime-Betrieb (Raspberry Pi / Greenbox)
 
 - Managed Runner: `python managed_runner.py` (Root-Wrapper → `deploy/raspberry_pi/managed_runner.py`) — schreibt Status-JSON für Monitoring
+- **Live-Status WebSocket** (PnL / offene Positionen in `live_status.json`): separates Long-Running-Skript `scripts/ws_live_status_daemon.py` — gleiche `.env` wie Propr, gemeinsamer Pfad via `TRADING_AGENT_LIVE_STATUS_PATH` oder `TRADING_AGENT_DATA_PATH` (siehe Docstring; typisch zweite systemd-Unit auf dem Pi)
 - systemd-Service: `trading-agent.service.example` als Vorlage
 - Home Assistant: liest Status + Journal per SSH, steuert Start/Stop/Restart
 - Runtime-Overrides (ohne `.env` anzufassen): `python runtime_config.py set ...`

@@ -71,6 +71,7 @@ def test_extract_live_status_payload_reads_account_wide_pnl_and_positions() -> N
     assert payload["account_unrealized_pnl"] == 33.5
     assert payload["account_open_positions_count"] == 2
     assert payload["websocket_connected"] is True
+    assert len(payload["open_positions_summary"]) == 2
 
 
 def test_connect_persists_live_status_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -92,6 +93,44 @@ def test_connect_persists_live_status_updates(monkeypatch: pytest.MonkeyPatch, t
     assert payload["account_open_positions_count"] == 1
     assert payload["account_unrealized_pnl"] == 11.5
     assert len(fake_websocket.sent_messages) == 3
+    assert payload.get("updated_at") is not None
+    assert payload.get("open_positions_summary") is not None
+    assert len(payload["open_positions_summary"]) == 1
+    assert payload["open_positions_summary"][0]["direction"] == "long"
+
+
+def test_extract_live_status_payload_empty_data_list() -> None:
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
+    payload = client.extract_live_status_payload(
+        {"type": "position.updated", "accountUnrealizedPnl": "0", "data": []}
+    )
+    assert payload is not None
+    assert payload["account_open_positions_count"] == 0
+    assert payload["open_positions_summary"] == []
+
+
+def test_run_forever_reconnects_after_clean_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key", websocket_url="wss://example.test/ws"))
+    calls: list[int] = []
+
+    async def fake_connect(
+        self: ProprWebSocketClient,
+        account_id: str,
+        *,
+        path: Path | None = None,
+        on_status=None,
+        stop_after_events: int | None = None,
+    ) -> None:
+        calls.append(1)
+        if len(calls) >= 3:
+            raise SystemExit("test_stop")
+
+    monkeypatch.setattr(ProprWebSocketClient, "connect", fake_connect)
+    with pytest.raises(SystemExit, match="test_stop"):
+        asyncio.run(
+            client.run_forever("account-1", path=tmp_path / "live_status.json", reconnect_delay_seconds=0)
+        )
+    assert len(calls) == 3
 
 
 def test_run_forever_persists_disconnect_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

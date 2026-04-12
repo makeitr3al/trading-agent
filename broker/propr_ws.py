@@ -21,9 +21,10 @@ from pydantic import BaseModel
 from broker.state_sync import (
     _extract_account_open_positions_count_from_payload,
     _extract_account_unrealized_pnl_from_payload,
+    summarize_open_position_rows,
 )
 from config.propr_config import ProprConfig
-from utils.live_status import load_live_status, write_live_status
+from utils.live_status import _timestamp, load_live_status, write_live_status
 
 
 def _safe_ws_float(value: Any) -> float | None:
@@ -44,6 +45,20 @@ class ProprWebSocketClient:
     def __init__(self, config: ProprConfig, *, send_subscribe: bool = True) -> None:
         self.config = config
         self.send_subscribe = send_subscribe
+
+    def _summarize_open_positions(self, items: list[Any]) -> list[dict[str, Any]]:
+        dict_items = [x for x in items if isinstance(x, dict)]
+        return summarize_open_position_rows(dict_items)
+
+    def _open_positions_summary_from_payload(self, payload: dict[str, Any]) -> list[dict[str, Any]] | None:
+        raw: list[Any] | None = None
+        if isinstance(payload.get("data"), list):
+            raw = payload["data"]
+        elif isinstance(payload.get("positions"), list):
+            raw = payload["positions"]
+        if raw is None:
+            return None
+        return self._summarize_open_positions(raw)
 
     def build_ws_url(self) -> str:
         return self.config.websocket_url
@@ -104,7 +119,7 @@ class ProprWebSocketClient:
                 if maybe_pnl is not None and pnl_value is None:
                     pnl_value = maybe_pnl
                 maybe_count = _extract_account_open_positions_count_from_payload(candidate)
-                if maybe_count and open_positions_count is None:
+                if open_positions_count is None and maybe_count is not None:
                     open_positions_count = maybe_count
             elif isinstance(candidate, list):
                 wrapped = {"data": candidate}
@@ -112,7 +127,7 @@ class ProprWebSocketClient:
                 if maybe_pnl is not None and pnl_value is None:
                     pnl_value = maybe_pnl
                 maybe_count = _extract_account_open_positions_count_from_payload(wrapped)
-                if maybe_count and open_positions_count is None:
+                if open_positions_count is None and maybe_count is not None:
                     open_positions_count = maybe_count
 
         balance_fields: dict[str, Any] = {}
@@ -127,7 +142,14 @@ class ProprWebSocketClient:
                 if "totalUnrealizedPnl" in candidate and "balance" not in balance_fields:
                     pass  # pnl already handled above
 
-        if pnl_value is None and open_positions_count is None and not balance_fields:
+        open_positions_summary = self._open_positions_summary_from_payload(payload)
+
+        if (
+            pnl_value is None
+            and open_positions_count is None
+            and not balance_fields
+            and open_positions_summary is None
+        ):
             return None
 
         result: dict[str, Any] = {
@@ -139,6 +161,10 @@ class ProprWebSocketClient:
             "last_error": None,
         }
         result.update(balance_fields)
+        if open_positions_summary is not None:
+            result["open_positions_summary"] = open_positions_summary
+        elif open_positions_count is not None and open_positions_count == 0:
+            result["open_positions_summary"] = []
         return result
 
     def persist_live_status(self, payload: dict[str, Any], path: str | Path | None = None) -> Path:
@@ -150,8 +176,9 @@ class ProprWebSocketClient:
         payload: dict[str, Any],
         *,
         path: str | Path | None = None,
-        on_status: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        on_status: Callable[[dict[str, Any]], Awaitable[None] | None] = None,
     ) -> None:
+        payload = {**payload, "updated_at": _timestamp()}
         self.persist_live_status(payload, path=path)
         if on_status is not None:
             result = on_status(payload)
@@ -224,13 +251,13 @@ class ProprWebSocketClient:
         reconnect_delay_seconds: float = 5.0,
         max_reconnect_attempts: int | None = None,
     ) -> None:
-        attempts = 0
-        while max_reconnect_attempts is None or attempts <= max_reconnect_attempts:
+        consecutive_failures = 0
+        while True:
             try:
                 await self.connect(account_id, path=path, on_status=on_status)
-                return
+                consecutive_failures = 0
             except Exception as exc:
-                attempts += 1
+                consecutive_failures += 1
                 await self._emit_status(
                     {
                         "environment": self.config.environment,
@@ -241,6 +268,16 @@ class ProprWebSocketClient:
                     path=path,
                     on_status=on_status,
                 )
-                if max_reconnect_attempts is not None and attempts > max_reconnect_attempts:
+                if (
+                    max_reconnect_attempts is not None
+                    and consecutive_failures > max_reconnect_attempts
+                ):
                     raise
                 await asyncio.sleep(reconnect_delay_seconds)
+                continue
+            logger.info(
+                "WebSocket session ended for %s; reconnecting in %.1fs",
+                self.config.environment,
+                reconnect_delay_seconds,
+            )
+            await asyncio.sleep(reconnect_delay_seconds)

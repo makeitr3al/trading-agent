@@ -306,6 +306,45 @@ def map_propr_position_to_internal(position_payload: dict, *, strict: bool = Fal
     )
 
 
+_POSITION_SUMMARY_ROW_PNL_KEYS = [
+    "unrealizedPnl",
+    "unrealized_pnl",
+    "unrealisedPnl",
+    "unrealised_pnl",
+    "openPnl",
+    "open_pnl",
+    "upl",
+    "pnl",
+    "profitLoss",
+    "profit_loss",
+]
+
+
+def summarize_open_position_rows(items: list[dict]) -> list[dict[str, Any]]:
+    """Build display rows for open positions (REST or WebSocket payloads)."""
+    rows: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        trade = map_propr_position_to_internal(item)
+        if trade is None:
+            continue
+        pnl_dec = _extract_decimal(item, _POSITION_SUMMARY_ROW_PNL_KEYS)
+        symbol = _get_first(item, ["asset", "symbol", "pair", "base", "market"])
+        rows.append(
+            {
+                "symbol": str(symbol) if symbol is not None else None,
+                "direction": trade.direction.value.lower(),
+                "position_size": trade.quantity,
+                "entry_price": trade.entry,
+                "stop_loss": trade.stop_loss,
+                "take_profit": trade.take_profit,
+                "unrealized_pnl": float(pnl_dec) if pnl_dec is not None else None,
+                "position_id": trade.position_id,
+            }
+        )
+    return rows
+
 
 def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[dict]) -> float | None:
     top_level_keys = [
@@ -565,6 +604,7 @@ __all__ = [
     "_extract_account_unrealized_pnl_from_payload",
     "build_agent_state_from_propr_data",
     "sync_agent_state_from_propr",
+    "summarize_open_position_rows",
 ]
 
 

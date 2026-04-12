@@ -467,6 +467,9 @@ class TradingAgentAdminPanel extends HTMLElement {
       margin_balance: entity.attributes?.margin_balance,
       available_balance: entity.attributes?.available_balance,
       high_water_mark: entity.attributes?.high_water_mark,
+      open_positions_summary: entity.attributes?.open_positions_summary,
+      challenges_overview: entity.attributes?.challenges_overview,
+      active_challenges_count: entity.attributes?.active_challenges_count,
     };
   }
 
@@ -748,12 +751,44 @@ class TradingAgentAdminPanel extends HTMLElement {
     const journalSensor = this.entity(ENTITIES.journal);
     const summaryLines = runSummary?.attributes?.summary_lines || [];
 
-    // Active position: latest "filled" trade row
+    // Active position: latest "filled" trade row from journal, else WebSocket summary
     const openTrade = (journal.trade_rows || []).find((r) => r.entry_type === "trade" && r.status === "filled");
+    const wsPositions = Array.isArray(ld?.open_positions_summary) ? ld.open_positions_summary : [];
     const openPositions = Number(ld?.account_open_positions_count ?? 0);
+    const wsDetailRows = (!openTrade && wsPositions.length)
+      ? wsPositions.map((p, idx) => `<div class="${idx ? "ws-pos-block" : ""}">
+            ${p.challenge_name ? `<div class="status-row"><span class="label">Challenge</span><span class="value">${escapeHtml(p.challenge_name)}</span></div>` : ""}
+            <div class="status-row"><span class="label">Markt</span><span class="value">${escapeHtml(p.symbol ?? "-")}</span></div>
+            <div class="status-row"><span class="label">Richtung</span><span class="value"><span class="pill ${badgeClass(p.direction)}">${escapeHtml(p.direction ?? "-")}</span></span></div>
+            <div class="status-row"><span class="label">Groesse</span><span class="value">${escapeHtml(String(p.position_size ?? "-"))}</span></div>
+            <div class="status-row"><span class="label">Entry</span><span class="value">${p.entry_price != null ? escapeHtml(String(p.entry_price)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Stop Loss</span><span class="value">${p.stop_loss != null ? escapeHtml(String(p.stop_loss)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Take Profit</span><span class="value">${p.take_profit != null ? escapeHtml(String(p.take_profit)) : "-"}</span></div>
+            ${p.unrealized_pnl != null ? `<div class="status-row"><span class="label">Position PnL</span><span class="value">${formatPnl(p.unrealized_pnl)}</span></div>` : ""}
+            </div>`).join("")
+      : "";
+    const cov = Array.isArray(ld?.challenges_overview) ? ld.challenges_overview : [];
+    const multiChallengeRows = cov.length > 1
+      ? cov.map((c) => `<tr>
+          <td>${escapeHtml(c.challenge_name ?? c.challenge_id ?? c.account_id ?? "-")}</td>
+          <td class="num">${formatPnl(c.account_unrealized_pnl)}</td>
+          <td class="num">${escapeHtml(String(c.account_open_positions_count ?? 0))}</td>
+        </tr>`).join("")
+      : "";
+    const allChallengesCard = cov.length > 1
+      ? `<section class="card">
+          <h3>Alle aktiven Challenges (${cov.length})</h3>
+          <p class="muted">Summe unrealisiertes PnL und alle offenen Positionen ueber alle Challenge-Konten (REST nach jedem Add-on-Lauf).</p>
+          <table class="overview-table">
+            <thead><tr><th>Challenge</th><th class="num">Unreal. PnL</th><th class="num">Offene Pos.</th></tr></thead>
+            <tbody>${multiChallengeRows}</tbody>
+          </table>
+        </section>`
+      : "";
+
     const activePositionCard = (openPositions > 0 || openTrade)
       ? `<section class="card card-highlight">
-          <h3>Aktive Position ${openPositions > 1 ? `(${openPositions})` : ""}</h3>
+          <h3>Offene Positionen ${openPositions > 1 || cov.length > 1 ? `(${openPositions})` : ""}</h3>
           <div class="status-list">
             <div class="status-row"><span class="label">Unrealisiertes PnL</span><span class="value pnl-live">${formatPnl(ld?.account_unrealized_pnl)}</span></div>
             ${openTrade ? `
@@ -762,7 +797,7 @@ class TradingAgentAdminPanel extends HTMLElement {
             <div class="status-row"><span class="label">Entry</span><span class="value">${openTrade.entry_price != null ? escapeHtml(String(openTrade.entry_price)) : "-"}</span></div>
             <div class="status-row"><span class="label">Stop Loss</span><span class="value">${openTrade.stop_loss != null ? escapeHtml(String(openTrade.stop_loss)) : "-"}</span></div>
             <div class="status-row"><span class="label">Take Profit</span><span class="value">${openTrade.take_profit != null ? escapeHtml(String(openTrade.take_profit)) : "-"}</span></div>
-            ` : ""}
+            ` : wsDetailRows}
             <div class="status-row"><span class="label">Quelle</span><span class="value"><span class="pill ${badgeClass(ld?.source)}">${escapeHtml(ld?.source ?? "-")}</span></span></div>
             <div class="status-row"><span class="label">Aktualisiert</span><span class="value">${formatValue(ld?.updated_at)}</span></div>
           </div>
@@ -803,6 +838,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       : "";
 
     return `<div class="stack">
+      ${allChallengesCard}
       ${activePositionCard}
       ${challengeAccountCard}
       ${statsStrip}
@@ -816,8 +852,11 @@ class TradingAgentAdminPanel extends HTMLElement {
           ["Zeit", operator?.attributes?.schedule_time],
         ])}
         ${this.statusCard("Live-Status", [
-          ["PnL", ld?.account_unrealized_pnl, false, formatPnl],
-          ["Offene Positionen", ld?.account_open_positions_count],
+          ["PnL (Summe)", ld?.account_unrealized_pnl, false, formatPnl],
+          ["Offene Positionen (Summe)", ld?.account_open_positions_count],
+          ...(Number(ld?.active_challenges_count) > 1
+            ? [["Aktive Challenges", ld?.active_challenges_count]]
+            : []),
           ["Quelle", ld?.source, true],
           ["WebSocket verbunden", ld?.websocket_connected, true],
           ["Letztes Update", ld?.updated_at],
@@ -1301,7 +1340,10 @@ class TradingAgentAdminPanel extends HTMLElement {
       .status-row { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
       .label { color: #5d6b81; }
       .value { text-align: right; }
-      .muted { color: #6a7890; margin: 0; }
+      .muted { color: #6a7890; margin: 0 0 12px 0; font-size: 13px; }
+      .overview-table { width: 100%; border-collapse: collapse; min-width: 0; font-size: 13px; }
+      .overview-table th, .overview-table td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
+      .overview-table .num { text-align: right; }
       .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
       .toolbar-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .search { min-width: 260px; }
@@ -1356,6 +1398,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       .market-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #162133; cursor: pointer; padding: 3px 0; }
       .market-item input[type="checkbox"] { width: auto; margin: 0; cursor: pointer; }
       .market-item:hover { color: #1f7a8c; }
+      .ws-pos-block { border-top: 1px solid #e5e9ef; margin-top: 10px; padding-top: 10px; }
       @media (max-width: 900px) {
         .page { padding: 16px; }
         .hero { flex-direction: column; }
@@ -1377,6 +1420,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           <span class="chip">Run ID: ${formatValue(this.entity(ENTITIES.runSummary)?.state)}</span>
           <span class="chip">PnL: ${formatPnl(ld?.account_unrealized_pnl)}</span>
           <span class="chip">Offene Positionen: ${formatValue(ld?.account_open_positions_count)}</span>
+          ${Number(ld?.active_challenges_count) > 1 ? `<span class="chip">Challenges: ${escapeHtml(String(ld.active_challenges_count))}</span>` : ""}
           <span class="chip">Tests: ${formatValue(this.entity(ENTITIES.tests)?.state)}</span>
           <span class="chip">Panel: ${escapeHtml(PANEL_VERSION)}</span>
         </div>

@@ -108,56 +108,72 @@ def _extract_challenge_name(attempt_detail: dict[str, Any]) -> str | None:
     return None
 
 
+def list_active_challenge_contexts(client: ProprClient) -> list[ActiveChallengeContext]:
+    """All active challenge attempts with account balance/name from attempt detail."""
+    payload = client.get_challenge_attempts()
+    attempts = parse_challenge_attempts(payload)
+    active_attempts = [attempt for attempt in attempts if attempt.status == "active"]
+    results: list[ActiveChallengeContext] = []
+    for attempt in active_attempts:
+        if not attempt.account_id:
+            logger.warning(
+                "Skipping active challenge attempt without account_id (attempt_id=%s)",
+                attempt.attempt_id,
+            )
+            continue
+        account_balance: AccountBalance | None = None
+        challenge_name: str | None = None
+        if attempt.attempt_id:
+            try:
+                detail = client.get_challenge_attempt(attempt.attempt_id)
+                account_balance = parse_account_balance(detail)
+                challenge_name = _extract_challenge_name(detail)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch challenge attempt detail for %s",
+                    attempt.attempt_id,
+                    exc_info=True,
+                )
+        results.append(
+            ActiveChallengeContext(
+                attempt=attempt,
+                account_id=attempt.account_id,
+                challenge_id=attempt.challenge_id,
+                challenge_name=challenge_name,
+                account_balance=account_balance,
+            )
+        )
+    return results
+
+
 def get_active_challenge_context(
     client: ProprClient,
     challenge_id: str | None = None,
 ) -> ActiveChallengeContext | None:
-    payload = client.get_challenge_attempts()
-    attempts = parse_challenge_attempts(payload)
-    active_attempts = [attempt for attempt in attempts if attempt.status == "active"]
-
-    if not active_attempts:
+    active_contexts = list_active_challenge_contexts(client)
+    if not active_contexts:
         return None
 
     if challenge_id:
-        filtered = [a for a in active_attempts if a.challenge_id == challenge_id]
+        filtered = [ctx for ctx in active_contexts if ctx.challenge_id == challenge_id]
         if not filtered:
             logger.warning(
                 "No active attempt matches PROPR_CHALLENGE_ID=%s (have %d active attempts)",
-                challenge_id, len(active_attempts),
+                challenge_id,
+                len(active_contexts),
             )
             return None
-        attempt = filtered[0]
-    elif len(active_attempts) == 1:
-        attempt = active_attempts[0]
-    else:
-        logger.warning(
-            "Multiple active challenge attempts found (%d). "
-            "Set PROPR_CHALLENGE_ID to select one. Using first.",
-            len(active_attempts),
-        )
-        attempt = active_attempts[0]
+        return filtered[0]
 
-    if not attempt.account_id:
-        raise ValueError("Active challenge attempt is missing account_id")
+    if len(active_contexts) == 1:
+        return active_contexts[0]
 
-    account_balance: AccountBalance | None = None
-    challenge_name: str | None = None
-    if attempt.attempt_id:
-        try:
-            detail = client.get_challenge_attempt(attempt.attempt_id)
-            account_balance = parse_account_balance(detail)
-            challenge_name = _extract_challenge_name(detail)
-        except Exception:
-            logger.warning("Failed to fetch challenge attempt detail for %s", attempt.attempt_id, exc_info=True)
-
-    return ActiveChallengeContext(
-        attempt=attempt,
-        account_id=attempt.account_id,
-        challenge_id=attempt.challenge_id,
-        challenge_name=challenge_name,
-        account_balance=account_balance,
+    logger.warning(
+        "Multiple active challenge attempts found (%d). "
+        "Set PROPR_CHALLENGE_ID to select one. Using first.",
+        len(active_contexts),
     )
+    return active_contexts[0]
 
 
 __all__ = [
@@ -166,5 +182,6 @@ __all__ = [
     "normalize_attempt_payload",
     "parse_challenge_attempts",
     "parse_account_balance",
+    "list_active_challenge_contexts",
     "get_active_challenge_context",
 ]
