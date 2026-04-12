@@ -39,6 +39,9 @@ htmlcov/
 # Claude Code
 .claude/
 
+# Local reference docs (not project code)
+broker/propr_docs.txt
+
 # Artifacts (generated / cached data)
 artifacts/asset_registry.json
 artifacts/live_status.json
