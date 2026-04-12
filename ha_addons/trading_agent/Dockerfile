@@ -13,6 +13,7 @@ RUN apk add --no-cache python3 py3-pip bash
 ENV APP_PATH=/opt/trading-agent
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
