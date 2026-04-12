@@ -10,6 +10,16 @@ bool_to_yes_no() {
     fi
 }
 
+# Prefix each line of merged stdout/stderr with UTC ISO8601 for Home Assistant add-on logs.
+log_cmd_lines() {
+    local _ec
+    "$@" 2>&1 | while IFS= read -r line || [[ -n "${line}" ]]; do
+        printf '%s %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${line}"
+    done
+    _ec="${PIPESTATUS[0]}"
+    return "${_ec}"
+}
+
 APP_PATH="/opt/trading-agent"
 DATA_PATH="$(bashio::config 'data_path')"
 VIRTUAL_ENV="/opt/venv"
@@ -29,11 +39,12 @@ mkdir -p "$DATA_PATH"
 cd "$APP_PATH"
 
 export PATH="$VIRTUAL_ENV/bin:$PATH"
+export PYTHONUNBUFFERED=1
 export PYTHONPATH="$APP_PATH"
 export TRADING_AGENT_DATA_PATH="$DATA_PATH"
 export TRADING_AGENT_OPERATOR_CONFIG_PATH="$OPERATOR_CONFIG_PATH"
 
-operator_env_output="$($VIRTUAL_ENV/bin/python operator_config.py export-env --path "$OPERATOR_CONFIG_PATH" 2>&1)" || {
+operator_env_output="$($VIRTUAL_ENV/bin/python operator_config.py export-env --path "$OPERATOR_CONFIG_PATH")" || {
     bashio::log.fatal "Failed to resolve operator config"
     bashio::log.fatal "$operator_env_output"
     exit 1
@@ -211,19 +222,19 @@ case "$OPERATOR_MODE" in
         export SCAN_ALLOW_SUBMIT="YES"
         export MANUAL_WRITE_CONFIRM="NO"
         export MANUAL_ORDER_TYPES_CONFIRM="NO"
-        python scripts/multi_market_scan.py || run_exit_code=$?
+        log_cmd_lines python scripts/multi_market_scan.py || run_exit_code=$?
         ;;
     preflight)
         export SCAN_ALLOW_SUBMIT="NO"
         export MANUAL_WRITE_CONFIRM="NO"
         export MANUAL_ORDER_TYPES_CONFIRM="NO"
-        python run_test_suite.py --suite preflight --pytest-arg=-q --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
+        log_cmd_lines python run_test_suite.py --suite preflight --pytest-arg=-q --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
         ;;
     beta_write)
         export SCAN_ALLOW_SUBMIT="NO"
         export MANUAL_WRITE_CONFIRM="YES"
         export MANUAL_ORDER_TYPES_CONFIRM="YES"
-        python run_test_suite.py --suite beta_write --allow-live-beta-writes --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
+        log_cmd_lines python run_test_suite.py --suite beta_write --allow-live-beta-writes --status-path "$OPERATOR_TEST_STATUS_PATH" --log-path "$OPERATOR_TEST_LOG_PATH" || run_exit_code=$?
         ;;
     *)
         bashio::log.fatal "Unsupported operator mode: $OPERATOR_MODE"
