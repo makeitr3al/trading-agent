@@ -577,6 +577,10 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.setEntityValue(ENTITIES.markets, value);
   }
 
+  _autoSaveConfig() {
+    this.callService("script", "turn_on", { entity_id: "script.trading_agent_save_current_config_haos" });
+  }
+
   marketsSelector() {
     const registry = this.assetRegistry;
     if (!registry || !registry.length) {
@@ -1198,11 +1202,13 @@ class TradingAgentAdminPanel extends HTMLElement {
         selected.delete(asset);
       }
       this._updateMarketSelection(selected);
+      this._autoSaveConfig();
       return;
     }
     const entityId = target.dataset.entity;
     if (entityId) {
       this.setEntityValue(entityId, target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value);
+      this._autoSaveConfig();
       return;
     }
     const { table, filter, pagesize } = target.dataset;

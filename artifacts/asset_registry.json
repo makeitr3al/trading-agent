@@ -1,0 +1,1778 @@
+{
+  "fetched_at": "2026-04-10T12:18:53.179217+00:00",
+  "assets": [
+    {
+      "name": "BTC",
+      "propr_asset": "BTC",
+      "asset_type": "crypto",
+      "base": "BTC",
+      "quote": "USDC",
+      "sz_decimals": 5,
+      "max_leverage": 40
+    },
+    {
+      "name": "ETH",
+      "propr_asset": "ETH",
+      "asset_type": "crypto",
+      "base": "ETH",
+      "quote": "USDC",
+      "sz_decimals": 4,
+      "max_leverage": 25
+    },
+    {
+      "name": "ATOM",
+      "propr_asset": "ATOM",
+      "asset_type": "crypto",
+      "base": "ATOM",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "DYDX",
+      "propr_asset": "DYDX",
+      "asset_type": "crypto",
+      "base": "DYDX",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "SOL",
+      "propr_asset": "SOL",
+      "asset_type": "crypto",
+      "base": "SOL",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 20
+    },
+    {
+      "name": "AVAX",
+      "propr_asset": "AVAX",
+      "asset_type": "crypto",
+      "base": "AVAX",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "BNB",
+      "propr_asset": "BNB",
+      "asset_type": "crypto",
+      "base": "BNB",
+      "quote": "USDC",
+      "sz_decimals": 3,
+      "max_leverage": 10
+    },
+    {
+      "name": "APE",
+      "propr_asset": "APE",
+      "asset_type": "crypto",
+      "base": "APE",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "OP",
+      "propr_asset": "OP",
+      "asset_type": "crypto",
+      "base": "OP",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "LTC",
+      "propr_asset": "LTC",
+      "asset_type": "crypto",
+      "base": "LTC",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "ARB",
+      "propr_asset": "ARB",
+      "asset_type": "crypto",
+      "base": "ARB",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "DOGE",
+      "propr_asset": "DOGE",
+      "asset_type": "crypto",
+      "base": "DOGE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "INJ",
+      "propr_asset": "INJ",
+      "asset_type": "crypto",
+      "base": "INJ",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "SUI",
+      "propr_asset": "SUI",
+      "asset_type": "crypto",
+      "base": "SUI",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "kPEPE",
+      "propr_asset": "kPEPE",
+      "asset_type": "crypto",
+      "base": "kPEPE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "CRV",
+      "propr_asset": "CRV",
+      "asset_type": "crypto",
+      "base": "CRV",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "LDO",
+      "propr_asset": "LDO",
+      "asset_type": "crypto",
+      "base": "LDO",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "LINK",
+      "propr_asset": "LINK",
+      "asset_type": "crypto",
+      "base": "LINK",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "STX",
+      "propr_asset": "STX",
+      "asset_type": "crypto",
+      "base": "STX",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "CFX",
+      "propr_asset": "CFX",
+      "asset_type": "crypto",
+      "base": "CFX",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "GMX",
+      "propr_asset": "GMX",
+      "asset_type": "crypto",
+      "base": "GMX",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "SNX",
+      "propr_asset": "SNX",
+      "asset_type": "crypto",
+      "base": "SNX",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "XRP",
+      "propr_asset": "XRP",
+      "asset_type": "crypto",
+      "base": "XRP",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 20
+    },
+    {
+      "name": "BCH",
+      "propr_asset": "BCH",
+      "asset_type": "crypto",
+      "base": "BCH",
+      "quote": "USDC",
+      "sz_decimals": 3,
+      "max_leverage": 10
+    },
+    {
+      "name": "APT",
+      "propr_asset": "APT",
+      "asset_type": "crypto",
+      "base": "APT",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "AAVE",
+      "propr_asset": "AAVE",
+      "asset_type": "crypto",
+      "base": "AAVE",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "COMP",
+      "propr_asset": "COMP",
+      "asset_type": "crypto",
+      "base": "COMP",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "WLD",
+      "propr_asset": "WLD",
+      "asset_type": "crypto",
+      "base": "WLD",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "YGG",
+      "propr_asset": "YGG",
+      "asset_type": "crypto",
+      "base": "YGG",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "TRX",
+      "propr_asset": "TRX",
+      "asset_type": "crypto",
+      "base": "TRX",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "kSHIB",
+      "propr_asset": "kSHIB",
+      "asset_type": "crypto",
+      "base": "kSHIB",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "UNI",
+      "propr_asset": "UNI",
+      "asset_type": "crypto",
+      "base": "UNI",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "SEI",
+      "propr_asset": "SEI",
+      "asset_type": "crypto",
+      "base": "SEI",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "RUNE",
+      "propr_asset": "RUNE",
+      "asset_type": "crypto",
+      "base": "RUNE",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "ZRO",
+      "propr_asset": "ZRO",
+      "asset_type": "crypto",
+      "base": "ZRO",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "DOT",
+      "propr_asset": "DOT",
+      "asset_type": "crypto",
+      "base": "DOT",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "BANANA",
+      "propr_asset": "BANANA",
+      "asset_type": "crypto",
+      "base": "BANANA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "TRB",
+      "propr_asset": "TRB",
+      "asset_type": "crypto",
+      "base": "TRB",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "FTT",
+      "propr_asset": "FTT",
+      "asset_type": "crypto",
+      "base": "FTT",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "ARK",
+      "propr_asset": "ARK",
+      "asset_type": "crypto",
+      "base": "ARK",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "BIGTIME",
+      "propr_asset": "BIGTIME",
+      "asset_type": "crypto",
+      "base": "BIGTIME",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "KAS",
+      "propr_asset": "KAS",
+      "asset_type": "crypto",
+      "base": "KAS",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "BLUR",
+      "propr_asset": "BLUR",
+      "asset_type": "crypto",
+      "base": "BLUR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "TIA",
+      "propr_asset": "TIA",
+      "asset_type": "crypto",
+      "base": "TIA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "BSV",
+      "propr_asset": "BSV",
+      "asset_type": "crypto",
+      "base": "BSV",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "ADA",
+      "propr_asset": "ADA",
+      "asset_type": "crypto",
+      "base": "ADA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "TON",
+      "propr_asset": "TON",
+      "asset_type": "crypto",
+      "base": "TON",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "MINA",
+      "propr_asset": "MINA",
+      "asset_type": "crypto",
+      "base": "MINA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "POLYX",
+      "propr_asset": "POLYX",
+      "asset_type": "crypto",
+      "base": "POLYX",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "GAS",
+      "propr_asset": "GAS",
+      "asset_type": "crypto",
+      "base": "GAS",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "PENDLE",
+      "propr_asset": "PENDLE",
+      "asset_type": "crypto",
+      "base": "PENDLE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "FET",
+      "propr_asset": "FET",
+      "asset_type": "crypto",
+      "base": "FET",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "NEAR",
+      "propr_asset": "NEAR",
+      "asset_type": "crypto",
+      "base": "NEAR",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "MEME",
+      "propr_asset": "MEME",
+      "asset_type": "crypto",
+      "base": "MEME",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ORDI",
+      "propr_asset": "ORDI",
+      "asset_type": "crypto",
+      "base": "ORDI",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "NEO",
+      "propr_asset": "NEO",
+      "asset_type": "crypto",
+      "base": "NEO",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "ZEN",
+      "propr_asset": "ZEN",
+      "asset_type": "crypto",
+      "base": "ZEN",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "FIL",
+      "propr_asset": "FIL",
+      "asset_type": "crypto",
+      "base": "FIL",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "PYTH",
+      "propr_asset": "PYTH",
+      "asset_type": "crypto",
+      "base": "PYTH",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "SUSHI",
+      "propr_asset": "SUSHI",
+      "asset_type": "crypto",
+      "base": "SUSHI",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "IMX",
+      "propr_asset": "IMX",
+      "asset_type": "crypto",
+      "base": "IMX",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "kBONK",
+      "propr_asset": "kBONK",
+      "asset_type": "crypto",
+      "base": "kBONK",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "GMT",
+      "propr_asset": "GMT",
+      "asset_type": "crypto",
+      "base": "GMT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SUPER",
+      "propr_asset": "SUPER",
+      "asset_type": "crypto",
+      "base": "SUPER",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "USTC",
+      "propr_asset": "USTC",
+      "asset_type": "crypto",
+      "base": "USTC",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "JUP",
+      "propr_asset": "JUP",
+      "asset_type": "crypto",
+      "base": "JUP",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "kLUNC",
+      "propr_asset": "kLUNC",
+      "asset_type": "crypto",
+      "base": "kLUNC",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "RSR",
+      "propr_asset": "RSR",
+      "asset_type": "crypto",
+      "base": "RSR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "GALA",
+      "propr_asset": "GALA",
+      "asset_type": "crypto",
+      "base": "GALA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "JTO",
+      "propr_asset": "JTO",
+      "asset_type": "crypto",
+      "base": "JTO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "ACE",
+      "propr_asset": "ACE",
+      "asset_type": "crypto",
+      "base": "ACE",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "MAV",
+      "propr_asset": "MAV",
+      "asset_type": "crypto",
+      "base": "MAV",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "WIF",
+      "propr_asset": "WIF",
+      "asset_type": "crypto",
+      "base": "WIF",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "CAKE",
+      "propr_asset": "CAKE",
+      "asset_type": "crypto",
+      "base": "CAKE",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "PEOPLE",
+      "propr_asset": "PEOPLE",
+      "asset_type": "crypto",
+      "base": "PEOPLE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ENS",
+      "propr_asset": "ENS",
+      "asset_type": "crypto",
+      "base": "ENS",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "ETC",
+      "propr_asset": "ETC",
+      "asset_type": "crypto",
+      "base": "ETC",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "XAI",
+      "propr_asset": "XAI",
+      "asset_type": "crypto",
+      "base": "XAI",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "MANTA",
+      "propr_asset": "MANTA",
+      "asset_type": "crypto",
+      "base": "MANTA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "UMA",
+      "propr_asset": "UMA",
+      "asset_type": "crypto",
+      "base": "UMA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "ONDO",
+      "propr_asset": "ONDO",
+      "asset_type": "crypto",
+      "base": "ONDO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "ALT",
+      "propr_asset": "ALT",
+      "asset_type": "crypto",
+      "base": "ALT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ZETA",
+      "propr_asset": "ZETA",
+      "asset_type": "crypto",
+      "base": "ZETA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "DYM",
+      "propr_asset": "DYM",
+      "asset_type": "crypto",
+      "base": "DYM",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "MAVIA",
+      "propr_asset": "MAVIA",
+      "asset_type": "crypto",
+      "base": "MAVIA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "W",
+      "propr_asset": "W",
+      "asset_type": "crypto",
+      "base": "W",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "STRK",
+      "propr_asset": "STRK",
+      "asset_type": "crypto",
+      "base": "STRK",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "TAO",
+      "propr_asset": "TAO",
+      "asset_type": "crypto",
+      "base": "TAO",
+      "quote": "USDC",
+      "sz_decimals": 3,
+      "max_leverage": 5
+    },
+    {
+      "name": "AR",
+      "propr_asset": "AR",
+      "asset_type": "crypto",
+      "base": "AR",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "kFLOKI",
+      "propr_asset": "kFLOKI",
+      "asset_type": "crypto",
+      "base": "kFLOKI",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "BOME",
+      "propr_asset": "BOME",
+      "asset_type": "crypto",
+      "base": "BOME",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ETHFI",
+      "propr_asset": "ETHFI",
+      "asset_type": "crypto",
+      "base": "ETHFI",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "ENA",
+      "propr_asset": "ENA",
+      "asset_type": "crypto",
+      "base": "ENA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "MNT",
+      "propr_asset": "MNT",
+      "asset_type": "crypto",
+      "base": "MNT",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "TNSR",
+      "propr_asset": "TNSR",
+      "asset_type": "crypto",
+      "base": "TNSR",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "SAGA",
+      "propr_asset": "SAGA",
+      "asset_type": "crypto",
+      "base": "SAGA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "MERL",
+      "propr_asset": "MERL",
+      "asset_type": "crypto",
+      "base": "MERL",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "HBAR",
+      "propr_asset": "HBAR",
+      "asset_type": "crypto",
+      "base": "HBAR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "POPCAT",
+      "propr_asset": "POPCAT",
+      "asset_type": "crypto",
+      "base": "POPCAT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "EIGEN",
+      "propr_asset": "EIGEN",
+      "asset_type": "crypto",
+      "base": "EIGEN",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "REZ",
+      "propr_asset": "REZ",
+      "asset_type": "crypto",
+      "base": "REZ",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "NOT",
+      "propr_asset": "NOT",
+      "asset_type": "crypto",
+      "base": "NOT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "TURBO",
+      "propr_asset": "TURBO",
+      "asset_type": "crypto",
+      "base": "TURBO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "BRETT",
+      "propr_asset": "BRETT",
+      "asset_type": "crypto",
+      "base": "BRETT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "IO",
+      "propr_asset": "IO",
+      "asset_type": "crypto",
+      "base": "IO",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "ZK",
+      "propr_asset": "ZK",
+      "asset_type": "crypto",
+      "base": "ZK",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "BLAST",
+      "propr_asset": "BLAST",
+      "asset_type": "crypto",
+      "base": "BLAST",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "MEW",
+      "propr_asset": "MEW",
+      "asset_type": "crypto",
+      "base": "MEW",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "RENDER",
+      "propr_asset": "RENDER",
+      "asset_type": "crypto",
+      "base": "RENDER",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "POL",
+      "propr_asset": "POL",
+      "asset_type": "crypto",
+      "base": "POL",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "CELO",
+      "propr_asset": "CELO",
+      "asset_type": "crypto",
+      "base": "CELO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "HMSTR",
+      "propr_asset": "HMSTR",
+      "asset_type": "crypto",
+      "base": "HMSTR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SCR",
+      "propr_asset": "SCR",
+      "asset_type": "crypto",
+      "base": "SCR",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "kNEIRO",
+      "propr_asset": "kNEIRO",
+      "asset_type": "crypto",
+      "base": "kNEIRO",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "GOAT",
+      "propr_asset": "GOAT",
+      "asset_type": "crypto",
+      "base": "GOAT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "MOODENG",
+      "propr_asset": "MOODENG",
+      "asset_type": "crypto",
+      "base": "MOODENG",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "GRASS",
+      "propr_asset": "GRASS",
+      "asset_type": "crypto",
+      "base": "GRASS",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "PURR",
+      "propr_asset": "PURR",
+      "asset_type": "crypto",
+      "base": "PURR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "PNUT",
+      "propr_asset": "PNUT",
+      "asset_type": "crypto",
+      "base": "PNUT",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "XLM",
+      "propr_asset": "XLM",
+      "asset_type": "crypto",
+      "base": "XLM",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "CHILLGUY",
+      "propr_asset": "CHILLGUY",
+      "asset_type": "crypto",
+      "base": "CHILLGUY",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SAND",
+      "propr_asset": "SAND",
+      "asset_type": "crypto",
+      "base": "SAND",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "IOTA",
+      "propr_asset": "IOTA",
+      "asset_type": "crypto",
+      "base": "IOTA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ALGO",
+      "propr_asset": "ALGO",
+      "asset_type": "crypto",
+      "base": "ALGO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "HYPE",
+      "propr_asset": "HYPE",
+      "asset_type": "crypto",
+      "base": "HYPE",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "ME",
+      "propr_asset": "ME",
+      "asset_type": "crypto",
+      "base": "ME",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "MOVE",
+      "propr_asset": "MOVE",
+      "asset_type": "crypto",
+      "base": "MOVE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "VIRTUAL",
+      "propr_asset": "VIRTUAL",
+      "asset_type": "crypto",
+      "base": "VIRTUAL",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "PENGU",
+      "propr_asset": "PENGU",
+      "asset_type": "crypto",
+      "base": "PENGU",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "USUAL",
+      "propr_asset": "USUAL",
+      "asset_type": "crypto",
+      "base": "USUAL",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "FARTCOIN",
+      "propr_asset": "FARTCOIN",
+      "asset_type": "crypto",
+      "base": "FARTCOIN",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "AIXBT",
+      "propr_asset": "AIXBT",
+      "asset_type": "crypto",
+      "base": "AIXBT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ZEREBRO",
+      "propr_asset": "ZEREBRO",
+      "asset_type": "crypto",
+      "base": "ZEREBRO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "BIO",
+      "propr_asset": "BIO",
+      "asset_type": "crypto",
+      "base": "BIO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "GRIFFAIN",
+      "propr_asset": "GRIFFAIN",
+      "asset_type": "crypto",
+      "base": "GRIFFAIN",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SPX",
+      "propr_asset": "SPX",
+      "asset_type": "crypto",
+      "base": "SPX",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "S",
+      "propr_asset": "S",
+      "asset_type": "crypto",
+      "base": "S",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "MORPHO",
+      "propr_asset": "MORPHO",
+      "asset_type": "crypto",
+      "base": "MORPHO",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "TRUMP",
+      "propr_asset": "TRUMP",
+      "asset_type": "crypto",
+      "base": "TRUMP",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 10
+    },
+    {
+      "name": "MELANIA",
+      "propr_asset": "MELANIA",
+      "asset_type": "crypto",
+      "base": "MELANIA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "ANIME",
+      "propr_asset": "ANIME",
+      "asset_type": "crypto",
+      "base": "ANIME",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "VINE",
+      "propr_asset": "VINE",
+      "asset_type": "crypto",
+      "base": "VINE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "VVV",
+      "propr_asset": "VVV",
+      "asset_type": "crypto",
+      "base": "VVV",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 3
+    },
+    {
+      "name": "BERA",
+      "propr_asset": "BERA",
+      "asset_type": "crypto",
+      "base": "BERA",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "TST",
+      "propr_asset": "TST",
+      "asset_type": "crypto",
+      "base": "TST",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "LAYER",
+      "propr_asset": "LAYER",
+      "asset_type": "crypto",
+      "base": "LAYER",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "IP",
+      "propr_asset": "IP",
+      "asset_type": "crypto",
+      "base": "IP",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 3
+    },
+    {
+      "name": "KAITO",
+      "propr_asset": "KAITO",
+      "asset_type": "crypto",
+      "base": "KAITO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "NIL",
+      "propr_asset": "NIL",
+      "asset_type": "crypto",
+      "base": "NIL",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "PAXG",
+      "propr_asset": "PAXG",
+      "asset_type": "crypto",
+      "base": "PAXG",
+      "quote": "USDC",
+      "sz_decimals": 3,
+      "max_leverage": 10
+    },
+    {
+      "name": "PROMPT",
+      "propr_asset": "PROMPT",
+      "asset_type": "crypto",
+      "base": "PROMPT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "BABY",
+      "propr_asset": "BABY",
+      "asset_type": "crypto",
+      "base": "BABY",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "WCT",
+      "propr_asset": "WCT",
+      "asset_type": "crypto",
+      "base": "WCT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "HYPER",
+      "propr_asset": "HYPER",
+      "asset_type": "crypto",
+      "base": "HYPER",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ZORA",
+      "propr_asset": "ZORA",
+      "asset_type": "crypto",
+      "base": "ZORA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "INIT",
+      "propr_asset": "INIT",
+      "asset_type": "crypto",
+      "base": "INIT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "DOOD",
+      "propr_asset": "DOOD",
+      "asset_type": "crypto",
+      "base": "DOOD",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "NXPC",
+      "propr_asset": "NXPC",
+      "asset_type": "crypto",
+      "base": "NXPC",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SOPH",
+      "propr_asset": "SOPH",
+      "asset_type": "crypto",
+      "base": "SOPH",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "RESOLV",
+      "propr_asset": "RESOLV",
+      "asset_type": "crypto",
+      "base": "RESOLV",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SYRUP",
+      "propr_asset": "SYRUP",
+      "asset_type": "crypto",
+      "base": "SYRUP",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "PUMP",
+      "propr_asset": "PUMP",
+      "asset_type": "crypto",
+      "base": "PUMP",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "PROVE",
+      "propr_asset": "PROVE",
+      "asset_type": "crypto",
+      "base": "PROVE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "YZY",
+      "propr_asset": "YZY",
+      "asset_type": "crypto",
+      "base": "YZY",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "XPL",
+      "propr_asset": "XPL",
+      "asset_type": "crypto",
+      "base": "XPL",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 10
+    },
+    {
+      "name": "WLFI",
+      "propr_asset": "WLFI",
+      "asset_type": "crypto",
+      "base": "WLFI",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "LINEA",
+      "propr_asset": "LINEA",
+      "asset_type": "crypto",
+      "base": "LINEA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "SKY",
+      "propr_asset": "SKY",
+      "asset_type": "crypto",
+      "base": "SKY",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ASTER",
+      "propr_asset": "ASTER",
+      "asset_type": "crypto",
+      "base": "ASTER",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "AVNT",
+      "propr_asset": "AVNT",
+      "asset_type": "crypto",
+      "base": "AVNT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "STBL",
+      "propr_asset": "STBL",
+      "asset_type": "crypto",
+      "base": "STBL",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "0G",
+      "propr_asset": "0G",
+      "asset_type": "crypto",
+      "base": "0G",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "HEMI",
+      "propr_asset": "HEMI",
+      "asset_type": "crypto",
+      "base": "HEMI",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "APEX",
+      "propr_asset": "APEX",
+      "asset_type": "crypto",
+      "base": "APEX",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "2Z",
+      "propr_asset": "2Z",
+      "asset_type": "crypto",
+      "base": "2Z",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ZEC",
+      "propr_asset": "ZEC",
+      "asset_type": "crypto",
+      "base": "ZEC",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 10
+    },
+    {
+      "name": "MON",
+      "propr_asset": "MON",
+      "asset_type": "crypto",
+      "base": "MON",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "MET",
+      "propr_asset": "MET",
+      "asset_type": "crypto",
+      "base": "MET",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "MEGA",
+      "propr_asset": "MEGA",
+      "asset_type": "crypto",
+      "base": "MEGA",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "CC",
+      "propr_asset": "CC",
+      "asset_type": "crypto",
+      "base": "CC",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "ICP",
+      "propr_asset": "ICP",
+      "asset_type": "crypto",
+      "base": "ICP",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "AERO",
+      "propr_asset": "AERO",
+      "asset_type": "crypto",
+      "base": "AERO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "STABLE",
+      "propr_asset": "STABLE",
+      "asset_type": "crypto",
+      "base": "STABLE",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "FOGO",
+      "propr_asset": "FOGO",
+      "asset_type": "crypto",
+      "base": "FOGO",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "LIT",
+      "propr_asset": "LIT",
+      "asset_type": "crypto",
+      "base": "LIT",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 5
+    },
+    {
+      "name": "XMR",
+      "propr_asset": "XMR",
+      "asset_type": "crypto",
+      "base": "XMR",
+      "quote": "USDC",
+      "sz_decimals": 3,
+      "max_leverage": 5
+    },
+    {
+      "name": "AXS",
+      "propr_asset": "AXS",
+      "asset_type": "crypto",
+      "base": "AXS",
+      "quote": "USDC",
+      "sz_decimals": 1,
+      "max_leverage": 5
+    },
+    {
+      "name": "DASH",
+      "propr_asset": "DASH",
+      "asset_type": "crypto",
+      "base": "DASH",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": 5
+    },
+    {
+      "name": "SKR",
+      "propr_asset": "SKR",
+      "asset_type": "crypto",
+      "base": "SKR",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "AZTEC",
+      "propr_asset": "AZTEC",
+      "asset_type": "crypto",
+      "base": "AZTEC",
+      "quote": "USDC",
+      "sz_decimals": 0,
+      "max_leverage": 3
+    },
+    {
+      "name": "AAPL",
+      "propr_asset": "xyz:AAPL",
+      "asset_type": "hip3",
+      "base": "AAPL",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "CL",
+      "propr_asset": "xyz:CL",
+      "asset_type": "hip3",
+      "base": "CL",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "GOLD",
+      "propr_asset": "xyz:GOLD",
+      "asset_type": "hip3",
+      "base": "GOLD",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "NVDA",
+      "propr_asset": "xyz:NVDA",
+      "asset_type": "hip3",
+      "base": "NVDA",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "SILVER",
+      "propr_asset": "xyz:SILVER",
+      "asset_type": "hip3",
+      "base": "SILVER",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "TSLA",
+      "propr_asset": "xyz:TSLA",
+      "asset_type": "hip3",
+      "base": "TSLA",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    },
+    {
+      "name": "SPACEX",
+      "propr_asset": "xyz:SPACEX",
+      "asset_type": "hip3",
+      "base": "SPACEX",
+      "quote": "USDC",
+      "sz_decimals": 2,
+      "max_leverage": null
+    }
+  ]
+}
