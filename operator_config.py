@@ -31,6 +31,8 @@ def main() -> int:
     set_parser.add_argument("--markets")
     set_parser.add_argument("--scheduling-enabled", choices=["true", "false"])
     set_parser.add_argument("--schedule-time")
+    set_parser.add_argument("--challenge-id", default=None)
+    set_parser.add_argument("--push-enabled", choices=["true", "false"])
 
     reset_parser = subparsers.add_parser("reset", help="Reset the operator configuration back to defaults.")
     reset_parser.add_argument("--path", default=None)
@@ -59,6 +61,10 @@ def main() -> int:
                 updates["scheduling_enabled"] = args.scheduling_enabled == "true"
             if args.schedule_time is not None:
                 updates["schedule_time"] = args.schedule_time
+            if args.challenge_id is not None:
+                updates["challenge_id"] = args.challenge_id
+            if args.push_enabled is not None:
+                updates["push_enabled"] = args.push_enabled == "true"
             if not updates:
                 raise ValueError("No operator configuration values were provided")
             path, config = update_operator_config(updates, path=args.path)

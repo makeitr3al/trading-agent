@@ -5,64 +5,94 @@ trading_agent_load_current_config_haos:
   alias: Trading Agent Konfiguration laden
   mode: single
   sequence:
-    - variables:
-        operator_mode: "{{ states('sensor.trading_agent_operator_config') }}"
-        operator_environment: "{{ state_attr('sensor.trading_agent_operator_config', 'environment') or 'beta' }}"
-        operator_leverage: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') or 1 }}"
-        operator_markets: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') or 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY' }}"
-        operator_scheduling_enabled: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') }}"
-        operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
-        operator_challenge_id: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') or '' }}"
-        ui_mode: >-
-          {% if operator_mode == 'preflight' %}
-            Preflight-Test
-          {% elif operator_mode == 'beta_write' %}
-            Beta-Write-Test
-          {% else %}
-            Scharf
-          {% endif %}
-    - action: input_select.select_option
-      target:
-        entity_id: input_select.trading_agent_mode
-      data:
-        option: "{{ ui_mode | trim }}"
-    - action: input_select.select_option
-      target:
-        entity_id: input_select.trading_agent_environment
-      data:
-        option: "{{ operator_environment }}"
-    - action: input_number.set_value
-      target:
-        entity_id: input_number.trading_agent_leverage
-      data:
-        value: "{{ operator_leverage | int }}"
-    - action: input_text.set_value
-      target:
-        entity_id: input_text.trading_agent_markets
-      data:
-        value: "{{ operator_markets }}"
-    - choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ operator_scheduling_enabled in [true, 'true', 'True', 'on', '1'] }}"
-          sequence:
-            - action: input_boolean.turn_on
-              target:
-                entity_id: input_boolean.trading_agent_scheduling_aktiv
-      default:
-        - action: input_boolean.turn_off
+    - if:
+        - condition: template
+          value_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
+      then:
+        - variables:
+            operator_mode: "{{ states('sensor.trading_agent_operator_config') }}"
+            operator_environment: "{{ state_attr('sensor.trading_agent_operator_config', 'environment') or 'beta' }}"
+            operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
+            ui_mode: >-
+              {% if operator_mode == 'preflight' %}
+                Preflight-Test
+              {% elif operator_mode == 'beta_write' %}
+                Beta-Write-Test
+              {% else %}
+                Scharf
+              {% endif %}
+        - action: input_select.select_option
           target:
-            entity_id: input_boolean.trading_agent_scheduling_aktiv
-    - action: input_datetime.set_datetime
-      target:
-        entity_id: input_datetime.trading_agent_schedule_time
-      data:
-        time: "{{ operator_schedule_time[:5] }}"
-    - action: input_text.set_value
-      target:
-        entity_id: input_text.trading_agent_challenge_id
-      data:
-        value: "{{ operator_challenge_id }}"
+            entity_id: input_select.trading_agent_mode
+          data:
+            option: "{{ ui_mode | trim }}"
+        - action: input_select.select_option
+          target:
+            entity_id: input_select.trading_agent_environment
+          data:
+            option: "{{ operator_environment }}"
+        - if:
+            - condition: template
+              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') is not none }}"
+          then:
+            - action: input_number.set_value
+              target:
+                entity_id: input_number.trading_agent_leverage
+              data:
+                value: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') | int }}"
+        - if:
+            - condition: template
+              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') is not none }}"
+          then:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.trading_agent_markets
+              data:
+                value: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') }}"
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [true, 'true', 'True', 'on', '1'] }}"
+              sequence:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.trading_agent_scheduling_aktiv
+            - conditions:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [false, 'false', 'False', 'off', '0'] }}"
+              sequence:
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.trading_agent_scheduling_aktiv
+        - action: input_datetime.set_datetime
+          target:
+            entity_id: input_datetime.trading_agent_schedule_time
+          data:
+            time: "{{ operator_schedule_time[:5] }}"
+        - if:
+            - condition: template
+              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') is not none }}"
+          then:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.trading_agent_challenge_id
+              data:
+                value: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') }}"
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [true, 'true', 'True', 'on', '1'] }}"
+              sequence:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.trading_agent_push_aktiv
+            - conditions:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [false, 'false', 'False', 'off', '0'] }}"
+              sequence:
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.trading_agent_push_aktiv
 
 
 trading_agent_save_current_config_haos:
@@ -87,6 +117,7 @@ trading_agent_save_current_config_haos:
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
 
 trading_agent_jetzt_ausfuehren_haos:
   alias: Trading Agent Aktuellen Modus ausfuehren
@@ -110,6 +141,7 @@ trading_agent_preflight_test_haos:
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -127,6 +159,7 @@ trading_agent_beta_write_test_haos:
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -144,6 +177,7 @@ trading_agent_scharf_lauf_haos:
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
