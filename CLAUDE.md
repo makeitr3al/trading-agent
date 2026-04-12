@@ -16,8 +16,9 @@ app/            # trading_app.py, journal.py, risk_guard.py
 strategy/       # agent_cycle, decision_engine, signal_rules, regime_detector,
                 # trend_signal_detector, countertrend_signal_detector,
                 # position_sizer, order_manager, trade_manager, strategy_runner, state, engine
-broker/         # propr_client.py, propr_sdk.py, execution, order_service, state_sync,
-                # symbol_service, health_guard, asset_guard, challenge_service, propr_ws
+broker/         # alle Propr-API-Integration (propr_client, propr_sdk, execution, order_service,
+                # state_sync, symbol_service, health_guard, asset_guard, challenge_service, propr_ws);
+                # offizielles SDK: PyPI-Paket propr_sdk, geladen über broker/propr_sdk.py
 config/         # propr_config.py, hyperliquid_config.py, strategy_config.py
 indicators/     # bollinger.py, macd.py (Indikator-Implementierungen)
 models/         # Datenmodelle: candle, decision, order, regime, signal, symbol_spec, trade, ...

@@ -36,7 +36,8 @@
 | Indicators | `indicators/` | Pure math (e.g. Bollinger, MACD). |
 | Data access | `data/providers/` | `CandleDataProvider` implementations (live, golden, historical). |
 | Utilities | `utils/` | Env loading, runtime status/overrides, operator tooling. |
-| Alternate Propr layer | `propr/` | Parallel modules overlapping `broker/` (legacy / alternate path). |
+
+**Propr integration:** All HTTP/SDK calls to Propr go through **`broker/`** (`propr_client`, `order_service`, `state_sync`, `execution`, etc.). The published **`propr_sdk`** Python package is imported only from **`broker/propr_sdk.py`** — it is not a second app-layer tree.
 
 ### 2.2 Allowed dependency direction
 
@@ -47,10 +48,10 @@
 - `broker` may import `config`, `models`, `utils`; must not import `app` or `strategy`.
 - `data/providers` may import `config`, `models`; must not import `app` or `strategy`.
 
-### 2.3 `broker/` vs `propr/`
+### 2.3 Propr I/O boundary
 
-- **Canonical path for live trading:** `app/trading_app.py` uses **`broker.*`** only for Propr execution and sync.
-- **`propr/`** remains in the tree with overlapping names (`client`, `order_service`, `state_sync`, `execution_bridge`). Treat **`broker/`** as the source of truth for new work until the two trees are consolidated. New features must not introduce additional dependence on `propr/` from `app/` without an explicit migration decision and manifest update.
+- **`app/trading_app.py`** uses **`broker.*`** only for Propr execution and state sync.
+- Do not add a parallel in-repo package for Propr calls; extend **`broker/`** (and **`propr_sdk`** via `broker/propr_sdk.py` if the SDK surface changes).
 
 ---
 
@@ -134,7 +135,7 @@ These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-nego
 - Importing `ProprClient` or performing REST calls from `strategy/` or `indicators/`.
 - Using `float` for sizes or prices in broker execution paths.
 - Bypassing `run_app_cycle` guards “just for a script” without using the documented script flags and non-golden data rules.
-- Adding a second silent path to Propr alongside `broker/` from `app/` (e.g. wiring `propr/` in parallel) without updating this manifest.
+- Adding a second in-repo integration path to Propr from `app/` (bypassing `broker/`) without updating this manifest.
 - Committing credentials, production confirm flags, or `artifacts/` contents intended to stay local.
 
 ---
@@ -144,7 +145,7 @@ These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-nego
 Answer explicitly when touching cycle behavior, layering, or execution policy:
 
 - [ ] Does the change respect the dependency direction in §2 (no new forbidden imports)?
-- [ ] If `propr/` is used or extended, is `broker/` still the canonical app path, and is the duplication documented?
+- [ ] Does new Propr-related code live under `broker/` (or justified changes to `broker/propr_sdk.py`), not in `app/` or `strategy/`?
 - [ ] Are submits still impossible under `DATA_SOURCE=golden`?
 - [ ] Are new quantity/price paths using `Decimal` in the broker layer?
 - [ ] Do tests cover the new branch without requiring real Propr prod?
