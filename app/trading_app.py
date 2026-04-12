@@ -173,6 +173,7 @@ def _build_app_cycle_result(
     asset_guard_result: AssetGuardResult | None = None,
     symbol_spec_loaded: bool = False,
     executed_at: str | None = None,
+    journal_emit_pending_order: bool = True,
 ) -> AppCycleResult:
     result = AppCycleResult(
         challenge_context=challenge_context,
@@ -198,6 +199,9 @@ def _build_app_cycle_result(
     cycle_timestamp = candles[-1].timestamp.isoformat()
     if executed_at is None:
         executed_at = datetime.now(timezone.utc).isoformat()
+    signal_lifecycle_id = (
+        post_cycle_state.signal_lifecycle_id if post_cycle_state is not None else None
+    )
     journal_entries = build_journal_entries(
         symbol=symbol,
         environment=environment,
@@ -212,6 +216,9 @@ def _build_app_cycle_result(
         closed_trade=closed_trade,
         skipped_reason=skipped_reason,
         exit_price=float(candles[-1].close),
+        journal_emit_pending_order=journal_emit_pending_order,
+        signal_lifecycle_id=signal_lifecycle_id,
+        managed_exit_orders=managed_exit_orders,
     )
     result = result.model_copy(update={"journal_entries": journal_entries})
 
@@ -244,6 +251,7 @@ class _CycleContext:
     environment: str | None
     symbol_spec_loaded: bool
     challenge_id: str | None = None
+    journal_emit_pending_order: bool = True
     resolved_balance: float | None = None
 
     # Accumulated state — mutated by phases
@@ -287,6 +295,7 @@ class _CycleContext:
             asset_guard_result=self.asset_guard_result,
             symbol_spec_loaded=self.symbol_spec_loaded,
             executed_at=self.executed_at,
+            journal_emit_pending_order=self.journal_emit_pending_order,
         )
 
 
@@ -534,6 +543,7 @@ def run_app_cycle(
     journal_path: str | Path | None = None,
     executed_at: str | None = None,
     challenge_id: str | None = None,
+    journal_emit_pending_order: bool = True,
 ) -> AppCycleResult:
     ctx = _CycleContext(
         client=client,
@@ -554,6 +564,7 @@ def run_app_cycle(
         symbol_spec_loaded=symbol_spec is not None,
         executed_at=executed_at,
         challenge_id=challenge_id,
+        journal_emit_pending_order=journal_emit_pending_order,
     )
 
     for phase in [

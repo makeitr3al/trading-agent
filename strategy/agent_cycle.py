@@ -15,6 +15,7 @@ from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
 from strategy.signal_rules import touches_middle_band
 from strategy.strategy_runner import run_strategy_cycle
+from ulid import ULID
 
 # TODO: Later manage pending-order validity across multiple days.
 # TODO: Later add intrabar ordering when entry and SL/TP can both be touched.
@@ -169,6 +170,18 @@ def _resolve_middle_band_retest_required(
         return False
 
     return previous_required
+
+
+def _resolve_signal_lifecycle_id_for_new_state(
+    state: AgentState,
+    pending_order: Order | None,
+    active_trade: Trade | None,
+) -> str | None:
+    if active_trade is None and pending_order is None:
+        return None
+    if state.signal_lifecycle_id:
+        return state.signal_lifecycle_id
+    return str(ULID())
 
 
 def run_agent_cycle(
@@ -331,6 +344,12 @@ def run_agent_cycle(
         else state.active_trade
     )
 
+    signal_lifecycle_id = _resolve_signal_lifecycle_id_for_new_state(
+        state=state,
+        pending_order=pending_order,
+        active_trade=active_trade,
+    )
+
     new_state = state.model_copy(
         update={
             "active_trade": active_trade,
@@ -343,6 +362,7 @@ def run_agent_cycle(
             "middle_band_retest_required": middle_band_retest_required,
             "consumed_signals": consumed_signals,
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),
+            "signal_lifecycle_id": signal_lifecycle_id,
         }
     )
 

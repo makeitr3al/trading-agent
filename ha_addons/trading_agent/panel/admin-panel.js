@@ -41,6 +41,20 @@ const TABS = [
   ["trades", "Journal Orders & Trades"],
 ];
 
+const LIFECYCLE_COLUMNS = [
+  { key: "_expand", label: "", sortable: false },
+  { key: "sort_timestamp", label: "Letzte Aktivitaet", sortable: true, filter: "text" },
+  { key: "phase", label: "Phase", sortable: true, filter: "select", optionKey: "lifecycle_phases", badge: true },
+  { key: "symbol", label: "Markt", sortable: true, filter: "select", optionKey: "symbols" },
+  { key: "environment", label: "Umgebung", sortable: true, filter: "select", optionKey: "environments" },
+  { key: "source_signal_type", label: "Signalquelle", sortable: true, filter: "select", optionKey: "signal_sources" },
+  { key: "order_status", label: "Order-Status", sortable: true, filter: "text" },
+  { key: "fill_timestamp", label: "Fill", sortable: true, filter: "text" },
+  { key: "close_timestamp", label: "Exit", sortable: true, filter: "text" },
+  { key: "management_count", label: "SL/TP Updates", sortable: true, filter: "text" },
+  { key: "pnl", label: "PnL", sortable: true, filter: "text" },
+];
+
 const TRADE_COLUMNS = [
   { key: "_select", label: "", sortable: false },
   { key: "_expand", label: "", sortable: false },
@@ -171,6 +185,23 @@ function buildLifecycleChains(tradeRows) {
   return lifecycles;
 }
 
+function buildLifecycleDetail(row) {
+  const steps = row.steps || [];
+  if (!steps.length) {
+    return `<div class="detail-grid"><div class="muted">Keine Schritte erfasst.</div></div>`;
+  }
+  const lines = steps.map((s) => {
+    const kind = escapeHtml(s.step || "");
+    const at = formatValue(s.at);
+    const extra = Object.entries(s)
+      .filter(([k]) => !["step", "at"].includes(k))
+      .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(v != null ? String(v) : "-")}`)
+      .join(" · ");
+    return `<div class="event-item"><span class="event-time">${at}</span><span class="pill neutral">${kind}</span> ${extra ? `<span class="event-note">${extra}</span>` : ""}</div>`;
+  });
+  return `<div class="event-log"><h4>Lifecycle-Schritte</h4>${lines.join("")}</div>`;
+}
+
 function buildTradeDetail(row, allTradeRows) {
   const details = `<div class="detail-grid">
     <div><span class="detail-label">Fill-Zeit</span> ${formatValue(row.fill_timestamp)}</div>
@@ -216,8 +247,9 @@ function uniqueValues(rows, key) {
     .sort((left, right) => String(left).localeCompare(String(right), "de"));
 }
 
-function buildFilterOptions(scanRows, tradeRows) {
-  const allRows = [...scanRows, ...tradeRows];
+function buildFilterOptions(scanRows, tradeRows, lifecycleRows) {
+  const lr = lifecycleRows || [];
+  const allRows = [...scanRows, ...tradeRows, ...lr];
   return {
     symbols: uniqueValues(allRows, "symbol"),
     environments: uniqueValues(allRows, "environment"),
@@ -228,6 +260,7 @@ function buildFilterOptions(scanRows, tradeRows) {
     trade_statuses: uniqueValues(tradeRows, "status"),
     directions: uniqueValues(tradeRows, "direction"),
     signal_sources: uniqueValues(tradeRows, "source_signal_type"),
+    lifecycle_phases: uniqueValues(lr, "phase"),
   };
 }
 
@@ -336,7 +369,8 @@ function snapshotFallback(journalState) {
       entry_count_total: 0,
       scan_rows: [],
       trade_rows: [],
-      filter_options: buildFilterOptions([], []),
+      lifecycle_rows: [],
+      filter_options: buildFilterOptions([], [], []),
       warnings: [],
     };
   }
@@ -348,7 +382,8 @@ function snapshotFallback(journalState) {
     entry_count_total: Number(journalState?.attributes?.entry_count || scanRows.length + tradeRows.length || 0),
     scan_rows: scanRows,
     trade_rows: tradeRows,
-    filter_options: buildFilterOptions(scanRows, tradeRows),
+    lifecycle_rows: [],
+    filter_options: buildFilterOptions(scanRows, tradeRows, []),
     warnings: [
       "Panel verwendet Journal-Snapshot als Fallback, weil /local/trading-agent/journal_table.json leer oder veraltet ist.",
     ],
@@ -368,7 +403,8 @@ class TradingAgentAdminPanel extends HTMLElement {
       entry_count_total: 0,
       scan_rows: [],
       trade_rows: [],
-      filter_options: buildFilterOptions([], []),
+      lifecycle_rows: [],
+      filter_options: buildFilterOptions([], [], []),
       warnings: [],
     };
     this.loadError = null;
@@ -377,11 +413,13 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.tableState = {
       scans: { ...BASE_TABLE_STATE },
       trades: { ...BASE_TABLE_STATE },
+      lifecycle: { ...BASE_TABLE_STATE, sortKey: "sort_timestamp" },
     };
     this._directLiveStatus = null;
     this._liveStatusInterval = null;
     this._lastJournalRefresh = 0;
     this._expandedTradeRows = new Set();
+    this._expandedLifecycleRows = new Set();
     this._selectedTradeRows = new Set();
     this._expandedScanRuns = new Set();
     this.assetRegistry = null;
@@ -674,7 +712,12 @@ class TradingAgentAdminPanel extends HTMLElement {
 
   effectiveJournal() {
     const live = this.journalPayload || {};
-    if ((live.entry_count_total || 0) > 0 || (live.scan_rows?.length || 0) > 0 || (live.trade_rows?.length || 0) > 0) {
+    if (
+      (live.entry_count_total || 0) > 0 ||
+      (live.scan_rows?.length || 0) > 0 ||
+      (live.trade_rows?.length || 0) > 0 ||
+      (live.lifecycle_rows?.length || 0) > 0
+    ) {
       return live;
     }
     return snapshotFallback(this.entity(ENTITIES.journal));
@@ -1036,6 +1079,14 @@ class TradingAgentAdminPanel extends HTMLElement {
     </div>`;
   }
 
+  tradesTab() {
+    const journal = this.effectiveJournal();
+    return `<div class="stack">
+      ${this.tableTab("lifecycle", LIFECYCLE_COLUMNS, journal.lifecycle_rows || [])}
+      ${this.tableTab("trades", TRADE_COLUMNS, journal.trade_rows || [])}
+    </div>`;
+  }
+
   tableTab(name, columns, rows) {
     const journal = this.effectiveJournal();
     const state = this.tableState[name];
@@ -1043,13 +1094,25 @@ class TradingAgentAdminPanel extends HTMLElement {
     const totalPages = Math.max(1, Math.ceil(filteredRows.length / state.pageSize));
     const page = Math.min(state.page, totalPages);
     const pageRows = filteredRows.slice((page - 1) * state.pageSize, (page - 1) * state.pageSize + state.pageSize);
-    const options = journal.filter_options || buildFilterOptions([], []);
+    const options = journal.filter_options || buildFilterOptions([], [], []);
+    const sectionTitle =
+      name === "lifecycle"
+        ? "Signal-Lifecycle"
+        : name === "trades"
+          ? "Journal Orders & Trades (Rohzeilen)"
+          : name === "scans"
+            ? "Journal Scans"
+            : "Tabelle";
+    const sectionHint =
+      name === "lifecycle"
+        ? "Eine Zeile pro signal_lifecycle_id (neue Journale). Aeltere Eintraege ohne ID erscheinen nur unten in den Rohzeilen."
+        : "";
     return `<div class="stack">
       <section class="card">
         <div class="toolbar">
           <div>
-            <h3>${escapeHtml(name === "scans" ? "Journal Scans" : "Journal Orders & Trades")}</h3>
-            <p class="muted">Gesamt: ${filteredRows.length} gefilterte Zeilen von ${rows.length}. Letztes Update: ${formatValue(journal.generated_at)}</p>
+            <h3>${escapeHtml(sectionTitle)}</h3>
+            <p class="muted">Gesamt: ${filteredRows.length} gefilterte Zeilen von ${rows.length}. Letztes Update: ${formatValue(journal.generated_at)}${sectionHint ? ` ${escapeHtml(sectionHint)}` : ""}</p>
           </div>
           <div class="toolbar-actions">
             <input class="search" type="search" placeholder="Globale Textsuche" data-table="${name}" data-search="1" value="${escapeHtml(state.search)}">
@@ -1101,9 +1164,12 @@ class TradingAgentAdminPanel extends HTMLElement {
                 ? pageRows
                     .map(
                       (row, idx) => {
-                        const isTradesTable = (name === "trades");
+                        const isTradesTable = name === "trades";
+                        const isLifecycleTable = name === "lifecycle";
                         const globalIdx = (page - 1) * state.pageSize + idx;
-                        const isExpanded = isTradesTable && this._expandedTradeRows.has(globalIdx);
+                        const isExpanded =
+                          (isTradesTable && this._expandedTradeRows.has(globalIdx)) ||
+                          (isLifecycleTable && this._expandedLifecycleRows.has(globalIdx));
                         const cells = columns
                           .map((column) => {
                             if (column.key === "_select" && isTradesTable) {
@@ -1126,9 +1192,18 @@ class TradingAgentAdminPanel extends HTMLElement {
                             return `<td>${formatValue(value)}</td>`;
                           })
                           .join("");
-                        let html = `<tr class="${isTradesTable ? "expandable" : ""} ${isExpanded ? "expanded" : ""}" ${isTradesTable ? `data-action="toggle-trade" data-row-index="${globalIdx}"` : ""}>${cells}</tr>`;
+                        const expandAction =
+                          isTradesTable
+                            ? `data-action="toggle-trade" data-row-index="${globalIdx}"`
+                            : isLifecycleTable
+                              ? `data-action="toggle-lifecycle" data-row-index="${globalIdx}"`
+                              : "";
+                        let html = `<tr class="${isTradesTable || isLifecycleTable ? "expandable" : ""} ${isExpanded ? "expanded" : ""}" ${expandAction}>${cells}</tr>`;
                         if (isExpanded) {
-                          html += `<tr class="detail-row"><td colspan="${columns.length}">${buildTradeDetail(row, journal.trade_rows || [])}</td></tr>`;
+                          const detail = isLifecycleTable
+                            ? buildLifecycleDetail(row)
+                            : buildTradeDetail(row, journal.trade_rows || []);
+                          html += `<tr class="detail-row"><td colspan="${columns.length}">${detail}</td></tr>`;
                         }
                         return html;
                       }
@@ -1203,6 +1278,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       this.render();
       return;
     }
+    if (action === "toggle-lifecycle" && target.dataset.rowIndex != null) {
+      const idx = Number(target.dataset.rowIndex);
+      if (this._expandedLifecycleRows.has(idx)) {
+        this._expandedLifecycleRows.delete(idx);
+      } else {
+        this._expandedLifecycleRows.add(idx);
+      }
+      this.render();
+      return;
+    }
     if (action === "toggle-market-group") {
       const group = target.dataset.group || target.closest("[data-group]")?.dataset.group;
       if (group) {
@@ -1233,7 +1318,11 @@ class TradingAgentAdminPanel extends HTMLElement {
       return;
     }
     if (action === "reset" && table) {
-      this.setTableState(table, { ...BASE_TABLE_STATE });
+      const base = { ...BASE_TABLE_STATE };
+      if (table === "lifecycle") {
+        base.sortKey = "sort_timestamp";
+      }
+      this.setTableState(table, base);
       return;
     }
     if (action === "page" && table) {
@@ -1305,7 +1394,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           ? this.statusTab()
           : this.currentTab === "scans"
             ? this.scansTab()
-            : this.tableTab("trades", TRADE_COLUMNS, journal.trade_rows || []);
+            : this.tradesTab();
 
     this.shadowRoot.innerHTML = `<style>
       :host { display: block; height: 100%; background: linear-gradient(180deg, #f6f8fb 0%, #eef3f8 100%); color: #162133; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }

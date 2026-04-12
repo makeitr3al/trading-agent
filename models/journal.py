@@ -41,3 +41,4 @@ class JournalEntry(BaseModel):
     external_order_id: str | None = None
     broker_pending_order_id: str | None = None
     order_lifecycle_id: str | None = None
+    signal_lifecycle_id: str | None = None

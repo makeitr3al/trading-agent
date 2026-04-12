@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -160,11 +161,147 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def _entry_sort_key(entry: dict[str, Any]) -> str:
+    return str(entry.get("executed_at") or entry.get("entry_timestamp") or "")
+
+
+def _lifecycle_phase_from_entries(group: list[dict[str, Any]]) -> str:
+    has_closed = any(e.get("entry_type") == "trade" and e.get("status") == "closed" for e in group)
+    if has_closed:
+        return "closed"
+    has_filled = any(e.get("entry_type") == "trade" and e.get("status") == "filled" for e in group)
+    if has_filled:
+        return "open"
+    has_order = any(e.get("entry_type") == "order" for e in group)
+    if has_order:
+        return "pending_order"
+    return "signal_only"
+
+
+def _lifecycle_steps(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for entry in sorted(group, key=_entry_sort_key):
+        et = entry.get("entry_type")
+        ts = entry.get("executed_at") or entry.get("entry_timestamp")
+        if et == "cycle":
+            steps.append(
+                {
+                    "step": "signal",
+                    "at": ts,
+                    "decision_action": entry.get("decision_action"),
+                    "received_signals": _format_signal_list(entry.get("received_signals") or []),
+                    "notes": entry.get("notes"),
+                }
+            )
+        elif et == "order":
+            steps.append(
+                {
+                    "step": "order",
+                    "at": ts,
+                    "status": entry.get("status"),
+                    "direction": entry.get("direction"),
+                    "entry_price": entry.get("entry_price"),
+                    "stop_loss": entry.get("stop_loss"),
+                    "take_profit": entry.get("take_profit"),
+                    "notes": entry.get("notes"),
+                }
+            )
+        elif et == "trade" and entry.get("status") == "filled":
+            steps.append(
+                {
+                    "step": "fill",
+                    "at": ts,
+                    "direction": entry.get("direction"),
+                    "position_size": entry.get("position_size"),
+                    "entry_price": entry.get("entry_price"),
+                    "stop_loss": entry.get("stop_loss"),
+                    "take_profit": entry.get("take_profit"),
+                    "notes": entry.get("notes"),
+                }
+            )
+        elif et == "trade_management":
+            steps.append(
+                {
+                    "step": "trade_management",
+                    "at": ts,
+                    "status": entry.get("status"),
+                    "stop_loss": entry.get("stop_loss"),
+                    "take_profit": entry.get("take_profit"),
+                    "notes": entry.get("notes"),
+                }
+            )
+        elif et == "trade" and entry.get("status") == "closed":
+            steps.append(
+                {
+                    "step": "exit",
+                    "at": ts,
+                    "close_price": entry.get("close_price"),
+                    "pnl": entry.get("pnl"),
+                    "notes": entry.get("notes"),
+                }
+            )
+    return steps
+
+
+def _build_lifecycle_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for entry in entries:
+        et = entry.get("entry_type")
+        if et not in {"cycle", "order", "trade", "trade_management"}:
+            continue
+        sid = entry.get("signal_lifecycle_id")
+        if not sid or not str(sid).strip():
+            continue
+        groups[str(sid).strip()].append(entry)
+
+    rows: list[dict[str, Any]] = []
+    for sid, group in groups.items():
+        group_sorted = sorted(group, key=_entry_sort_key, reverse=True)
+        group_chrono = list(reversed(group_sorted))
+        steps = _lifecycle_steps(group_chrono)
+        first_cycle = next((e for e in group_chrono if e.get("entry_type") == "cycle"), None)
+        source_signal = next(
+            (e.get("source_signal_type") for e in group_chrono if e.get("source_signal_type")),
+            None,
+        )
+        filled = next((e for e in group_chrono if e.get("entry_type") == "trade" and e.get("status") == "filled"), None)
+        closed = next((e for e in reversed(group_chrono) if e.get("entry_type") == "trade" and e.get("status") == "closed"), None)
+        last_mgmt = next(
+            (e for e in reversed(group_chrono) if e.get("entry_type") == "trade_management"),
+            None,
+        )
+        last_order = next((e for e in reversed(group_chrono) if e.get("entry_type") == "order"), None)
+        management_count = sum(1 for e in group_chrono if e.get("entry_type") == "trade_management")
+        sort_ts = max((_entry_sort_key(e) for e in group), default="")
+        rows.append(
+            {
+                "signal_lifecycle_id": sid,
+                "sort_timestamp": sort_ts,
+                "symbol": group_chrono[0].get("symbol") if group_chrono else None,
+                "environment": group_chrono[0].get("environment") if group_chrono else None,
+                "source_signal_type": source_signal,
+                "phase": _lifecycle_phase_from_entries(group_chrono),
+                "signal_summary": _format_signal_list(first_cycle.get("received_signals") or []) if first_cycle else None,
+                "decision_action": first_cycle.get("decision_action") if first_cycle else None,
+                "order_status": last_order.get("status") if last_order else None,
+                "fill_timestamp": filled.get("fill_timestamp") if filled else None,
+                "close_timestamp": closed.get("close_timestamp") if closed else None,
+                "pnl": closed.get("pnl") if closed else None,
+                "stop_loss": (last_mgmt or filled or last_order or {}).get("stop_loss"),
+                "take_profit": (last_mgmt or filled or last_order or {}).get("take_profit"),
+                "management_count": management_count,
+                "steps": steps,
+            }
+        )
+
+    return sorted(rows, key=lambda r: (r.get("sort_timestamp") or "", r.get("symbol") or ""), reverse=True)
+
+
 def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     trade_rows: list[dict[str, Any]] = []
     for entry in entries:
         entry_type = entry.get("entry_type")
-        if entry_type not in {"order", "trade"}:
+        if entry_type not in {"order", "trade", "trade_management"}:
             continue
         trade_rows.append(
             {
@@ -182,6 +319,7 @@ def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "take_profit": entry.get("take_profit"),
                 "close_price": entry.get("close_price"),
                 "lifecycle_id": entry.get("lifecycle_id"),
+                "signal_lifecycle_id": entry.get("signal_lifecycle_id"),
                 "pnl": entry.get("pnl"),
                 "fill_timestamp": entry.get("fill_timestamp"),
                 "close_timestamp": entry.get("close_timestamp"),
@@ -199,7 +337,12 @@ def _build_trade_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _filter_options(scan_rows: list[dict[str, Any]], trade_rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+def _filter_options(
+    scan_rows: list[dict[str, Any]],
+    trade_rows: list[dict[str, Any]],
+    lifecycle_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, list[str]]:
+    lifecycle_rows = lifecycle_rows or []
     all_rows = [*scan_rows, *trade_rows]
     return {
         "symbols": sorted({str(row["symbol"]) for row in all_rows if row.get("symbol")}),
@@ -211,6 +354,7 @@ def _filter_options(scan_rows: list[dict[str, Any]], trade_rows: list[dict[str, 
         "trade_statuses": sorted({str(row["status"]) for row in trade_rows if row.get("status")}),
         "directions": sorted({str(row["direction"]) for row in trade_rows if row.get("direction")}),
         "signal_sources": sorted({str(row["source_signal_type"]) for row in trade_rows if row.get("source_signal_type")}),
+        "lifecycle_phases": sorted({str(row["phase"]) for row in lifecycle_rows if row.get("phase")}),
     }
 
 
@@ -224,6 +368,7 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
         "entry_count_total": 0,
         "scan_rows": [],
         "trade_rows": [],
+        "lifecycle_rows": [],
         "filter_options": {
             "symbols": [],
             "environments": [],
@@ -234,6 +379,7 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
             "trade_statuses": [],
             "directions": [],
             "signal_sources": [],
+            "lifecycle_phases": [],
         },
         "warnings": [],
     }
@@ -243,6 +389,7 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
     entries = _iter_journal_entries(journal_path)
     scan_rows = _build_scan_rows(entries)
     trade_rows = _build_trade_rows(entries)
+    lifecycle_rows = _build_lifecycle_rows(entries)
     payload["latest_entry_timestamp"] = max(
         (
             str(entry.get("entry_timestamp"))
@@ -254,7 +401,8 @@ def build_journal_table(path: str | Path | None = None) -> dict[str, Any]:
     payload["entry_count_total"] = len(entries)
     payload["scan_rows"] = scan_rows
     payload["trade_rows"] = trade_rows
-    payload["filter_options"] = _filter_options(scan_rows, trade_rows)
+    payload["lifecycle_rows"] = lifecycle_rows
+    payload["filter_options"] = _filter_options(scan_rows, trade_rows, lifecycle_rows)
 
     payload_bytes = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
     if len(entries) > JOURNAL_WARNING_ROW_THRESHOLD:

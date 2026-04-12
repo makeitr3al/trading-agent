@@ -71,6 +71,87 @@ def test_build_journal_table_splits_scan_and_trade_rows(tmp_path: Path) -> None:
     assert payload["filter_options"]["symbols"] == ["BTC/USDC"]
     assert "signal_types" in payload["filter_options"]
     assert "scan_signals" in payload["filter_options"]
+    assert payload["lifecycle_rows"] == []
+    assert payload["filter_options"].get("lifecycle_phases") == []
+
+
+def test_build_journal_table_lifecycle_rows_grouped_by_signal_lifecycle_id(tmp_path: Path) -> None:
+    journal_path = tmp_path / "journal.jsonl"
+    sid = "01HZTESTLIFECYCLE01"
+    entries = [
+        {
+            "entry_type": "cycle",
+            "entry_date": "2026-03-29",
+            "entry_timestamp": "2026-03-29T08:00:00+00:00",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "decision_action": "PREPARE_TREND_ORDER",
+            "used_signals": ["TREND_LONG"],
+            "received_signals": [{"signal_type": "TREND_LONG", "is_valid": True, "reason": "ok"}],
+            "notes": "prep",
+            "signal_lifecycle_id": sid,
+        },
+        {
+            "entry_type": "order",
+            "entry_date": "2026-03-29",
+            "entry_timestamp": "2026-03-29T08:00:01+00:00",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "status": "submitted",
+            "direction": "long",
+            "source_signal_type": "TREND_LONG",
+            "signal_lifecycle_id": sid,
+        },
+        {
+            "entry_type": "trade",
+            "entry_date": "2026-03-29",
+            "entry_timestamp": "2026-03-29T08:05:00+00:00",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "status": "filled",
+            "direction": "long",
+            "source_signal_type": "TREND_LONG",
+            "fill_timestamp": "2026-03-29T08:05:00+00:00",
+            "signal_lifecycle_id": sid,
+        },
+        {
+            "entry_type": "trade_management",
+            "entry_date": "2026-03-29",
+            "entry_timestamp": "2026-03-29T09:00:00+00:00",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "status": "managed",
+            "direction": "long",
+            "stop_loss": 98.0,
+            "take_profit": 112.0,
+            "notes": "exit orders updated",
+            "signal_lifecycle_id": sid,
+        },
+        {
+            "entry_type": "trade",
+            "entry_date": "2026-03-29",
+            "entry_timestamp": "2026-03-29T10:00:00+00:00",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "status": "closed",
+            "direction": "long",
+            "close_timestamp": "2026-03-29T10:00:00+00:00",
+            "pnl": 1.5,
+            "signal_lifecycle_id": sid,
+        },
+    ]
+    journal_path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+
+    payload = build_journal_table(path=journal_path)
+
+    assert len(payload["lifecycle_rows"]) == 1
+    lr = payload["lifecycle_rows"][0]
+    assert lr["signal_lifecycle_id"] == sid
+    assert lr["phase"] == "closed"
+    assert lr["management_count"] == 1
+    assert lr["pnl"] == 1.5
+    assert len(lr["steps"]) >= 4
+    assert "lifecycle_phases" in payload["filter_options"]
 
 
 def test_build_journal_table_warns_for_large_entry_count(tmp_path: Path) -> None:

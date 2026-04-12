@@ -338,6 +338,7 @@ def main() -> None:
                 journal_path=scan_settings.journal_path,
                 executed_at=scan_executed_at,
                 challenge_id=scan_settings.challenge_id,
+                journal_emit_pending_order=False,
             )
             scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
             market_contexts.append(

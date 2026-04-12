@@ -317,6 +317,89 @@ def test_build_journal_entries_order_status_resting_when_broker_has_pending_id()
     assert entries[1].order_lifecycle_id == "broker-pending-99"
 
 
+def test_build_journal_entries_skips_order_row_when_journal_emit_pending_order_false() -> None:
+    order = _make_order()
+    strategy_result = StrategyRunResult(
+        trend_signal=SignalState(
+            signal_type=SignalType.TREND_LONG,
+            is_valid=True,
+            reason="trend signal detected",
+            entry=110.0,
+            stop_loss=100.0,
+            take_profit=130.0,
+        ),
+        countertrend_signal=None,
+        decision=DecisionResult(
+            action=DecisionAction.PREPARE_TREND_ORDER,
+            reason="valid trend signal",
+            selected_signal_type=SignalType.TREND_LONG.value,
+        ),
+        order=order,
+        updated_trade=None,
+    )
+    post_cycle_state = AgentState(pending_order=order, signal_lifecycle_id="sid-dry-run")
+    entries = build_journal_entries(
+        symbol="BTC/USDC",
+        environment="beta",
+        cycle_timestamp="2026-01-01T00:00:00+00:00",
+        strategy_result=strategy_result,
+        synced_state=AgentState(),
+        post_cycle_state=post_cycle_state,
+        previous_state=None,
+        submitted_order=False,
+        replaced_order=False,
+        closed_trade=False,
+        skipped_reason=None,
+        exit_price=100.5,
+        journal_emit_pending_order=False,
+        signal_lifecycle_id="sid-dry-run",
+    )
+    assert len(entries) == 1
+    assert entries[0].entry_type == "cycle"
+    assert entries[0].signal_lifecycle_id == "sid-dry-run"
+
+
+def test_build_journal_entries_trade_management_when_managed_exit_orders() -> None:
+    old_trade = _make_trade(entry=100.0, quantity=1.0, opened_at="2026-01-01T08:00:00+00:00").model_copy(
+        update={"stop_loss": 90.0, "take_profit": 120.0},
+    )
+    new_trade = old_trade.model_copy(update={"stop_loss": 92.0, "take_profit": 118.0})
+    strategy_result = StrategyRunResult(
+        trend_signal=None,
+        countertrend_signal=None,
+        decision=DecisionResult(
+            action=DecisionAction.NO_ACTION,
+            reason="adjust exits",
+            selected_signal_type=SignalType.TREND_LONG.value,
+        ),
+        order=None,
+        updated_trade=new_trade,
+    )
+    synced_state = AgentState(active_trade=old_trade)
+    post_cycle_state = AgentState(active_trade=new_trade, signal_lifecycle_id="sid-mgmt")
+    entries = build_journal_entries(
+        symbol="BTC/USDC",
+        environment="beta",
+        cycle_timestamp="2026-01-01T09:00:00+00:00",
+        strategy_result=strategy_result,
+        synced_state=synced_state,
+        post_cycle_state=post_cycle_state,
+        previous_state=None,
+        submitted_order=False,
+        replaced_order=False,
+        closed_trade=False,
+        skipped_reason=None,
+        exit_price=101.0,
+        managed_exit_orders=True,
+        signal_lifecycle_id="sid-mgmt",
+    )
+    assert any(e.entry_type == "trade_management" for e in entries)
+    mgmt = next(e for e in entries if e.entry_type == "trade_management")
+    assert mgmt.status == "managed"
+    assert mgmt.signal_lifecycle_id == "sid-mgmt"
+    assert "92.0" in (mgmt.notes or "") or "92" in (mgmt.notes or "")
+
+
 def test_build_journal_entries_broker_sync_fill_trade_without_simulated_filled_trade() -> None:
     pending = _make_order()
     previous_state = AgentState(pending_order=pending, pending_order_id="pending-legacy")

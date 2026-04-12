@@ -166,6 +166,9 @@ def build_journal_entries(
     skipped_reason: str | None,
     exit_price: float | None,
     executed_at: str | None = None,
+    journal_emit_pending_order: bool = True,
+    signal_lifecycle_id: str | None = None,
+    managed_exit_orders: bool = False,
 ) -> list[JournalEntry]:
     timestamp = cycle_timestamp
     entry_date = _entry_date(timestamp)
@@ -188,10 +191,11 @@ def build_journal_entries(
             unused_signals=_unused_signals(strategy_result),
             notes=strategy_result.decision.reason if strategy_result is not None else skipped_reason,
             lifecycle_id=cycle_lifecycle_id,
+            signal_lifecycle_id=signal_lifecycle_id,
         )
     ]
 
-    if pending_order is not None:
+    if pending_order is not None and journal_emit_pending_order:
         broker_pending_order_id = _resolve_broker_pending_order_id(post_cycle_state, synced_state)
         order_status = _derive_order_journal_status(
             skipped_reason=skipped_reason,
@@ -225,6 +229,7 @@ def build_journal_entries(
                 external_order_id=broker_pending_order_id,
                 broker_pending_order_id=broker_pending_order_id,
                 order_lifecycle_id=order_lifecycle_id,
+                signal_lifecycle_id=signal_lifecycle_id,
             )
         )
 
@@ -253,6 +258,7 @@ def build_journal_entries(
                 lifecycle_id=trade_lifecycle,
                 external_order_id=ft.position_id,
                 order_lifecycle_id=trade_lifecycle,
+                signal_lifecycle_id=signal_lifecycle_id,
             )
         )
 
@@ -282,6 +288,47 @@ def build_journal_entries(
                 lifecycle_id=trade_lifecycle,
                 external_order_id=trade.position_id,
                 order_lifecycle_id=trade_lifecycle,
+                signal_lifecycle_id=signal_lifecycle_id,
+            )
+        )
+
+    if (
+        managed_exit_orders
+        and synced_state is not None
+        and synced_state.active_trade is not None
+        and post_cycle_state is not None
+        and post_cycle_state.active_trade is not None
+    ):
+        old_t = synced_state.active_trade
+        new_t = post_cycle_state.active_trade
+        notes = (
+            f"exit orders updated: SL {old_t.stop_loss}->{new_t.stop_loss}, "
+            f"TP {old_t.take_profit}->{new_t.take_profit}"
+        )
+        entries.append(
+            JournalEntry(
+                entry_type="trade_management",
+                entry_date=entry_date,
+                entry_timestamp=timestamp,
+                executed_at=executed_at,
+                symbol=symbol,
+                environment=environment,
+                direction=old_t.direction.value,
+                fill_timestamp=None,
+                position_size=new_t.quantity,
+                entry_price=float(new_t.entry) if new_t.entry is not None else None,
+                stop_loss=float(new_t.stop_loss) if new_t.stop_loss is not None else None,
+                take_profit=float(new_t.take_profit) if new_t.take_profit is not None else None,
+                close_price=None,
+                pnl=None,
+                status="managed",
+                source_signal_type=(
+                    strategy_result.decision.selected_signal_type if strategy_result is not None else None
+                ),
+                notes=notes,
+                lifecycle_id=f"{symbol}_{new_t.position_id or timestamp}",
+                external_order_id=new_t.position_id,
+                signal_lifecycle_id=signal_lifecycle_id,
             )
         )
 
@@ -308,6 +355,7 @@ def build_journal_entries(
                 notes="active trade close executed",
                 lifecycle_id=f"{symbol}_{synced_active_trade.opened_at or timestamp}",
                 external_order_id=synced_active_trade.position_id,
+                signal_lifecycle_id=signal_lifecycle_id,
             )
         )
 
