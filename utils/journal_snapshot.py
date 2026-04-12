@@ -67,6 +67,9 @@ def _compact_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "fill_timestamp": entry.get("fill_timestamp"),
         "close_timestamp": entry.get("close_timestamp"),
         "notes": entry.get("notes"),
+        "external_order_id": entry.get("external_order_id"),
+        "broker_pending_order_id": entry.get("broker_pending_order_id"),
+        "order_lifecycle_id": entry.get("order_lifecycle_id"),
     }
 
 

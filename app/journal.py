@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from models.agent_state import AgentState
 from models.journal import JournalEntry, JournalSignalRecord, JournalUnusedSignalRecord
 from models.order import Order, OrderType
 from models.runner_result import StrategyRunResult
@@ -90,13 +91,75 @@ def _trade_pnl(active_trade: Trade | None, exit_price: float | None) -> float | 
     return round((active_trade.entry - exit_price) * active_trade.quantity, 8)
 
 
+def _resolve_broker_pending_order_id(
+    post_cycle_state: AgentState | None,
+    synced_state: AgentState | None,
+) -> str | None:
+    for state in (post_cycle_state, synced_state):
+        if state is None:
+            continue
+        raw = state.pending_order_id
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return None
+
+
+def _derive_order_journal_status(
+    *,
+    skipped_reason: str | None,
+    replaced_order: bool,
+    submitted_order: bool,
+    broker_pending_order_id: str | None,
+    synced_state: AgentState | None,
+) -> str:
+    if skipped_reason is not None:
+        return "not_executed"
+    if replaced_order:
+        return "replaced"
+    if submitted_order:
+        return "submitted"
+    if broker_pending_order_id is not None or (
+        synced_state is not None and synced_state.pending_order is not None
+    ):
+        return "resting"
+    return "prepared"
+
+
+def _should_emit_broker_sync_fill(
+    previous_state: AgentState | None,
+    synced_state: AgentState | None,
+    strategy_result: StrategyRunResult | None,
+) -> bool:
+    if strategy_result is None:
+        return False
+    if strategy_result.filled_trade is not None:
+        return False
+    if previous_state is None or synced_state is None:
+        return False
+    had_pending = previous_state.pending_order is not None or (
+        previous_state.pending_order_id is not None and bool(str(previous_state.pending_order_id).strip())
+    )
+    if not had_pending:
+        return False
+    if previous_state.active_trade is not None:
+        return False
+    if synced_state.active_trade is None:
+        return False
+    if synced_state.pending_order is not None:
+        return False
+    if synced_state.pending_order_id is not None and str(synced_state.pending_order_id).strip():
+        return False
+    return True
+
+
 def build_journal_entries(
     symbol: str,
     environment: str | None,
     cycle_timestamp: str,
     strategy_result: StrategyRunResult | None,
-    synced_active_trade: Trade | None,
-    pending_order: Order | None,
+    synced_state: AgentState | None,
+    post_cycle_state: AgentState | None,
+    previous_state: AgentState | None,
     submitted_order: bool,
     replaced_order: bool,
     closed_trade: bool,
@@ -107,6 +170,8 @@ def build_journal_entries(
     timestamp = cycle_timestamp
     entry_date = _entry_date(timestamp)
     cycle_lifecycle_id = f"{symbol}_{timestamp}"
+    synced_active_trade = synced_state.active_trade if synced_state is not None else None
+    pending_order = post_cycle_state.pending_order if post_cycle_state is not None else None
 
     entries = [
         JournalEntry(
@@ -127,13 +192,15 @@ def build_journal_entries(
     ]
 
     if pending_order is not None:
-        order_status = "prepared"
-        if replaced_order:
-            order_status = "replaced"
-        elif submitted_order:
-            order_status = "submitted"
-        elif skipped_reason is not None:
-            order_status = "not_executed"
+        broker_pending_order_id = _resolve_broker_pending_order_id(post_cycle_state, synced_state)
+        order_status = _derive_order_journal_status(
+            skipped_reason=skipped_reason,
+            replaced_order=replaced_order,
+            submitted_order=submitted_order,
+            broker_pending_order_id=broker_pending_order_id,
+            synced_state=synced_state,
+        )
+        order_lifecycle_id = broker_pending_order_id or cycle_lifecycle_id
 
         entries.append(
             JournalEntry(
@@ -155,10 +222,15 @@ def build_journal_entries(
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes=f"pending order via {pending_order.signal_source}",
                 lifecycle_id=cycle_lifecycle_id,
+                external_order_id=broker_pending_order_id,
+                broker_pending_order_id=broker_pending_order_id,
+                order_lifecycle_id=order_lifecycle_id,
             )
         )
 
     if strategy_result is not None and strategy_result.filled_trade is not None:
+        ft = strategy_result.filled_trade
+        trade_lifecycle = f"{symbol}_{ft.opened_at or timestamp}"
         entries.append(
             JournalEntry(
                 entry_type="trade",
@@ -167,18 +239,49 @@ def build_journal_entries(
                 executed_at=executed_at,
                 symbol=symbol,
                 environment=environment,
-                direction=strategy_result.filled_trade.direction.value,
-                fill_timestamp=strategy_result.filled_trade.opened_at or timestamp,
-                position_size=strategy_result.filled_trade.quantity,
-                entry_price=float(strategy_result.filled_trade.entry) if strategy_result.filled_trade.entry is not None else None,
-                stop_loss=float(strategy_result.filled_trade.stop_loss) if strategy_result.filled_trade.stop_loss is not None else None,
-                take_profit=float(strategy_result.filled_trade.take_profit) if strategy_result.filled_trade.take_profit is not None else None,
+                direction=ft.direction.value,
+                fill_timestamp=ft.opened_at or timestamp,
+                position_size=ft.quantity,
+                entry_price=float(ft.entry) if ft.entry is not None else None,
+                stop_loss=float(ft.stop_loss) if ft.stop_loss is not None else None,
+                take_profit=float(ft.take_profit) if ft.take_profit is not None else None,
                 close_price=None,
                 pnl=None,
                 status="filled",
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes="pending order filled into active trade",
-                lifecycle_id=f"{symbol}_{strategy_result.filled_trade.opened_at or timestamp}",
+                lifecycle_id=trade_lifecycle,
+                external_order_id=ft.position_id,
+                order_lifecycle_id=trade_lifecycle,
+            )
+        )
+
+    if _should_emit_broker_sync_fill(previous_state, synced_state, strategy_result):
+        trade = synced_state.active_trade
+        assert trade is not None
+        trade_lifecycle = f"{symbol}_{trade.opened_at or trade.position_id or timestamp}"
+        entries.append(
+            JournalEntry(
+                entry_type="trade",
+                entry_date=entry_date,
+                entry_timestamp=timestamp,
+                executed_at=executed_at,
+                symbol=symbol,
+                environment=environment,
+                direction=trade.direction.value,
+                fill_timestamp=trade.opened_at or timestamp,
+                position_size=trade.quantity,
+                entry_price=float(trade.entry) if trade.entry is not None else None,
+                stop_loss=float(trade.stop_loss) if trade.stop_loss is not None else None,
+                take_profit=float(trade.take_profit) if trade.take_profit is not None else None,
+                close_price=None,
+                pnl=None,
+                status="filled",
+                source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
+                notes="broker sync: pending entry cleared, active position opened",
+                lifecycle_id=trade_lifecycle,
+                external_order_id=trade.position_id,
+                order_lifecycle_id=trade_lifecycle,
             )
         )
 
@@ -204,6 +307,7 @@ def build_journal_entries(
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
                 notes="active trade close executed",
                 lifecycle_id=f"{symbol}_{synced_active_trade.opened_at or timestamp}",
+                external_order_id=synced_active_trade.position_id,
             )
         )
 

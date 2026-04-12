@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from app.journal import append_journal_entries
+from app.journal import append_journal_entries, build_journal_entries
 from app.trading_app import run_app_cycle
 from broker.health_guard import HealthGuardResult
 from config.strategy_config import StrategyConfig
@@ -271,6 +271,137 @@ def test_append_journal_entries_appends_to_existing_file(tmp_path: Path) -> None
     assert len(persisted) == 2
     assert persisted[0]["entry_type"] == "cycle"
     assert persisted[1]["entry_type"] == "trade"
+
+
+def test_build_journal_entries_order_status_resting_when_broker_has_pending_id() -> None:
+    order = _make_order()
+    strategy_result = StrategyRunResult(
+        trend_signal=SignalState(
+            signal_type=SignalType.TREND_LONG,
+            is_valid=True,
+            reason="trend signal detected",
+            entry=110.0,
+            stop_loss=100.0,
+            take_profit=130.0,
+        ),
+        countertrend_signal=None,
+        decision=DecisionResult(
+            action=DecisionAction.PREPARE_TREND_ORDER,
+            reason="valid trend signal",
+            selected_signal_type=SignalType.TREND_LONG.value,
+        ),
+        order=order,
+        updated_trade=None,
+    )
+    post_cycle_state = AgentState(pending_order=order)
+    synced_state = AgentState(pending_order_id="broker-pending-99")
+    entries = build_journal_entries(
+        symbol="BTC/USDC",
+        environment="beta",
+        cycle_timestamp="2026-01-01T00:00:00+00:00",
+        strategy_result=strategy_result,
+        synced_state=synced_state,
+        post_cycle_state=post_cycle_state,
+        previous_state=None,
+        submitted_order=False,
+        replaced_order=False,
+        closed_trade=False,
+        skipped_reason=None,
+        exit_price=100.5,
+        executed_at="2026-01-01T00:00:01+00:00",
+    )
+    assert entries[1].entry_type == "order"
+    assert entries[1].status == "resting"
+    assert entries[1].broker_pending_order_id == "broker-pending-99"
+    assert entries[1].external_order_id == "broker-pending-99"
+    assert entries[1].order_lifecycle_id == "broker-pending-99"
+
+
+def test_build_journal_entries_broker_sync_fill_trade_without_simulated_filled_trade() -> None:
+    pending = _make_order()
+    previous_state = AgentState(pending_order=pending, pending_order_id="pending-legacy")
+    active = _make_trade(
+        entry=108.0,
+        quantity=0.42,
+        opened_at="2026-01-01T12:00:00+00:00",
+    ).model_copy(update={"position_id": "pos-sync-1"})
+    synced_state = AgentState(active_trade=active, pending_order=None, pending_order_id=None)
+    strategy_result = StrategyRunResult(
+        trend_signal=None,
+        countertrend_signal=None,
+        decision=DecisionResult(
+            action=DecisionAction.NO_ACTION,
+            reason="holding",
+            selected_signal_type=SignalType.TREND_LONG.value,
+        ),
+        order=None,
+        updated_trade=None,
+        filled_trade=None,
+    )
+    post_cycle_state = AgentState(active_trade=active)
+    entries = build_journal_entries(
+        symbol="BTC/USDC",
+        environment="beta",
+        cycle_timestamp="2026-01-01T12:05:00+00:00",
+        strategy_result=strategy_result,
+        synced_state=synced_state,
+        post_cycle_state=post_cycle_state,
+        previous_state=previous_state,
+        submitted_order=False,
+        replaced_order=False,
+        closed_trade=False,
+        skipped_reason=None,
+        exit_price=109.0,
+    )
+    assert len(entries) == 2
+    assert entries[0].entry_type == "cycle"
+    trade_entry = entries[1]
+    assert trade_entry.entry_type == "trade"
+    assert trade_entry.status == "filled"
+    assert trade_entry.position_size == 0.42
+    assert trade_entry.external_order_id == "pos-sync-1"
+    assert trade_entry.notes == "broker sync: pending entry cleared, active position opened"
+
+
+def test_run_app_cycle_order_journal_resting_when_synced_has_pending_order_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order = _make_order()
+    strategy_result = StrategyRunResult(
+        trend_signal=SignalState(
+            signal_type=SignalType.TREND_LONG,
+            is_valid=True,
+            reason="trend signal detected",
+            entry=110.0,
+            stop_loss=100.0,
+            take_profit=130.0,
+        ),
+        countertrend_signal=None,
+        decision=DecisionResult(
+            action=DecisionAction.PREPARE_TREND_ORDER,
+            reason="valid trend signal",
+            selected_signal_type=SignalType.TREND_LONG.value,
+        ),
+        order=order,
+        updated_trade=None,
+    )
+    post_cycle_state = AgentState(pending_order=order)
+    synced = AgentState(pending_order_id="resting-on-book")
+    _patch_common(monkeypatch, synced, strategy_result, post_cycle_state)
+
+    result = run_app_cycle(
+        client=FakeClient(),
+        order_service=FakeOrderService(),
+        symbol="BTC/USDC",
+        candles=_make_candles(),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=False,
+        journal_path=None,
+    )
+    order_entry = result.journal_entries[1]
+    assert order_entry.status == "resting"
+    assert order_entry.broker_pending_order_id == "resting-on-book"
 
 
 def test_run_app_cycle_uses_unknown_environment_when_client_has_no_config(monkeypatch: pytest.MonkeyPatch) -> None:
