@@ -1,0 +1,159 @@
+# Architecture manifest — Trading Agent
+
+**Normative document.** Use this to challenge designs, diffs, and refactors: changes should respect the contracts below or update this file in the same pull request when the contract intentionally changes.
+
+**Companion:** Operational setup, env vars, and day-to-day conventions live in [CLAUDE.md](../CLAUDE.md). This manifest focuses on **structure, dependencies, data flow, and safety invariants**.
+
+---
+
+## 1. Purpose and scope
+
+**In scope**
+
+- Rule-based trading loop: market data → regime/signals → decisions → (optional) Propr execution and journaling.
+- Single-account, per-cycle orchestration via `app.trading_app.run_app_cycle`.
+- Execution only through the **Propr** API; primary market data from **Hyperliquid** (REST; WebSocket possible later).
+
+**Out of scope (by design today)**
+
+- Multi-tenant or distributed execution.
+- Guaranteed intrabar ordering, partial-fill simulation in strategy (see TODOs in code).
+- Replacing CLAUDE.md; this file does not duplicate full env tutorials.
+
+---
+
+## 2. Layering rules (normative)
+
+### 2.1 Package roles
+
+| Layer | Path | Responsibility |
+|--------|------|----------------|
+| Runtime / orchestration | `app/` | One cycle: call strategy, guards, broker I/O, journal. |
+| Strategy | `strategy/` | Indicators-driven regime, signals, decisions, sizing logic; no direct HTTP to Propr. |
+| Broker integration | `broker/` | Propr client/SDK, orders, execution helpers, state sync, symbol/spec, health/asset guards, registry. |
+| Configuration | `config/` | Typed settings (Propr, Hyperliquid, strategy). |
+| Domain models | `models/` | Shared Pydantic/dataclass types (candles, orders, state, journal entries). |
+| Indicators | `indicators/` | Pure math (e.g. Bollinger, MACD). |
+| Data access | `data/providers/` | `CandleDataProvider` implementations (live, golden, historical). |
+| Utilities | `utils/` | Env loading, runtime status/overrides, operator tooling. |
+| Alternate Propr layer | `propr/` | Parallel modules overlapping `broker/` (legacy / alternate path). |
+
+### 2.2 Allowed dependency direction
+
+- `models`, `config`, `indicators`: may be imported from any higher layer; they must not import `app`, `broker`, or `strategy` orchestration.
+- `strategy` should depend on `models`, `config`, `indicators`, and `data` types — **not** on Propr HTTP clients or `app`.
+- **Known exception:** `strategy/position_sizer.py` imports `broker.symbol_service` for quantity rounding. New code should avoid widening broker imports from `strategy`; prefer shared pure helpers in `models` or `utils` when tightening boundaries.
+- `app` may import `strategy`, `broker`, `config`, `models`, `utils`.
+- `broker` may import `config`, `models`, `utils`; must not import `app` or `strategy`.
+- `data/providers` may import `config`, `models`; must not import `app` or `strategy`.
+
+### 2.3 `broker/` vs `propr/`
+
+- **Canonical path for live trading:** `app/trading_app.py` uses **`broker.*`** only for Propr execution and sync.
+- **`propr/`** remains in the tree with overlapping names (`client`, `order_service`, `state_sync`, `execution_bridge`). Treat **`broker/`** as the source of truth for new work until the two trees are consolidated. New features must not introduce additional dependence on `propr/` from `app/` without an explicit migration decision and manifest update.
+
+---
+
+## 3. Runtime and entry points
+
+- **Production-style loop:** `managed_runner.py` → `deploy/raspberry_pi/managed_runner.py` → `run_app_cycle` from `app.trading_app`.
+- **Other runners:** e.g. `scripts/scheduled_runner.py`, `scripts/propr_live_app_cycle.py` — same core cycle when they call `run_app_cycle`.
+- **Tests and scripts:** `tests/`, `scripts/` (smoke, golden, scan, submit/cancel tests).
+- **`main.py`:** Convenience / demo around `ProprClient`; **not** the main trading loop.
+
+---
+
+## 4. Data flow
+
+```mermaid
+flowchart LR
+  subgraph runtime [Runtime]
+    MR[managed_runner]
+    TA[trading_app.run_app_cycle]
+  end
+  subgraph strategy [Strategy]
+    ENG[engine.run_agent_cycle]
+  end
+  subgraph broker [Broker]
+    SS[state_sync]
+    OS[order_service]
+    EX[execution]
+  end
+  subgraph external [External]
+    HL[Hyperliquid]
+    PR[Propr API]
+  end
+  MR --> TA
+  TA --> ENG
+  TA --> SS
+  TA --> OS
+  TA --> EX
+  SS --> PR
+  OS --> PR
+  EX --> PR
+  ENG --> HL
+```
+
+1. **Input:** `DataBatch` from a `CandleDataProvider` (`data/providers/base.py`: candles, optional symbol, config, balance, active trade, `AgentState`).
+2. **Strategy:** `strategy.engine.run_agent_cycle` runs signal/regime/decision logic and produces a `StrategyRunResult` (and order intent shapes as defined by models/strategy).
+3. **State:** `broker.state_sync.sync_agent_state_from_propr` refreshes `AgentState` from Propr when the cycle uses live broker state.
+4. **Execution:** Guards in `app` + `broker.execution` / `broker.order_service` submit, replace, or cancel on Propr as policy allows.
+5. **Observability:** `app.journal` appends structured journal entries.
+
+**Provider contract (invariant to preserve):** Implementations must return candles and metadata consistent with `CandleDataProvider.get_data()` → `DataBatch`. Changes to required fields, ordering, or timezone semantics must update providers, callers, and tests together.
+
+---
+
+## 5. Execution and safety invariants
+
+These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-negotiable architecture constraints**.
+
+- **Decimals:** Money and quantity paths in the broker layer use `Decimal`, not `float`.
+- **Identifiers:** New orders use ULID as `intentId` where applicable.
+- **Environments:** Default development on `PROPR_ENV=beta`. Production requires `PROPR_PROD_CONFIRM=YES` in `.env` (never commit that flag as enabled in examples).
+- **Submit gates:** Real submits require explicit flags (`MANUAL_ALLOW_SUBMIT`, `RUNNER_ALLOW_SUBMIT`, `SCAN_ALLOW_SUBMIT`, etc., per context). **`DATA_SOURCE=golden` hard-blocks submit** regardless of flags.
+- **SymbolSpec:** Live submit is blocked if symbol specification cannot be loaded.
+- **HTTP success:** Treat `200` and `201` as success for create/cancel where applicable.
+- **Rounding:** Quantity from `quantity_decimals` on `SymbolSpec`; price rounding only when `price_decimals` is available.
+- **Positions:** `quantity == 0` positions are not treated as active trades after sync.
+- **Beta limitation:** Standalone `BUY_STOP` / `SELL_STOP` entries may be rejected (`conditional_order_requires_position_or_group`); architecture must keep this visible in execution policy, not hidden inside strategy-only code.
+
+---
+
+## 6. Extension points
+
+- **New signal or regime rule:** Implement inside `strategy/` using `models` and `config`; expose through `agent_cycle` / `decision_engine` as appropriate. Do not add Propr calls in `strategy/`.
+- **New guard:** Add evaluation in `app/risk_guard.py`, `broker/asset_guard.py`, or `broker/health_guard.py` and invoke from `run_app_cycle` (or dedicated broker helper called from `app`).
+- **New data source:** New class under `data/providers/` satisfying `CandleDataProvider`; wire via env/factory in the same places existing providers are selected.
+- **New order type or mapper:** Extend `broker/order_service.py`, `broker/propr_sdk.py`, or related mappers; keep `intentId` and Decimal rules.
+
+---
+
+## 7. Anti-patterns
+
+- Importing `ProprClient` or performing REST calls from `strategy/` or `indicators/`.
+- Using `float` for sizes or prices in broker execution paths.
+- Bypassing `run_app_cycle` guards “just for a script” without using the documented script flags and non-golden data rules.
+- Adding a second silent path to Propr alongside `broker/` from `app/` (e.g. wiring `propr/` in parallel) without updating this manifest.
+- Committing credentials, production confirm flags, or `artifacts/` contents intended to stay local.
+
+---
+
+## 8. Change checklist (PR / design review)
+
+Answer explicitly when touching cycle behavior, layering, or execution policy:
+
+- [ ] Does the change respect the dependency direction in §2 (no new forbidden imports)?
+- [ ] If `propr/` is used or extended, is `broker/` still the canonical app path, and is the duplication documented?
+- [ ] Are submits still impossible under `DATA_SOURCE=golden`?
+- [ ] Are new quantity/price paths using `Decimal` in the broker layer?
+- [ ] Do tests cover the new branch without requiring real Propr prod?
+- [ ] If public cycle behavior or safety rules changed, is **this manifest** (or CLAUDE.md for ops-only detail) updated in the same PR?
+
+---
+
+## Maintenance rule
+
+Any pull request that changes **public per-cycle behavior**, **layer imports**, or **submit/safety policy** must update this manifest in the same PR when the architectural contract changes. Purely internal refactors that preserve the above contracts do not require manifest edits.
+
+**Version:** Document creation tracks repository state; bump or date this section when making substantive contract changes.

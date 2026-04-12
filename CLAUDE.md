@@ -21,7 +21,6 @@ broker/         # propr_client.py, propr_sdk.py, execution, order_service, state
 config/         # propr_config.py, hyperliquid_config.py, strategy_config.py
 indicators/     # bollinger.py, macd.py (Indikator-Implementierungen)
 models/         # Datenmodelle: candle, decision, order, regime, signal, symbol_spec, trade, ...
-propr/          # alternativer Propr-Client-Layer (client, execution_bridge, order_mapper, ...)
 deploy/         # Deployment-Artefakte; deploy/raspberry_pi/managed_runner.py (Haupt-Runner)
 ha_addons/      # Home Assistant Add-on Dateien
 scripts/        # manuelle Test- und Run-Skripte
@@ -30,6 +29,8 @@ utils/          # env_loader, runtime_status, runtime_overrides, journal_snapsho
 tests/          # pytest-basiert, Golden Fixtures
 artifacts/      # Journal, Status, Logs (nicht committen)
 ```
+
+**Normative Architektur (Schichten, Datenfluss, Safety-Invarianten, PR-Checkliste):** [docs/ARCHITECTURE_MANIFEST.md](docs/ARCHITECTURE_MANIFEST.md) — zentrales Dokument, gegen das Entwürfe und Diffs geprüft werden; CLAUDE.md bleibt der operative Leitfaden (Setup, Env, Tests).
 
 ---
 
