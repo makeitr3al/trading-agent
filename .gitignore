@@ -31,6 +31,10 @@ Thumbs.db
 .idea/
 trading-agent.code-workspace
 
+# Cursor (local rules, agent prompts — not part of the shipped app)
+.cursor/
+AGENTS.md
+
 # pytest / cache
 .pytest_cache/
 .coverage
