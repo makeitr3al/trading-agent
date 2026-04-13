@@ -111,7 +111,6 @@ def build_manual_order_submission_preview(
     internal_stop_loss: float | int | str | Decimal | None = None,
     internal_take_profit: float | int | str | Decimal | None = None,
     position_id: str | None = None,
-    order_group_id: str | None = None,
 ) -> dict[str, Any]:
     asset, base, quote = _parse_symbol(symbol)
     normalized_side = _require_non_empty(side, "side").lower()
@@ -134,10 +133,8 @@ def build_manual_order_submission_preview(
         "reduce_only": reduce_only,
         "close_position": close_position,
         "intent_id": generate_intent_id(),
-        # Beta fallback: the public docs do not currently document these create-order fields,
-        # but the sandbox may require one of them for conditional exit orders.
+        # The sandbox may require position_id for conditional exit orders.
         "position_id": position_id,
-        "order_group_id": order_group_id,
     }
     if price is not None:
         params["price"] = _serialize_decimal(price)
@@ -303,7 +300,7 @@ def build_sdk_create_order_params(submission_preview: dict[str, Any]) -> dict[st
     return {
         key: value
         for key, value in submission_preview.items()
-        if key not in {"internal_stop_loss", "internal_take_profit"}
+        if key not in {"internal_stop_loss", "internal_take_profit"} and value is not None
     }
 
 

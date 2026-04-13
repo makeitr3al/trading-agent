@@ -194,7 +194,6 @@ def test_build_manual_order_submission_preview_includes_position_id(monkeypatch:
     )
 
     assert params["position_id"] == "position-123"
-    assert params["order_group_id"] is None
 
 
 
@@ -354,6 +353,23 @@ def test_build_sdk_create_order_params_keeps_intent_id_and_position_id_for_docum
         "asset": "BTC/USDC",
         "position_id": "position-123",
     }
+
+
+
+def test_build_sdk_create_order_params_drops_none_values() -> None:
+    params = build_sdk_create_order_params(
+        {
+            "intent_id": "x",
+            "side": "buy",
+            "price": None,
+            "trigger_price": None,
+            "internal_stop_loss": "1",
+        }
+    )
+
+    assert "price" not in params
+    assert "trigger_price" not in params
+    assert "internal_stop_loss" not in params
 
 
 

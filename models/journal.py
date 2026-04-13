@@ -42,3 +42,5 @@ class JournalEntry(BaseModel):
     broker_pending_order_id: str | None = None
     order_lifecycle_id: str | None = None
     signal_lifecycle_id: str | None = None
+    scan_effective_submit_allowed: bool | None = None
+    scan_cycle_phase: str | None = None

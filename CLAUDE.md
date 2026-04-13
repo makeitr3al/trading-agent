@@ -105,14 +105,14 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 - **Golden Scenarios**: fachliche Fixtures für alle Signaltypen — deterministisch, kein Submit
 - **Smoke Test**: read-only gegen Beta-API (`scripts/propr_smoke_test.py`)
 - **Write Test**: Beta-Submit + direkter Cancel (`scripts/propr_submit_cancel_test.py`)
-- **Order Types Test**: Beta-Verifikation aller Order-Typen (`scripts/propr_order_types_test.py`)
+- **Order Types Test**: Beta-Verifikation aller Order-Typen (`scripts/propr_order_types_test.py`) — inkl. Versuch standalone `BUY_STOP`/`SELL_STOP`; bei Erfolg primär WebSocket-Bestätigung (orders), sonst REST-Fallback; bei Ablehnung 13056 wird übersprungen und der Lauf setzt fort
 - **Run Suite**: `python run_test_suite.py --suite <name>` — verfügbare Suites:
   - `core` — fokussierter Regressionstest (Bot-Logik + Runtime-Helpers)
   - `unit` — vollständige pytest-Suite unter `tests/`
   - `preflight` — empfohlener Erststarttest: unit + golden dry-run + smoke test *(Standard für Pi/HA)*
   - `beta_write` — Beta-Write-Verifikation mit echten Orders (opt-in, `--allow-live-beta-writes`)
 
-Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werden mit `conditional_order_requires_position_or_group` abgelehnt.
+Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werden von der Propr-API mit `conditional_order_requires_position_or_group` (HTTP 400, Code 13056) abgelehnt — unabhängig davon, dass `orderGroupId` in Responses oft `null` ist. Der Agent blockiert diese Submits auf Beta weiterhin vorab (`trading_app`), damit keine nutzlosen API-Fehlschläge entstehen.
 
 ---
 

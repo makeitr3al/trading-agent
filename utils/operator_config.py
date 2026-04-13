@@ -13,7 +13,7 @@ DEFAULT_OPERATOR_CONFIG = {
     "mode": "scharf",
     "environment": "beta",
     "leverage": 1,
-    "markets": "BTC,ETH,SOL,XRP,EUR,JPY",
+    "markets": "BTC,ETH,SOL,XRP",
     "scheduling_enabled": False,
     "schedule_time": "07:00",
     "challenge_id": "",
@@ -24,7 +24,7 @@ SUPPORTED_ENVIRONMENTS = ("beta", "prod")
 DEFAULT_MARKETS = DEFAULT_OPERATOR_CONFIG["markets"]
 LEGACY_DEFAULT_MARKETS = {
     "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL",
-    "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP,EUR/USDC:EUR,JPY/USDC:JPY",
+    "BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP",
 }
 
 

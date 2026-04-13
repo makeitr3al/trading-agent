@@ -113,7 +113,7 @@ Das Skript:
 - laedt die aktive Challenge
 - holt einen Referenzpreis ueber Hyperliquid Historical
 - testet `BUY_LIMIT` und `SELL_LIMIT` als frei stehende Pending-Orders
-- behandelt `BUY_STOP` und `SELL_STOP` aktuell als bekannte Beta-Einschraenkung fuer standalone conditional entries
+- versucht `BUY_STOP` und `SELL_STOP` als standalone `stop_limit`; bei erfolgreichem Submit zuerst WebSocket-Bestaetigung (orders-Kanal), sonst REST; bei API-Fehler `conditional_order_requires_position_or_group` (13056) protokolliert es `SKIPPED_API_REQUIRES_POSITION_OR_GROUP` und macht weiter
 - oeffnet danach zusaetzlich testweise eine kleine Market-Long-Position
 - erstellt dafuer eine `take_profit_limit`-Exit-Order und eine `stop_market`-Exit-Order
 - schliesst den offenen Trade anschliessend wieder per Market-Close

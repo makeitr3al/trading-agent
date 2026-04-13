@@ -40,6 +40,49 @@ def decide_next_action(
         )
         reason_prefix = "valid countertrend" if valid_countertrend else "outer band exit trigger"
 
+        if (
+            valid_countertrend
+            and countertrend_signal is not None
+            and countertrend_signal.signal_bar_close is not None
+        ):
+            c_sig = float(countertrend_signal.signal_bar_close)
+            if active_trade.direction == TradeDirection.LONG:
+                if current_price > c_sig:
+                    return DecisionResult(
+                        action=DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
+                        reason=f"{reason_prefix} locks trend stop to countertrend signal-bar close",
+                        selected_signal_type=selected_signal_type,
+                    )
+                if current_price < c_sig:
+                    return DecisionResult(
+                        action=DecisionAction.CLOSE_TREND_TRADE,
+                        reason=f"{reason_prefix} closes active trend trade (price below signal-bar close)",
+                        selected_signal_type=selected_signal_type,
+                    )
+                return DecisionResult(
+                    action=DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
+                    reason=f"{reason_prefix} locks trend stop to signal-bar close (price at bar close)",
+                    selected_signal_type=selected_signal_type,
+                )
+
+            if current_price < c_sig:
+                return DecisionResult(
+                    action=DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
+                    reason=f"{reason_prefix} locks trend stop to countertrend signal-bar close",
+                    selected_signal_type=selected_signal_type,
+                )
+            if current_price > c_sig:
+                return DecisionResult(
+                    action=DecisionAction.CLOSE_TREND_TRADE,
+                    reason=f"{reason_prefix} closes active trend trade (price above signal-bar close)",
+                    selected_signal_type=selected_signal_type,
+                )
+            return DecisionResult(
+                action=DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
+                reason=f"{reason_prefix} locks trend stop to signal-bar close (price at bar close)",
+                selected_signal_type=selected_signal_type,
+            )
+
         if _can_tighten_stop_to_last_close(active_trade, current_price):
             return DecisionResult(
                 action=DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,

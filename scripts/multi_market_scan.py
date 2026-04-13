@@ -77,6 +77,24 @@ def _select_execution_candidates(scan_results: list[dict[str, Any]], available_s
     )[:available_slots]
 
 
+def _failed_market_summary(symbol: str, coin: str, exc: Exception) -> dict[str, Any]:
+    print(f"Market: {symbol} ({coin})")
+    print(f"  scan_failed: {exc}")
+    return {
+        "symbol": symbol,
+        "coin": coin,
+        "decision_action": None,
+        "selected_signal_type": None,
+        "trend_signal_valid": None,
+        "countertrend_signal_valid": None,
+        "pending_order_present": False,
+        "active_trade_present": False,
+        "skipped_reason": str(exc),
+        "best_signal_strength": float("-inf"),
+        "result": None,
+    }
+
+
 def _print_market_summary(symbol: str, coin: str, result: Any, live_buy_spread: float) -> dict[str, Any]:
     strategy_result = getattr(result, "strategy_result", None)
     post_cycle_state = getattr(result, "post_cycle_state", None)
@@ -312,44 +330,49 @@ def main() -> None:
             symbol = asset_info.asset
             coin = asset_info.coin or asset_info.base
             print(f"Scanning asset={asset_ticker} coin={coin}")
-            data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
-                data_source=data_source_settings.data_source,
-                golden_scenario=data_source_settings.golden_scenario,
-                hyperliquid_base_config=hyperliquid_base_config,
-                coin=coin,
-                require_for_execution=False,
-            )
-            print(f"  source_name: {data_batch.source_name}")
-            print(f"  live_buy_spread: {live_buy_spread}")
+            try:
+                data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
+                    data_source=data_source_settings.data_source,
+                    golden_scenario=data_source_settings.golden_scenario,
+                    hyperliquid_base_config=hyperliquid_base_config,
+                    coin=coin,
+                    require_for_execution=False,
+                )
+                print(f"  source_name: {data_batch.source_name}")
+                print(f"  live_buy_spread: {live_buy_spread}")
 
-            result = run_app_cycle(
-                client=client,
-                order_service=order_service,
-                symbol=symbol,
-                candles=data_batch.candles,
-                config=strategy_config,
-                account_balance=data_batch.account_balance or 10000.0,
-                previous_state=data_batch.agent_state,
-                require_healthy_core=scan_settings.require_healthy_core,
-                allow_execution=False,
-                desired_leverage=scan_settings.leverage,
-                symbol_spec=None,
-                data_source=data_source_settings.data_source,
-                journal_path=scan_settings.journal_path,
-                executed_at=scan_executed_at,
-                challenge_id=scan_settings.challenge_id,
-                journal_emit_pending_order=False,
-            )
-            scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
-            market_contexts.append(
-                {
-                    "symbol": symbol,
-                    "coin": coin,
-                    "data_batch": data_batch,
-                    "strategy_config": strategy_config,
-                    "live_buy_spread": live_buy_spread,
-                }
-            )
+                result = run_app_cycle(
+                    client=client,
+                    order_service=order_service,
+                    symbol=symbol,
+                    candles=data_batch.candles,
+                    config=strategy_config,
+                    account_balance=data_batch.account_balance or 10000.0,
+                    previous_state=data_batch.agent_state,
+                    require_healthy_core=scan_settings.require_healthy_core,
+                    allow_execution=False,
+                    desired_leverage=scan_settings.leverage,
+                    symbol_spec=None,
+                    data_source=data_source_settings.data_source,
+                    journal_path=scan_settings.journal_path,
+                    executed_at=scan_executed_at,
+                    challenge_id=scan_settings.challenge_id,
+                    journal_emit_pending_order=False,
+                    scan_effective_submit_allowed=effective_allow_submit,
+                    scan_cycle_phase="dry_run",
+                )
+                scan_results.append(_print_market_summary(symbol, coin, result, live_buy_spread))
+                market_contexts.append(
+                    {
+                        "symbol": symbol,
+                        "coin": coin,
+                        "data_batch": data_batch,
+                        "strategy_config": strategy_config,
+                        "live_buy_spread": live_buy_spread,
+                    }
+                )
+            except Exception as exc:
+                scan_results.append(_failed_market_summary(symbol, coin, exc))
 
         markets_with_valid_trend = [item for item in scan_results if item["trend_signal_valid"]]
         markets_with_valid_countertrend = [item for item in scan_results if item["countertrend_signal_valid"]]
@@ -378,7 +401,7 @@ def main() -> None:
                 _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
             return
 
-        reference_result = scan_results[0]["result"] if scan_results else None
+        reference_result = next((row["result"] for row in scan_results if row.get("result")), None)
         synced_state = getattr(reference_result, "synced_state", None)
         currently_open_slots = 0
         if synced_state is not None:
@@ -426,6 +449,8 @@ def main() -> None:
                 journal_path=scan_settings.journal_path,
                 executed_at=scan_executed_at,
                 challenge_id=scan_settings.challenge_id,
+                scan_effective_submit_allowed=effective_allow_submit,
+                scan_cycle_phase="execute",
             )
             print(
                 f"Executed {symbol}: submitted={execution_result.submitted_order}, replaced={execution_result.replaced_order}, "

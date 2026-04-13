@@ -169,6 +169,8 @@ def build_journal_entries(
     journal_emit_pending_order: bool = True,
     signal_lifecycle_id: str | None = None,
     managed_exit_orders: bool = False,
+    scan_effective_submit_allowed: bool | None = None,
+    scan_cycle_phase: str | None = None,
 ) -> list[JournalEntry]:
     timestamp = cycle_timestamp
     entry_date = _entry_date(timestamp)
@@ -192,6 +194,8 @@ def build_journal_entries(
             notes=strategy_result.decision.reason if strategy_result is not None else skipped_reason,
             lifecycle_id=cycle_lifecycle_id,
             signal_lifecycle_id=signal_lifecycle_id,
+            scan_effective_submit_allowed=scan_effective_submit_allowed,
+            scan_cycle_phase=scan_cycle_phase,
         )
     ]
 
@@ -205,6 +209,10 @@ def build_journal_entries(
             synced_state=synced_state,
         )
         order_lifecycle_id = broker_pending_order_id or cycle_lifecycle_id
+
+        order_notes = f"pending order via {pending_order.signal_source}"
+        if skipped_reason:
+            order_notes = f"{order_notes}; {skipped_reason}"
 
         entries.append(
             JournalEntry(
@@ -224,7 +232,7 @@ def build_journal_entries(
                 pnl=None,
                 status=order_status,
                 source_signal_type=(strategy_result.decision.selected_signal_type if strategy_result is not None else None),
-                notes=f"pending order via {pending_order.signal_source}",
+                notes=order_notes,
                 lifecycle_id=cycle_lifecycle_id,
                 external_order_id=broker_pending_order_id,
                 broker_pending_order_id=broker_pending_order_id,

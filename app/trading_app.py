@@ -41,6 +41,7 @@ MAX_OPEN_ORDER_TRADE_SLOTS = 3
 
 
 def _beta_blocks_standalone_entry_order(order: Order | None, environment: str | None) -> bool:
+    """Skip API submit for standalone stop-limit entries on Beta: Propr returns 13056 conditional_order_requires_position_or_group."""
     if (environment or "").strip().lower() != "beta" or order is None:
         return False
     return order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
@@ -174,6 +175,8 @@ def _build_app_cycle_result(
     symbol_spec_loaded: bool = False,
     executed_at: str | None = None,
     journal_emit_pending_order: bool = True,
+    scan_effective_submit_allowed: bool | None = None,
+    scan_cycle_phase: str | None = None,
 ) -> AppCycleResult:
     result = AppCycleResult(
         challenge_context=challenge_context,
@@ -219,6 +222,8 @@ def _build_app_cycle_result(
         journal_emit_pending_order=journal_emit_pending_order,
         signal_lifecycle_id=signal_lifecycle_id,
         managed_exit_orders=managed_exit_orders,
+        scan_effective_submit_allowed=scan_effective_submit_allowed,
+        scan_cycle_phase=scan_cycle_phase,
     )
     result = result.model_copy(update={"journal_entries": journal_entries})
 
@@ -252,6 +257,8 @@ class _CycleContext:
     symbol_spec_loaded: bool
     challenge_id: str | None = None
     journal_emit_pending_order: bool = True
+    scan_effective_submit_allowed: bool | None = None
+    scan_cycle_phase: str | None = None
     resolved_balance: float | None = None
 
     # Accumulated state — mutated by phases
@@ -296,6 +303,8 @@ class _CycleContext:
             symbol_spec_loaded=self.symbol_spec_loaded,
             executed_at=self.executed_at,
             journal_emit_pending_order=self.journal_emit_pending_order,
+            scan_effective_submit_allowed=self.scan_effective_submit_allowed,
+            scan_cycle_phase=self.scan_cycle_phase,
         )
 
 
@@ -522,6 +531,8 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
                     "pending_order_id": _extract_external_order_id(ctx.execution_response),
                 }
             )
+        elif ctx.skipped_reason is None:
+            ctx.skipped_reason = "pending order submit returned no confirmation"
 
     return None
 
@@ -544,6 +555,8 @@ def run_app_cycle(
     executed_at: str | None = None,
     challenge_id: str | None = None,
     journal_emit_pending_order: bool = True,
+    scan_effective_submit_allowed: bool | None = None,
+    scan_cycle_phase: str | None = None,
 ) -> AppCycleResult:
     ctx = _CycleContext(
         client=client,
@@ -565,6 +578,8 @@ def run_app_cycle(
         executed_at=executed_at,
         challenge_id=challenge_id,
         journal_emit_pending_order=journal_emit_pending_order,
+        scan_effective_submit_allowed=scan_effective_submit_allowed,
+        scan_cycle_phase=scan_cycle_phase,
     )
 
     for phase in [

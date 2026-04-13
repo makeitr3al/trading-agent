@@ -18,7 +18,11 @@ from strategy.signal_rules import (
     is_close_deep_outside_bands,
     is_close_in_outer_band_sweet_spot,
 )
-from strategy.trade_manager import tighten_trend_stop_to_last_close, update_active_trade
+from strategy.trade_manager import (
+    tighten_trend_stop_to_last_close,
+    tighten_trend_stop_to_signal_bar_close,
+    update_active_trade,
+)
 from strategy.trend_signal_detector import detect_trend_signal
 
 # TODO: Later manage pending orders across multiple strategy cycles.
@@ -164,7 +168,14 @@ def run_strategy_cycle(
     updated_trade = None
     close_active_trade = False
     if active_trade is not None:
-        if decision.action == DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE:
+        if decision.action == DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE:
+            if countertrend_signal is not None and countertrend_signal.signal_bar_close is not None:
+                updated_trade = tighten_trend_stop_to_signal_bar_close(
+                    active_trade, float(countertrend_signal.signal_bar_close)
+                )
+            else:
+                updated_trade = tighten_trend_stop_to_last_close(active_trade, current_price)
+        elif decision.action == DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE:
             updated_trade = tighten_trend_stop_to_last_close(active_trade, current_price)
         elif decision.action in (
             DecisionAction.CLOSE_TREND_TRADE,

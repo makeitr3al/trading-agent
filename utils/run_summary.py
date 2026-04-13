@@ -51,6 +51,15 @@ def _iter_journal_entries(path: str | Path | None) -> list[dict[str, Any]]:
     return entries
 
 
+def _count_valid_signals_from_cycles(cycle_entries: list[dict[str, Any]]) -> int:
+    total = 0
+    for entry in cycle_entries:
+        for rec in entry.get("received_signals") or []:
+            if isinstance(rec, dict) and rec.get("is_valid") is True:
+                total += 1
+    return total
+
+
 def _entries_for_window(path: str | Path | None, started_at: str, finished_at: str) -> list[dict[str, Any]]:
     started_dt = _parse_iso8601(started_at)
     finished_dt = _parse_iso8601(finished_at)
@@ -164,6 +173,9 @@ def _build_live_run_summary(
     order_statuses = Counter(str(entry.get("status")) for entry in order_entries if entry.get("status"))
     trade_statuses = Counter(str(entry.get("status")) for entry in trade_entries if entry.get("status"))
     skipped_reasons = Counter(str(entry.get("skipped_reason")) for entry in cycle_entries if entry.get("skipped_reason"))
+    valid_signals_detected = _count_valid_signals_from_cycles(cycle_entries)
+    orders_submitted = sum(1 for e in order_entries if e.get("status") == "submitted")
+    orders_prepared = sum(1 for e in order_entries if e.get("status") == "prepared")
 
     success = exit_code == 0
     title = f"Scharf-Lauf {'abgeschlossen' if success else 'fehlgeschlagen'}"
@@ -182,6 +194,8 @@ def _build_live_run_summary(
     ]
     if skipped_reasons:
         summary_lines.append(f"Skip-Gruende: {_format_counts(skipped_reasons)}")
+    summary_lines.append(f"Valide Signale (received): {valid_signals_detected}")
+    summary_lines.append(f"Orders submitted/prepared: {orders_submitted}/{orders_prepared}")
     if latest_entry is not None:
         latest_symbol = latest_entry.get("symbol") or "-"
         summary_lines.append(f"Letzter Eintrag: {latest_symbol} | {latest_outcome or '-'}")
@@ -189,6 +203,8 @@ def _build_live_run_summary(
     notification_message = (
         f"Scharf-Lauf ({environment}) {'abgeschlossen' if success else 'fehlgeschlagen'}."
         f" Maerkte: {len(symbols)}."
+        f" Valide Signale: {valid_signals_detected}."
+        f" Orders submitted/prepared: {orders_submitted}/{orders_prepared}."
         f" Orders: {_format_counts(order_statuses)}."
         f" Trades: {_format_counts(trade_statuses)}."
     )
@@ -211,6 +227,9 @@ def _build_live_run_summary(
         "cycle_count": len(cycle_entries),
         "order_count": len(order_entries),
         "trade_count": len(trade_entries),
+        "valid_signals_detected": valid_signals_detected,
+        "orders_submitted_count": orders_submitted,
+        "orders_prepared_count": orders_prepared,
         "symbols": symbols,
         "latest_symbol": latest_entry.get("symbol") if latest_entry is not None else None,
         "latest_outcome": latest_outcome,

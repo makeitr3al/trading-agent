@@ -9,11 +9,18 @@ from models.trade import Trade, TradeDirection, TradeType
 from strategy.decision_engine import decide_next_action
 
 
-def _make_signal(signal_type: SignalType, is_valid: bool, reason: str) -> SignalState:
+def _make_signal(
+    signal_type: SignalType,
+    is_valid: bool,
+    reason: str,
+    *,
+    signal_bar_close: float | None = None,
+) -> SignalState:
     return SignalState(
         signal_type=signal_type,
         is_valid=is_valid,
         reason=reason,
+        signal_bar_close=signal_bar_close,
     )
 
 
@@ -32,6 +39,48 @@ def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_tight
         SignalType.COUNTERTREND_SHORT,
         is_valid=True,
         reason="countertrend signal detected",
+        signal_bar_close=99.5,
+    )
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.LONG)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=countertrend_signal,
+        active_trade=active_trade,
+        current_price=101.0,
+    )
+
+    assert result.action == DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE
+    assert result.reason == "valid countertrend locks trend stop to countertrend signal-bar close"
+    assert result.selected_signal_type == SignalType.COUNTERTREND_SHORT.value
+
+
+def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_close_market() -> None:
+    countertrend_signal = _make_signal(
+        SignalType.COUNTERTREND_LONG,
+        is_valid=True,
+        reason="countertrend signal detected",
+        signal_bar_close=99.0,
+    )
+    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.SHORT)
+
+    result = decide_next_action(
+        trend_signal=None,
+        countertrend_signal=countertrend_signal,
+        active_trade=active_trade,
+        current_price=101.5,
+    )
+
+    assert result.action == DecisionAction.CLOSE_TREND_TRADE
+    assert result.reason == "valid countertrend closes active trend trade (price above signal-bar close)"
+    assert result.selected_signal_type == SignalType.COUNTERTREND_LONG.value
+
+
+def test_decide_next_action_countertrend_without_signal_bar_close_uses_legacy_last_close_rule() -> None:
+    countertrend_signal = _make_signal(
+        SignalType.COUNTERTREND_SHORT,
+        is_valid=True,
+        reason="countertrend signal detected",
     )
     active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.LONG)
 
@@ -44,27 +93,6 @@ def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_tight
 
     assert result.action == DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE
     assert result.reason == "valid countertrend locks trend stop to last close"
-    assert result.selected_signal_type == SignalType.COUNTERTREND_SHORT.value
-
-
-def test_decide_next_action_valid_countertrend_with_active_trend_trade_can_close_market() -> None:
-    countertrend_signal = _make_signal(
-        SignalType.COUNTERTREND_LONG,
-        is_valid=True,
-        reason="countertrend signal detected",
-    )
-    active_trade = _make_trade(TradeType.TREND, direction=TradeDirection.SHORT)
-
-    result = decide_next_action(
-        trend_signal=None,
-        countertrend_signal=countertrend_signal,
-        active_trade=active_trade,
-        current_price=101.5,
-    )
-
-    assert result.action == DecisionAction.CLOSE_TREND_TRADE
-    assert result.reason == "valid countertrend closes active trend trade"
-    assert result.selected_signal_type == SignalType.COUNTERTREND_LONG.value
 
 
 def test_decide_next_action_outer_band_exit_trigger_can_tighten_stop_without_countertrend_signal() -> None:

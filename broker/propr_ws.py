@@ -281,3 +281,91 @@ class ProprWebSocketClient:
                 reconnect_delay_seconds,
             )
             await asyncio.sleep(reconnect_delay_seconds)
+
+
+def _ws_payload_references_order_id(obj: Any, order_id: str) -> bool:
+    tid = str(order_id).strip()
+    if not tid:
+        return False
+    if isinstance(obj, dict):
+        for key in ("orderId", "order_id"):
+            if key in obj and str(obj[key]).strip() == tid:
+                return True
+        for child in obj.values():
+            if _ws_payload_references_order_id(child, order_id):
+                return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _ws_payload_references_order_id(item, order_id):
+                return True
+    return False
+
+
+async def wait_for_order_id_on_websocket(
+    config: ProprConfig,
+    account_id: str,
+    order_id: str,
+    *,
+    timeout_seconds: float = 15.0,
+    max_debug_payloads: int = 5,
+) -> tuple[bool, list[dict[str, Any]]]:
+    """
+    Subscribe to account orders (and related channels) and return True once a WS message
+    references the given order id (nested match on orderId / order_id).
+    """
+    if websockets.connect is None:
+        raise RuntimeError("websockets dependency is not installed")
+
+    normalized_id = str(order_id).strip()
+    if not normalized_id:
+        return False, []
+
+    ws_client = ProprWebSocketClient(config, send_subscribe=True)
+    debug_payloads: list[dict[str, Any]] = []
+
+    async def _run() -> bool:
+        nonlocal debug_payloads
+        async with websockets.connect(
+            ws_client.build_ws_url(),
+            additional_headers=ws_client.build_auth_headers(),
+            ping_interval=20,
+            ping_timeout=10,
+        ) as websocket:
+            for message in ws_client.build_subscribe_messages(account_id):
+                await websocket.send(json.dumps(message))
+
+            async for raw_message in websocket:
+                try:
+                    payload = json.loads(raw_message)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if len(debug_payloads) < max_debug_payloads:
+                    debug_payloads.append(payload)
+                else:
+                    debug_payloads.pop(0)
+                    debug_payloads.append(payload)
+                if _ws_payload_references_order_id(payload, normalized_id):
+                    return True
+
+        return False
+
+    try:
+        found = await asyncio.wait_for(_run(), timeout=timeout_seconds)
+        return found, debug_payloads
+    except TimeoutError:
+        logger.warning(
+            "wait_for_order_id_on_websocket: timeout after %.1fs for order_id=%s (captured %d sample payloads)",
+            timeout_seconds,
+            normalized_id,
+            len(debug_payloads),
+        )
+        return False, debug_payloads
+
+
+__all__ = [
+    "ProprWsEvent",
+    "ProprWebSocketClient",
+    "wait_for_order_id_on_websocket",
+]

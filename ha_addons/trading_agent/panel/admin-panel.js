@@ -966,7 +966,12 @@ class TradingAgentAdminPanel extends HTMLElement {
       }
       const run = runMap.get(runKey);
       const sigType = row.signal_type || _deriveScanSignalType(row.selected_signal_type);
-      if (sigType && sigType !== "Kein Signal") run.signals += 1;
+      const vs = row.valid_signals_count;
+      if (typeof vs === "number" && vs > 0) {
+        run.signals += vs;
+      } else if (sigType && sigType !== "Kein Signal") {
+        run.signals += 1;
+      }
       if (row.order_created) run.orders_created += 1;
       run.trades_managed += (row.related_trade_count || 0);
       run.markets.push({

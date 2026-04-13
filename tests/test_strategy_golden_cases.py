@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures"))
 from strategy.engine import run_agent_cycle, run_strategy_cycle
 from strategy_scenarios import (
     break_even_should_activate_scenario,
-    countertrend_should_close_active_trend_trade_scenario,
+    countertrend_adjusts_short_trend_stop_at_signal_bar_close_scenario,
     countertrend_should_override_active_trend_trade_scenario,
     countertrend_tp_should_update_scenario,
     invalid_trend_candle_not_in_direction_scenario,
@@ -183,8 +183,8 @@ def test_countertrend_can_lock_active_trend_stop_to_last_close() -> None:
     assert result.updated_trade.stop_loss == pytest.approx(scenario.expected_updated_stop_loss)
 
 
-def test_countertrend_can_close_active_trend_trade() -> None:
-    scenario = countertrend_should_close_active_trend_trade_scenario()
+def test_countertrend_adjusts_short_trend_stop_to_signal_bar_close() -> None:
+    scenario = countertrend_adjusts_short_trend_stop_at_signal_bar_close_scenario()
 
     result = run_strategy_cycle(
         candles=scenario.candles,
@@ -199,7 +199,8 @@ def test_countertrend_can_close_active_trend_trade() -> None:
     assert result.decision.action.value == scenario.expected_decision_action
     assert (result.order is not None) is scenario.expected_order_present
     assert result.close_active_trade is scenario.expected_close_active_trade
-    assert result.updated_trade is None
+    assert result.updated_trade is not None
+    assert result.updated_trade.stop_loss == pytest.approx(scenario.expected_updated_stop_loss)
 
 
 def test_break_even_activates_for_active_trend_trade() -> None:

@@ -14,6 +14,7 @@ class AgentState(BaseModel):
     last_signal_type: str | None = None
     last_regime: str | None = None
     middle_band_retest_required: bool = False
+    pending_entry_signal_bar_ts: str | None = None
     consumed_signals: set[str] = Field(default_factory=set)
     last_cycle_timestamp: str | None = None
     account_open_entry_orders_count: int = 0

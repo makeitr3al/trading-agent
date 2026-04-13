@@ -32,6 +32,15 @@ def tighten_trend_stop_to_last_close(active_trade: Trade, latest_close: float) -
     return active_trade.model_copy(update={"stop_loss": new_stop_loss})
 
 
+def tighten_trend_stop_to_signal_bar_close(active_trade: Trade, signal_bar_close: float) -> Trade:
+    """Move trend stop toward signal-bar close (same tightening direction as last-close adjust)."""
+    if active_trade.direction == TradeDirection.LONG:
+        new_stop_loss = max(active_trade.stop_loss, signal_bar_close)
+    else:
+        new_stop_loss = min(active_trade.stop_loss, signal_bar_close)
+    return active_trade.model_copy(update={"stop_loss": new_stop_loss})
+
+
 def update_active_trade(
     active_trade: Trade | None,
     latest_bb_middle: float,

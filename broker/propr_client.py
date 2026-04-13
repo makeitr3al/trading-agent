@@ -72,7 +72,6 @@ def _to_sdk_order_payload(order_params: dict[str, Any], account_id: str) -> dict
         "reduce_only": "reduceOnly",
         "close_position": "closePosition",
         "position_id": "positionId",
-        "order_group_id": "orderGroupId",
     }
     for source_key, target_key in field_map.items():
         value = order_params.get(source_key)

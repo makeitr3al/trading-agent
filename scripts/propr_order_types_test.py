@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""Beta write test: limit and standalone stop-limit entry orders.
+
+Requires PROPR_ENV=beta, MANUAL_ORDER_TYPES_CONFIRM=YES, active challenge, and API credentials.
+When the API accepts a standalone stop_limit entry, confirmation uses the WebSocket orders
+channel first, then REST get_orders as fallback. If the API responds with
+`conditional_order_requires_position_or_group` (HTTP 400, code 13056), the script records
+SKIPPED_API_REQUIRES_POSITION_OR_GROUP and continues (Beta still enforces this as of live checks).
+"""
+
+import asyncio
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -19,7 +29,10 @@ from broker.order_service import (
     extract_order_id_from_submit_response,
 )
 from broker.propr_client import ProprClient
+from broker.propr_sdk import ProprAPIError
+from broker.propr_ws import wait_for_order_id_on_websocket
 from config.hyperliquid_config import HyperliquidConfig
+from config.propr_config import ProprConfig
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from models.order import Order, OrderType
 from utils.env_loader import (
@@ -32,9 +45,6 @@ from utils.env_loader import (
 STANDALONE_PENDING_ORDER_TYPES_TO_TEST = [
     OrderType.BUY_LIMIT,
     OrderType.SELL_LIMIT,
-]
-
-STANDALONE_CONDITIONAL_ORDER_TYPES_NOT_SUPPORTED = [
     OrderType.BUY_STOP,
     OrderType.SELL_STOP,
 ]
@@ -42,7 +52,6 @@ STANDALONE_CONDITIONAL_ORDER_TYPES_NOT_SUPPORTED = [
 
 # TODO: Later add a small polling abstraction shared across manual beta write scripts.
 # TODO: Later support symbol-specific test quantities from SymbolSpec once needed.
-# TODO: If Propr exposes grouped conditional entry orders via the SDK, add standalone BUY_STOP/SELL_STOP coverage.
 
 
 def _parse_numeric_status(response: dict | None) -> int | None:
@@ -138,6 +147,38 @@ def _build_test_order(order_type: OrderType, reference_price: Decimal) -> Order:
         position_size=quantity,
         signal_source=f"manual_order_type_test_{order_type.value.lower()}",
     )
+
+
+
+def _confirm_stop_order_ws_then_rest(
+    config: ProprConfig,
+    client: ProprClient,
+    account_id: str,
+    order_id: str,
+    *,
+    ws_timeout_seconds: float = 15.0,
+) -> tuple[bool, str]:
+    ws_ok, samples = asyncio.run(
+        wait_for_order_id_on_websocket(
+            config,
+            account_id,
+            order_id,
+            timeout_seconds=ws_timeout_seconds,
+        )
+    )
+    if ws_ok:
+        print(f"  confirmed via WebSocket within {ws_timeout_seconds:.0f}s")
+        return True, "websocket"
+
+    print("  WebSocket did not reference orderId within timeout; recent sample payloads:")
+    for i, payload in enumerate(samples):
+        print(f"    [{i}] {payload}")
+
+    rest_ok = _confirm_order_visible(client, account_id, order_id)
+    if rest_ok:
+        print("  confirmed via REST get_orders (fallback)")
+        return True, "rest_fallback"
+    return False, "neither"
 
 
 
@@ -293,6 +334,7 @@ def _cancel_if_possible(order_service: ProprOrderService, account_id: str, order
 
 
 def _run_pending_order_tests(
+    config: ProprConfig,
     client: ProprClient,
     order_service: ProprOrderService,
     account_id: str,
@@ -311,11 +353,20 @@ def _run_pending_order_tests(
         print("  documented payload preview:")
         _print_preview(preview)
 
-        submit_response, order_id, used_beta_asset_fallback = _submit_preview_with_beta_asset_fallback(
-            order_service,
-            account_id,
-            preview,
-        )
+        try:
+            submit_response, order_id, used_beta_asset_fallback = _submit_preview_with_beta_asset_fallback(
+                order_service,
+                account_id,
+                preview,
+            )
+        except ProprAPIError as exc:
+            msg = str(exc.message or exc).lower()
+            if exc.code == 13056 or "conditional_order_requires_position_or_group" in msg:
+                print(f"  API rejected standalone conditional entry (expected on some Beta accounts): {exc}")
+                results.append((order_type.value, "SKIPPED_API_REQUIRES_POSITION_OR_GROUP"))
+                continue
+            raise
+
         print(f"  used beta asset fallback: {used_beta_asset_fallback}")
         print("  submit response:")
         print(f"  {submit_response}")
@@ -324,17 +375,22 @@ def _run_pending_order_tests(
             results.append((order_type.value, "FAILED_NO_ORDER_ID"))
             continue
 
-        confirmed = _confirm_order_visible(client, account_id, order_id)
-        print(f"  confirmed in open orders: {confirmed}")
-        _cancel_if_possible(order_service, account_id, order_id, "pending order")
-        results.append((order_type.value, "CONFIRMED_AND_CANCELLED" if confirmed else "CANCELLED_WITHOUT_CONFIRMATION"))
+        if order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+            confirmed, via = _confirm_stop_order_ws_then_rest(config, client, account_id, order_id)
+            print(f"  stop entry confirmed ({via}): {confirmed}")
+            if confirmed and via == "websocket":
+                result_label = "CONFIRMED_WS_AND_CANCELLED"
+            elif confirmed and via == "rest_fallback":
+                result_label = "CONFIRMED_REST_AND_CANCELLED"
+            else:
+                result_label = "CANCELLED_WITHOUT_CONFIRMATION"
+        else:
+            confirmed = _confirm_order_visible(client, account_id, order_id)
+            print(f"  confirmed in open orders (REST): {confirmed}")
+            result_label = "CONFIRMED_AND_CANCELLED" if confirmed else "CANCELLED_WITHOUT_CONFIRMATION"
 
-    for order_type in STANDALONE_CONDITIONAL_ORDER_TYPES_NOT_SUPPORTED:
-        print(
-            f"Skipping standalone order type: {order_type.value} "
-            "because Propr Beta requires a position or group for conditional entry orders"
-        )
-        results.append((order_type.value, "SKIPPED_REQUIRES_POSITION_OR_GROUP"))
+        _cancel_if_possible(order_service, account_id, order_id, "pending order")
+        results.append((order_type.value, result_label))
 
     return results
 
@@ -541,7 +597,16 @@ def main() -> None:
         print(f"Reference market close: {reference_price}")
 
         results: list[tuple[str, str]] = []
-        results.extend(_run_pending_order_tests(client, order_service, account_id, settings.test_symbol, reference_price))
+        results.extend(
+            _run_pending_order_tests(
+                config,
+                client,
+                order_service,
+                account_id,
+                settings.test_symbol,
+                reference_price,
+            )
+        )
         results.extend(_run_open_trade_lifecycle_test(client, order_service, account_id, settings.test_symbol, reference_price))
 
         print("Order types beta test summary:")

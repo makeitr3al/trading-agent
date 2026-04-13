@@ -431,16 +431,17 @@ def countertrend_should_override_active_trend_trade_scenario() -> StrategyGolden
         ),
         expected_countertrend_signal_valid=True,
         expected_countertrend_signal_type="COUNTERTREND_SHORT",
-        expected_decision_action="ADJUST_TREND_STOP_TO_LAST_CLOSE",
+        expected_decision_action="ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE",
         expected_order_present=False,
         expected_close_active_trade=False,
         expected_updated_stop_loss=11.0,
     )
 
 
-def countertrend_should_close_active_trend_trade_scenario() -> StrategyGoldenScenario:
+def countertrend_adjusts_short_trend_stop_at_signal_bar_close_scenario() -> StrategyGoldenScenario:
+    """Legacy path closed the SHORT trend here; with signal_bar_close, P==C_sig tightens stop."""
     return _state_scenario(
-        name="countertrend closes active trend trade",
+        name="countertrend adjusts short trend stop at signal-bar close (P equals bar close)",
         closes=_prepend_context([10.4, 10.45, 10.5, 10.55, 10.6, 10.65, 9.0], BEARISH_REVERSAL_CONTEXT_CLOSES),
         config=make_config(),
         final_open=9.1,
@@ -453,9 +454,10 @@ def countertrend_should_close_active_trend_trade_scenario() -> StrategyGoldenSce
         ),
         expected_countertrend_signal_valid=True,
         expected_countertrend_signal_type="COUNTERTREND_LONG",
-        expected_decision_action="CLOSE_TREND_TRADE",
+        expected_decision_action="ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE",
         expected_order_present=False,
-        expected_close_active_trade=True,
+        expected_close_active_trade=False,
+        expected_updated_stop_loss=9.0,
     )
 
 
@@ -535,7 +537,7 @@ __all__ = [
     "no_countertrend_not_first_regime_bar_scenario",
     "trend_order_should_be_prepared_scenario",
     "countertrend_should_override_active_trend_trade_scenario",
-    "countertrend_should_close_active_trend_trade_scenario",
+    "countertrend_adjusts_short_trend_stop_at_signal_bar_close_scenario",
     "break_even_should_activate_scenario",
     "countertrend_tp_should_update_scenario",
     "trend_signal_consumed_duplicate_order_scenario",

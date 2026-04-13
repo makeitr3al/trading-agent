@@ -87,13 +87,12 @@ def _is_countertrend_signal_consumed_in_regime(
     return False
 
 
-def _is_signal_driven_action(action: DecisionAction) -> bool:
+def _is_middle_band_entry_lock_target(action: DecisionAction) -> bool:
+    """Actions blocked when middle-band retest is required (new entries only — not exits)."""
     return action in {
         DecisionAction.PREPARE_TREND_ORDER,
         DecisionAction.PREPARE_COUNTERTREND_ORDER,
         DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND,
-        DecisionAction.CLOSE_TREND_TRADE,
-        DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
     }
 
 
@@ -121,7 +120,7 @@ def _apply_middle_band_retest_lock(
         "countertrend_signal": _invalidate_signal_for_middle_band_lock(result.countertrend_signal),
     }
 
-    if _is_signal_driven_action(result.decision.action):
+    if _is_middle_band_entry_lock_target(result.decision.action):
         updates.update(
             {
                 "decision": DecisionResult(
@@ -172,6 +171,28 @@ def _resolve_middle_band_retest_required(
     return previous_required
 
 
+def _fill_window_closed_without_fill(
+    candles: list[Candle],
+    pending_order: Order | None,
+    signal_bar_ts: str | None,
+) -> bool:
+    """After the candle following the signal bar has closed, entry order still pending → arm retest lock."""
+    if pending_order is None or not signal_bar_ts:
+        return False
+
+    sig_idx: int | None = None
+    for i, c in enumerate(candles):
+        iso = c.timestamp.isoformat()
+        if iso == signal_bar_ts or iso[:19] == signal_bar_ts[:19]:
+            sig_idx = i
+            break
+    if sig_idx is None or sig_idx + 1 >= len(candles):
+        return False
+    fill_bar = candles[sig_idx + 1]
+    latest = candles[-1]
+    return latest.timestamp > fill_bar.timestamp
+
+
 def _resolve_signal_lifecycle_id_for_new_state(
     state: AgentState,
     pending_order: Order | None,
@@ -218,12 +239,7 @@ def run_agent_cycle(
     regime_states = build_regime_states(macd_df)
     last_regime = regime_states[-1].regime.value if regime_states else None
     regime_changed = state.last_regime is not None and state.last_regime != last_regime
-    current_price = float(closes.iloc[-1])
-    middle_band_retest_required = _resolve_middle_band_retest_required(
-        candles=candles,
-        config=config,
-        previous_required=state.middle_band_retest_required,
-    )
+    current_price = float(latest_candle.close)
 
     duplicate_trend_signal_blocked = (
         state.trend_signal_consumed_in_regime
@@ -321,11 +337,30 @@ def run_agent_cycle(
     else:
         pending_order = old_pending_order
 
+    next_pending_sig_ts = state.pending_entry_signal_bar_ts
+    if pending_order is None:
+        next_pending_sig_ts = None
+    elif state.pending_order is None and pending_order is not None:
+        next_pending_sig_ts = latest_candle.timestamp.isoformat()
+    elif state.pending_order is not None and pending_order is not None and state.pending_order.signal_source != pending_order.signal_source:
+        next_pending_sig_ts = latest_candle.timestamp.isoformat()
+    elif next_pending_sig_ts is None and pending_order is not None:
+        next_pending_sig_ts = pending_order.created_at or latest_candle.timestamp.isoformat()
+
+    middle_band_retest_required = _resolve_middle_band_retest_required(
+        candles=candles,
+        config=config,
+        previous_required=state.middle_band_retest_required,
+    )
+    if _fill_window_closed_without_fill(candles, pending_order, state.pending_entry_signal_bar_ts):
+        middle_band_retest_required = True
+
     consumed_signals: set[str] = set() if regime_changed else set(state.consumed_signals)
     if result.decision.action in {
         DecisionAction.PREPARE_TREND_ORDER,
         DecisionAction.CLOSE_TREND_TRADE,
         DecisionAction.ADJUST_TREND_STOP_TO_LAST_CLOSE,
+        DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
     }:
         consumed_signals.add("trend")
     if result.countertrend_signal is not None and result.countertrend_signal.is_valid:
@@ -360,6 +395,7 @@ def run_agent_cycle(
             else None,
             "last_regime": last_regime,
             "middle_band_retest_required": middle_band_retest_required,
+            "pending_entry_signal_bar_ts": next_pending_sig_ts,
             "consumed_signals": consumed_signals,
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),
             "signal_lifecycle_id": signal_lifecycle_id,

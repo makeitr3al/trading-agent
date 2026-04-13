@@ -117,7 +117,7 @@ These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-nego
 - **HTTP success:** Treat `200` and `201` as success for create/cancel where applicable.
 - **Rounding:** Quantity from `quantity_decimals` on `SymbolSpec`; price rounding only when `price_decimals` is available.
 - **Positions:** `quantity == 0` positions are not treated as active trades after sync.
-- **Beta limitation:** Standalone `BUY_STOP` / `SELL_STOP` entries may be rejected (`conditional_order_requires_position_or_group`); architecture must keep this visible in execution policy, not hidden inside strategy-only code.
+- **Beta limitation:** Standalone `BUY_STOP` / `SELL_STOP` entries may be rejected (`conditional_order_requires_position_or_group`, HTTP 400 / code 13056). `app/trading_app.py` blocks these submits on Beta up front; `scripts/propr_order_types_test.py` can still probe the API and, on success, confirm via WebSocket (orders) with REST fallback — keep this limitation visible in execution policy, not hidden inside strategy-only code.
 
 ---
 

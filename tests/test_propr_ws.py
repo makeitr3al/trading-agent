@@ -223,3 +223,13 @@ def test_is_relevant_event_covers_all_documented_types(
     client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
     event = ProprWsEvent(event_type=event_type, raw_payload={"type": event_type})
     assert client.is_relevant_event(event) is expected_relevant
+
+
+def test_ws_payload_references_order_id_nested_match() -> None:
+    from broker.propr_ws import _ws_payload_references_order_id
+
+    oid = "ord-xyz"
+    assert _ws_payload_references_order_id({"orderId": oid}, oid)
+    assert _ws_payload_references_order_id({"data": [{"order_id": oid}]}, oid)
+    assert not _ws_payload_references_order_id({"data": [{"id": oid}]}, oid)
+    assert not _ws_payload_references_order_id({"foo": "bar"}, oid)

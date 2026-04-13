@@ -180,4 +180,5 @@ def detect_trend_signal(
             bb_middle=bb_middle,
             bb_lower=bb_lower,
         ),
+        signal_bar_close=float(latest_candle.close),
     )

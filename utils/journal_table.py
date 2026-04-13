@@ -124,6 +124,13 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         selected_signal_type = _join_distinct(entry.get("used_signals") or [])
 
+        received_raw = entry.get("received_signals") or []
+        valid_signals_count = sum(
+            1
+            for item in received_raw
+            if isinstance(item, dict) and item.get("is_valid") is True
+        )
+
         scan_rows.append(
             {
                 "timestamp": entry.get("entry_timestamp"),
@@ -132,8 +139,11 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "environment": entry.get("environment"),
                 "decision_action": entry.get("decision_action"),
                 "selected_signal_type": selected_signal_type,
-                "received_signals": _format_signal_list(entry.get("received_signals") or []),
+                "received_signals": _format_signal_list(received_raw),
+                "valid_signals_count": valid_signals_count,
                 "unused_signals": _format_signal_list(entry.get("unused_signals") or []),
+                "scan_effective_submit_allowed": entry.get("scan_effective_submit_allowed"),
+                "scan_cycle_phase": entry.get("scan_cycle_phase"),
                 "order_created": bool(related_orders),
                 "order_status_summary": _join_distinct(order_statuses),
                 "trade_status_summary": _join_distinct(trade_statuses),

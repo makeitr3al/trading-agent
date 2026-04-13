@@ -116,7 +116,7 @@ def test_operator_config_export_env_contains_shell_exports(tmp_path: Path) -> No
 
 
 
-def test_operator_config_missing_file_uses_new_six_market_default(tmp_path: Path) -> None:
+def test_operator_config_missing_file_uses_default_hl_markets(tmp_path: Path) -> None:
     data_path = tmp_path / 'trading-agent-data'
     config_path = data_path / 'operator_config.json'
     env = dict(os.environ)
@@ -134,7 +134,7 @@ def test_operator_config_missing_file_uses_new_six_market_default(tmp_path: Path
 
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
-    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'
+    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP'
     assert payload['config']['push_enabled'] is False
 
 
@@ -170,5 +170,5 @@ def test_operator_config_migrates_legacy_three_market_default(tmp_path: Path) ->
 
     assert show_result.returncode == 0
     payload = json.loads(show_result.stdout)
-    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP,EUR,JPY'
+    assert payload['config']['markets'] == 'BTC,ETH,SOL,XRP'
     assert payload['config']['push_enabled'] is False
