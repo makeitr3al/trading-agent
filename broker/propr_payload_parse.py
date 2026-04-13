@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -40,13 +41,44 @@ def _normalize_side(value: Any) -> str | None:
     return None
 
 
-def _normalize_order_type(value: Any) -> str | None:
+def _coerce_propr_order_type_token(value: Any) -> str | None:
+    """Normalize Propr ``type`` / ``order_type`` strings (snake, SCREAMING_SNAKE, CamelCase) to snake_case."""
     if value is None:
         return None
-    normalized = str(value).strip().lower().replace("-", "_")
-    if normalized in {"stop", "stop_order", "buy_stop", "sell_stop", "stop_limit", "stop_market"}:
+    raw = str(value).strip()
+    if not raw:
+        return None
+    s = raw.replace("-", "_")
+    if "_" in s:
+        return s.lower()
+    if re.search(r"[a-z][A-Z]|[A-Z][a-z]", s):
+        spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+        spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", spaced)
+        return spaced.lower()
+    return s.lower()
+
+
+def _normalize_order_type(value: Any) -> str | None:
+    normalized = _coerce_propr_order_type_token(value)
+    if normalized is None:
+        return None
+    if normalized in {
+        "stop",
+        "stop_order",
+        "buy_stop",
+        "sell_stop",
+        "stop_limit",
+        "stop_market",
+    }:
         return "stop"
-    if normalized in {"limit", "limit_order", "buy_limit", "sell_limit", "take_profit_limit"}:
+    if normalized in {
+        "limit",
+        "limit_order",
+        "buy_limit",
+        "sell_limit",
+        "take_profit_limit",
+        "take_profit_market",
+    }:
         return "limit"
     return None
 
@@ -87,8 +119,7 @@ def _is_open_position_status(value: Any) -> bool:
 
 
 def _raw_order_type(value: Any) -> str | None:
-    normalized = _normalize_status(value)
-    return normalized or None
+    return _coerce_propr_order_type_token(value)
 
 
 def _truthy_flag(value: Any) -> bool:

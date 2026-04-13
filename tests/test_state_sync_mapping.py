@@ -210,12 +210,12 @@ def test_map_propr_position_to_internal_reads_alias_fields_and_active_status() -
     assert trade.opened_at == "2026-03-30T06:55:00Z"
 
 
-def test_map_propr_order_missing_core_fields_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="broker.state_sync"):
+def test_map_propr_order_missing_core_fields_logs_debug(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG, logger="broker.propr_order_position_map"):
         result = map_propr_order_to_internal({"side": "buy", "type": "stop_limit", "status": "open"})
 
     assert result is None
-    assert any("missing required price fields" in r.message for r in caplog.records)
+    assert any("incomplete bracket prices" in r.message for r in caplog.records)
 
 
 def test_map_propr_order_missing_side_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
@@ -304,3 +304,33 @@ def test_map_propr_order_wrong_type_values_return_none(caplog: pytest.LogCapture
         )
 
     assert result is None
+
+
+def test_map_propr_order_accepts_camel_case_stop_limit_type() -> None:
+    order = map_propr_order_to_internal(
+        {
+            "side": "buy",
+            "type": "StopLimit",
+            "price": 110,
+            "stopLoss": 100,
+            "takeProfit": 130,
+            "status": "open",
+        }
+    )
+    assert order is not None
+    assert order.order_type.name == "BUY_STOP"
+
+
+def test_map_propr_position_allows_missing_take_profit() -> None:
+    trade = map_propr_position_to_internal(
+        {
+            "status": "open",
+            "positionSide": "long",
+            "entryPrice": "100.0",
+            "stopLoss": "95.0",
+            "quantity": "1.0",
+            "positionId": "urn:prp-position:test",
+        }
+    )
+    assert trade is not None
+    assert trade.take_profit is None

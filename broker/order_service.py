@@ -303,6 +303,8 @@ def build_take_profit_submission_preview(
         raise ValueError("active trade quantity is required for take-profit exit")
     if active_trade.position_id is None:
         raise ValueError("active trade position_id is required for take-profit exit")
+    if active_trade.take_profit is None:
+        raise ValueError("active trade take_profit is required for take-profit exit")
 
     side, position_side = _exit_order_side_and_position(active_trade)
     take_profit_price = _apply_buy_spread_to_price(side, active_trade.take_profit, buy_spread)

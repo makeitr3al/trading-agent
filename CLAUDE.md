@@ -5,6 +5,7 @@
 Regelbasierter Python Trading Agent für die Prop-Trading-Plattform **Propr**.
 Strategie: Bollinger Bands + MACD-Regime (bullish / bearish / neutral).
 Echtzeit-Marktdaten kommen von **Hyperliquid** (REST, perspektivisch WebSocket).
+Gelieferte Kerzenreihen werden pro Provider durch [`data/providers/contract.py`](data/providers/contract.py) geprüft (UTC, streng aufsteigende Zeitstempel, Mindestlänge bei Golden).
 Execution läuft ausschließlich über die **Propr API**.
 
 ---
@@ -90,7 +91,7 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 | `PROPR_PROD_CONFIRM` | `YES` nötig für Prod-Zugriff |
 | `DATA_SOURCE` | `live` oder `golden` |
 | `GOLDEN_SCENARIO` | exakter Szenario-Name (nur bei `golden`) |
-| `HYPERLIQUID_COIN` | z.B. `BTC` oder `ETH` |
+| `HYPERLIQUID_COIN` | optional; überschreibt den aus `PROPR_SYMBOL` abgeleiteten HL-Coin (`BTC`/`ETH`; bei HIP-3 sonst automatisch `xyz:TICKER`) |
 | `TRADING_JOURNAL_PATH` | optional, überschreibt Standardpfad |
 | `RUNNER_STATUS_PATH` | optional, überschreibt Standardpfad |
 | `TRADING_AGENT_RUNTIME_CONFIG_PATH` | optional, überschreibt Standardpfad |
@@ -142,11 +143,13 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
 ## Multi-Market-Scan
 
 - `SCAN_MARKETS=BTC,ETH,SOL` — einfache Ticker (neues Format)
-- HIP-3 Assets: `SCAN_MARKETS=BTC,ETH,xyz:AAPL` — `xyz:`-Prefix für Stocks/Commodities
+- HIP-3 Assets: `SCAN_MARKETS=BTC,ETH,xyz:AAPL` — `xyz:`-Prefix für Stocks/Commodities; für **Hyperliquid**-Kerzen/L2 wird derselbe dex-qualifizierte Name (`xyz:AAPL`) verwendet, nicht nur `AAPL`
 - Legacy-Format `BTC/USDC:BTC,ETH/USDC:ETH` wird noch akzeptiert (mit Deprecation-Warnung)
 - Max. 3 offene Entry-Orders oder Positionen kontoweit
 - Priorisierung nach `signal_strength` wenn mehr Kandidaten als freie Slots
 - Asset Registry: `broker/asset_registry.py` — auto-discovers tradeable assets from Hyperliquid, caches to `artifacts/asset_registry.json` (24h TTL)
+- Live (`DATA_SOURCE=live`): Vor dem Kerzenabruf ruft `scripts/multi_market_scan.py` `AssetRegistry.validate_scan_asset_for_hyperliquid_fetch` — Krypto-Perps gegen die HL-Meta-Liste, HIP-3-Einträge gegen die Registry (`xyz:…`); leere Universe-Listen (offline) → nur Log-Warnung, keine harte Prüfung.
+- Journal (Scan): Schlägt ein Markt vor `run_app_cycle` fehl, wird eine **cycle**-Zeile angehängt (`scan_cycle_phase=scan_failed`, `skipped_reason=scan_failed`, Fehlertext in `notes`). Dry-Run und Execute eines Laufs teilen sich `executed_at`; die Scan-Aggregation in `utils/journal_table.py` dedupliziert zugehörige **cycle**-Zeilen pro Batch (bei Konflikt gewinnt `execute` vor `dry_run`).
 
 ---
 

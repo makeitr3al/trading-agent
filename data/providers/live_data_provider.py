@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from config.strategy_config import build_strategy_config
+from config.strategy_config import build_strategy_config, min_strategy_candle_count
 from data.providers.base import DataBatch
+from data.providers.contract import validate_data_batch
 from models.candle import Candle
 
 
-# TODO: Replace the live stub with a real production market data source.
-# TODO: Later support broker-native or exchange-native candles.
+# Dev stub only — not wired in ``get_data_provider`` (live uses Hyperliquid historical).
+# TODO: Replace with a real streaming source or remove when unused.
 
 DEMO_CLOSES = [
     1.0950,
@@ -56,7 +57,7 @@ DEMO_CLOSES = [
 
 class LiveDataProvider:
     def get_data(self) -> DataBatch:
-        start = datetime(2026, 1, 1, 0, 0, 0)
+        start = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         candles: list[Candle] = []
         for index, close in enumerate(DEMO_CLOSES):
             candles.append(
@@ -69,9 +70,11 @@ class LiveDataProvider:
                 )
             )
 
-        return DataBatch(
+        batch = DataBatch(
             candles=candles,
             symbol=None,
             source_name="live_stub",
             config=build_strategy_config(),
         )
+        validate_data_batch(batch, min_candles=min_strategy_candle_count(batch.config))
+        return batch

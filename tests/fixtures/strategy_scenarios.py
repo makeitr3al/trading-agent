@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from config.strategy_config import StrategyConfig, build_strategy_config
 from models.agent_state import AgentState
@@ -29,7 +29,7 @@ class StrategyGoldenScenario:
     expected_updated_stop_loss: float | None = None
 
 
-BASE_TIME = datetime(2026, 1, 1, 0, 0, 0)
+BASE_TIME = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 TREND_CONTEXT_CLOSES = [
     10.9,
     10.7,

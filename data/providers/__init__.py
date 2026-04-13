@@ -1,5 +1,6 @@
 from config.hyperliquid_config import HyperliquidConfig
 from data.providers.base import CandleDataProvider, DataBatch
+from data.providers.contract import validate_data_batch
 from data.providers.golden_data_provider import GoldenDataProvider
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from data.providers.live_data_provider import LiveDataProvider
@@ -26,4 +27,5 @@ __all__ = [
     "HyperliquidConfig",
     "LiveDataProvider",
     "get_data_provider",
+    "validate_data_batch",
 ]

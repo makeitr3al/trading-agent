@@ -90,6 +90,50 @@ def _derive_signal_type(selected_signal_type: str | None) -> str:
     return "Kein Signal"
 
 
+def _multi_scan_cycle_dedupe_key(entry: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
+    """Stable batch key for multi-market scan dry_run + execute cycles (same last-bar timestamp)."""
+    return (
+        entry.get("executed_at"),
+        entry.get("symbol"),
+        entry.get("environment"),
+        entry.get("entry_timestamp"),
+    )
+
+
+def _scan_cycle_phase_rank(phase: str | None) -> int:
+    if phase == "execute":
+        return 3
+    if phase == "dry_run":
+        return 2
+    if phase == "scan_failed":
+        return 1
+    return 0
+
+
+def _dedupe_multi_scan_cycles(cycle_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one row per (executed_at, symbol, environment, entry_timestamp) when dry_run+execute share a key."""
+    groups: dict[tuple[str | None, str | None, str | None, str | None], list[dict[str, Any]]] = defaultdict(list)
+    for entry in cycle_entries:
+        groups[_multi_scan_cycle_dedupe_key(entry)].append(entry)
+
+    winners: list[dict[str, Any]] = []
+    for group in groups.values():
+        if len(group) == 1:
+            winners.append(group[0])
+            continue
+        has_scan_phase = any(e.get("scan_cycle_phase") in {"dry_run", "execute"} for e in group)
+        if has_scan_phase:
+            winners.append(
+                max(
+                    enumerate(group),
+                    key=lambda pair: (_scan_cycle_phase_rank(pair[1].get("scan_cycle_phase")), pair[0]),
+                )[1]
+            )
+        else:
+            winners.extend(group)
+    return winners
+
+
 def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped_orders: dict[tuple[str | None, str | None, str | None], list[dict[str, Any]]] = {}
     grouped_trades: dict[tuple[str | None, str | None, str | None], list[dict[str, Any]]] = {}
@@ -101,11 +145,11 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif entry.get("entry_type") == "trade":
             grouped_trades.setdefault(key, []).append(entry)
 
-    scan_rows: list[dict[str, Any]] = []
-    for entry in entries:
-        if entry.get("entry_type") != "cycle":
-            continue
+    cycle_entries = [e for e in entries if e.get("entry_type") == "cycle"]
+    cycle_entries = _dedupe_multi_scan_cycles(cycle_entries)
 
+    scan_rows: list[dict[str, Any]] = []
+    for entry in cycle_entries:
         key = _group_key(entry)
         related_orders = grouped_orders.get(key, [])
         related_trades = grouped_trades.get(key, [])

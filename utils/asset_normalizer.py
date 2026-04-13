@@ -72,3 +72,14 @@ def parse_market_list(raw_csv: str) -> list[AssetInfo]:
     if not entries:
         raise ValueError("market list must not be empty")
     return [normalize_asset(entry) for entry in entries]
+
+
+def hyperliquid_candle_coin(asset: AssetInfo) -> str:
+    """Coin string for Hyperliquid ``/info`` (``candleSnapshot``, ``l2Book``).
+
+    Crypto perps use the universe name (``BTC``). HIP-3 / builder-deployed perps use the
+    dex-qualified form (``xyz:AAPL``), not the bare ticker.
+    """
+    if asset.is_hip3:
+        return asset.asset
+    return asset.coin or asset.base

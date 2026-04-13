@@ -214,11 +214,10 @@ def load_hyperliquid_config_from_env() -> HyperliquidConfig:
     coin = _get_env("HYPERLIQUID_COIN")
     if not coin:
         symbol_raw = _get_env("PROPR_SYMBOL") or DEFAULT_SYMBOL
-        from utils.asset_normalizer import normalize_asset
+        from utils.asset_normalizer import hyperliquid_candle_coin, normalize_asset
+
         info = normalize_asset(symbol_raw)
-        if info.coin is None:
-            raise ValueError("HYPERLIQUID_COIN is required for HIP-3 assets")
-        coin = info.coin
+        coin = hyperliquid_candle_coin(info)
 
     lookback_raw = _get_env("HYPERLIQUID_LOOKBACK_BARS") or "200"
     try:

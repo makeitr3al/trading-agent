@@ -2,7 +2,7 @@ import math
 
 import pandas as pd
 
-from config.strategy_config import StrategyConfig
+from config.strategy_config import StrategyConfig, min_strategy_candle_count
 from indicators.bollinger import compute_bollinger_bands
 from indicators.macd import compute_macd
 from models.candle import Candle
@@ -100,7 +100,7 @@ def run_strategy_cycle(
     account_balance: float,
     active_trade: Trade | None = None,
 ) -> StrategyRunResult:
-    min_required_candles = max(config.bollinger_period, config.macd_slow_period)
+    min_required_candles = min_strategy_candle_count(config)
     if len(candles) < min_required_candles:
         raise ValueError(
             f"At least {min_required_candles} candles are required to run the strategy cycle."

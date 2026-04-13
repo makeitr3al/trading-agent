@@ -49,3 +49,8 @@ def build_strategy_config(**overrides: Any) -> StrategyConfig:
     if not overrides:
         return base
     return StrategyConfig(**{**base.model_dump(), **overrides})
+
+
+def min_strategy_candle_count(config: StrategyConfig) -> int:
+    """Minimum closed bars for Bollinger + MACD warmup (strategy cycle and data-batch contract)."""
+    return max(config.bollinger_period, config.macd_slow_period)

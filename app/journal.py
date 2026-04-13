@@ -370,6 +370,40 @@ def build_journal_entries(
     return entries
 
 
+def append_multi_market_scan_failure_journal(
+    path: str | Path,
+    *,
+    symbol: str,
+    environment: str | None,
+    executed_at: str,
+    error_message: str,
+    scan_effective_submit_allowed: bool | None = None,
+) -> Path:
+    """Append a single cycle row when a multi-market scan fails before ``run_app_cycle``."""
+    journal_path = Path(path)
+    message = (error_message or "scan_failed").strip()
+    if len(message) > 8000:
+        message = message[:8000] + "…"
+    entry_ts = executed_at
+    entry = JournalEntry(
+        entry_type="cycle",
+        entry_date=_entry_date(entry_ts),
+        entry_timestamp=entry_ts,
+        executed_at=executed_at,
+        symbol=symbol,
+        environment=environment,
+        decision_action="NO_ACTION",
+        skipped_reason="scan_failed",
+        received_signals=[],
+        used_signals=[],
+        unused_signals=[],
+        notes=message,
+        scan_effective_submit_allowed=scan_effective_submit_allowed,
+        scan_cycle_phase="scan_failed",
+    )
+    return append_journal_entries(journal_path, [entry])
+
+
 def append_journal_entries(path: str | Path, entries: list[JournalEntry]) -> Path:
     journal_path = Path(path)
     journal_path.parent.mkdir(parents=True, exist_ok=True)

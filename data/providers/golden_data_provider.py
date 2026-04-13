@@ -7,7 +7,9 @@ from types import ModuleType
 from typing import Callable
 import sys
 
+from config.strategy_config import min_strategy_candle_count
 from data.providers.base import DataBatch
+from data.providers.contract import validate_data_batch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +25,7 @@ class GoldenDataProvider:
 
     def get_data(self) -> DataBatch:
         scenario = _load_golden_scenario(self.scenario_name)
-        return DataBatch(
+        batch = DataBatch(
             candles=scenario.candles,
             symbol=None,
             source_name=f"golden:{scenario.name}",
@@ -32,6 +34,11 @@ class GoldenDataProvider:
             active_trade=scenario.active_trade,
             agent_state=scenario.agent_state,
         )
+        validate_data_batch(
+            batch,
+            min_candles=min_strategy_candle_count(scenario.config),
+        )
+        return batch
 
 
 

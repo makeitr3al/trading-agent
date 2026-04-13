@@ -590,7 +590,9 @@ def should_manage_exit_orders(
     stop_changed = state.active_trade.stop_loss != normalized_trade.stop_loss
     take_profit_changed = state.active_trade.take_profit != normalized_trade.take_profit
     missing_stop_order = not _has_external_order_id(state.stop_loss_order_id)
-    missing_take_profit_order = not _has_external_order_id(state.take_profit_order_id)
+    missing_take_profit_order = (
+        normalized_trade.take_profit is not None and not _has_external_order_id(state.take_profit_order_id)
+    )
     return stop_changed or take_profit_changed or missing_stop_order or missing_take_profit_order
 
 
@@ -636,7 +638,7 @@ def manage_active_trade_exit_orders(
             ),
         )
 
-    if (
+    if normalized_trade.take_profit is not None and (
         state.active_trade.take_profit != normalized_trade.take_profit
         or not _has_external_order_id(state.take_profit_order_id)
     ):

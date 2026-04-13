@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def _classify_open_order_payload(order_payload: dict[str, Any]) -> str:
-    raw_type = _raw_order_type(get_first_key(order_payload, ["order_type", "type"]))
-    normalized_type = _normalize_order_type(get_first_key(order_payload, ["order_type", "type"]))
+    type_value = get_first_key(order_payload, ["order_type", "type"])
+    raw_type = _raw_order_type(type_value)
+    normalized_type = _normalize_order_type(type_value)
     reduce_only = _truthy_flag(get_first_key(order_payload, ["reduceOnly", "reduce_only"]))
     position_id = get_first_key(order_payload, ["positionId", "position_id"])
 
@@ -63,8 +64,8 @@ def map_propr_order_to_internal(order_payload: dict, *, strict: bool = False) ->
         return None
     if entry is None or stop_loss is None or take_profit is None:
         missing = [f for f, v in [("entry", entry), ("stop_loss", stop_loss), ("take_profit", take_profit)] if v is None]
-        logger.warning(
-            "map_propr_order_to_internal: missing required price fields %s — payload keys: %s",
+        logger.debug(
+            "map_propr_order_to_internal: incomplete bracket prices %s — payload keys: %s",
             missing,
             list(order_payload.keys()),
         )
@@ -122,11 +123,8 @@ def map_propr_position_to_internal(position_payload: dict, *, strict: bool = Fal
     stop_loss = _to_decimal(get_first_key(position_payload, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"]))
     take_profit = _to_decimal(get_first_key(position_payload, ["take_profit", "takeProfit", "tp", "internal_take_profit"]))
 
-    if side is None or entry is None or stop_loss is None or take_profit is None:
-        missing = [
-            f for f, v in [("side", side), ("entry", entry), ("stop_loss", stop_loss), ("take_profit", take_profit)]
-            if v is None
-        ]
+    if side is None or entry is None or stop_loss is None:
+        missing = [f for f, v in [("side", side), ("entry", entry), ("stop_loss", stop_loss)] if v is None]
         logger.warning(
             "map_propr_position_to_internal: missing required fields %s — payload keys: %s",
             missing,
@@ -135,6 +133,12 @@ def map_propr_position_to_internal(position_payload: dict, *, strict: bool = Fal
         if strict:
             raise ValueError(f"Missing required position fields: {missing}")
         return None
+
+    if take_profit is None:
+        logger.debug(
+            "map_propr_position_to_internal: take_profit absent on open position — payload keys: %s",
+            list(position_payload.keys()),
+        )
 
     signal_source = str(position_payload.get("signal_source") or position_payload.get("signalSource") or "")
     trade_type = (
@@ -149,7 +153,7 @@ def map_propr_position_to_internal(position_payload: dict, *, strict: bool = Fal
         direction=direction,
         entry=float(entry),
         stop_loss=float(stop_loss),
-        take_profit=float(take_profit),
+        take_profit=float(take_profit) if take_profit is not None else None,
         quantity=float(quantity) if quantity is not None else None,
         position_id=get_first_key(position_payload, ["positionId", "position_id", "id"]),
         is_active=True,

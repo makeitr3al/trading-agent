@@ -18,7 +18,7 @@ class Trade(BaseModel):
     direction: TradeDirection
     entry: float
     stop_loss: float
-    take_profit: float
+    take_profit: float | None = None
     quantity: float | None = None
     position_id: str | None = None
     is_active: bool = True

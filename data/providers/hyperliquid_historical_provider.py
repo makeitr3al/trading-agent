@@ -7,6 +7,7 @@ import requests
 
 from config.hyperliquid_config import HyperliquidConfig
 from data.providers.base import DataBatch
+from data.providers.contract import validate_data_batch
 from models.candle import Candle
 
 
@@ -78,11 +79,13 @@ class HyperliquidHistoricalProvider:
             }
         )
         candles = self._parse_candles(response)
-        return DataBatch(
+        batch = DataBatch(
             candles=candles,
             symbol=self.config.coin,
             source_name="hyperliquid_historical",
         )
+        validate_data_batch(batch)
+        return batch
 
     def fetch_l2_book(self) -> dict[str, Any]:
         response = self._post_info(

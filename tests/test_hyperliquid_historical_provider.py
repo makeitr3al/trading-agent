@@ -141,6 +141,39 @@ def test_raises_clear_error_when_response_is_empty_or_invalid() -> None:
         invalid_provider.fetch_candles()
 
 
+def test_raises_when_candle_snapshot_root_is_not_a_list() -> None:
+    provider = HyperliquidHistoricalProvider(
+        HyperliquidConfig(coin="BTC"),
+        http_client=FakeHyperliquidHttpClient({"data": []}),
+    )
+    with pytest.raises(ValueError, match="empty or invalid"):
+        provider.fetch_candles()
+
+
+def test_raises_when_snapshot_row_is_not_a_dict() -> None:
+    provider = HyperliquidHistoricalProvider(
+        HyperliquidConfig(coin="BTC"),
+        http_client=FakeHyperliquidHttpClient([[1, 2, 3]]),
+    )
+    with pytest.raises(ValueError, match="empty or invalid"):
+        provider.fetch_candles()
+
+
+def test_fetch_candles_raises_when_contract_sees_duplicate_timestamps() -> None:
+    same_ms = 1_700_000_000_000
+    provider = HyperliquidHistoricalProvider(
+        HyperliquidConfig(coin="BTC", lookback_bars=2),
+        http_client=FakeHyperliquidHttpClient(
+            [
+                {"t": same_ms, "o": "100", "h": "110", "l": "95", "c": "105"},
+                {"t": same_ms, "o": "105", "h": "112", "l": "101", "c": "111"},
+            ]
+        ),
+    )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        provider.fetch_candles()
+
+
 def test_env_loader_loads_hyperliquid_config_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HYPERLIQUID_COIN", "ETH")
     monkeypatch.setenv("HYPERLIQUID_BASE_URL", "https://api.example.xyz")
@@ -166,12 +199,25 @@ def test_env_loader_derives_hyperliquid_coin_from_propr_symbol(monkeypatch: pyte
     assert config.coin == "ETH"
 
 
-def test_env_loader_raises_error_when_hip3_asset_and_no_hyperliquid_coin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_loader_defaults_hyperliquid_coin_to_dex_qualified_hip3_symbol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("HYPERLIQUID_COIN", raising=False)
     monkeypatch.setenv("PROPR_SYMBOL", "xyz:AAPL")
     monkeypatch.delenv("HYPERLIQUID_BASE_URL", raising=False)
     monkeypatch.delenv("HYPERLIQUID_INTERVAL", raising=False)
     monkeypatch.delenv("HYPERLIQUID_LOOKBACK_BARS", raising=False)
 
-    with pytest.raises(ValueError, match="HYPERLIQUID_COIN is required for HIP-3"):
-        load_hyperliquid_config_from_env()
+    config = load_hyperliquid_config_from_env()
+    assert config.coin == "xyz:AAPL"
+
+
+def test_env_loader_hyperliquid_coin_env_overrides_hip3_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HYPERLIQUID_COIN", "xyz:GOLD")
+    monkeypatch.setenv("PROPR_SYMBOL", "xyz:AAPL")
+    monkeypatch.delenv("HYPERLIQUID_BASE_URL", raising=False)
+    monkeypatch.delenv("HYPERLIQUID_INTERVAL", raising=False)
+    monkeypatch.delenv("HYPERLIQUID_LOOKBACK_BARS", raising=False)
+
+    config = load_hyperliquid_config_from_env()
+    assert config.coin == "xyz:GOLD"

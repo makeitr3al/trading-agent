@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.journal import append_multi_market_scan_failure_journal
 from utils.journal_table import build_journal_table
 
 
@@ -152,6 +153,98 @@ def test_build_journal_table_lifecycle_rows_grouped_by_signal_lifecycle_id(tmp_p
     assert lr["pnl"] == 1.5
     assert len(lr["steps"]) >= 4
     assert "lifecycle_phases" in payload["filter_options"]
+
+
+def test_append_multi_market_scan_failure_journal_surfaces_in_scan_rows(tmp_path: Path) -> None:
+    journal_path = tmp_path / "journal.jsonl"
+    executed = "2026-04-13T22:53:30+00:00"
+    append_multi_market_scan_failure_journal(
+        journal_path,
+        symbol="EUR",
+        environment="beta",
+        executed_at=executed,
+        error_message="500 Server Error: Internal Server Error for url: https://api.hyperliquid.xyz/info",
+        scan_effective_submit_allowed=True,
+    )
+    payload = build_journal_table(path=journal_path)
+    assert len(payload["scan_rows"]) == 1
+    row = payload["scan_rows"][0]
+    assert row["symbol"] == "EUR"
+    assert row["decision_action"] == "NO_ACTION"
+    assert row["skip_reason"] == "scan_failed"
+    assert row["scan_cycle_phase"] == "scan_failed"
+    assert "500" in (row["notes"] or "")
+
+
+def test_build_journal_table_dedupes_multi_scan_dry_run_and_execute_same_bar(tmp_path: Path) -> None:
+    """Multi-market scan journals dry_run then execute with same entry_timestamp (last bar); UI expects one row."""
+    journal_path = tmp_path / "journal.jsonl"
+    ts = "2026-04-13T22:53:24+00:00"
+    executed = "2026-04-13T22:53:22+00:00"
+    entries = [
+        {
+            "entry_type": "cycle",
+            "entry_date": "2026-04-13",
+            "entry_timestamp": ts,
+            "executed_at": executed,
+            "symbol": "BTC",
+            "environment": "beta",
+            "decision_action": "PREPARE_TREND_ORDER",
+            "used_signals": ["TREND_LONG"],
+            "received_signals": [{"signal_type": "TREND_LONG", "is_valid": True, "reason": "valid trend signal"}],
+            "notes": "valid trend signal",
+            "scan_cycle_phase": "dry_run",
+        },
+        {
+            "entry_type": "cycle",
+            "entry_date": "2026-04-13",
+            "entry_timestamp": ts,
+            "executed_at": executed,
+            "symbol": "BTC",
+            "environment": "beta",
+            "decision_action": "PREPARE_TREND_ORDER",
+            "used_signals": ["TREND_LONG"],
+            "received_signals": [{"signal_type": "TREND_LONG", "is_valid": True, "reason": "valid trend signal"}],
+            "notes": "valid trend signal",
+            "skipped_reason": "beta does not support standalone stop entries",
+            "scan_cycle_phase": "execute",
+        },
+        {
+            "entry_type": "order",
+            "entry_date": "2026-04-13",
+            "entry_timestamp": ts,
+            "executed_at": executed,
+            "symbol": "BTC",
+            "environment": "beta",
+            "status": "blocked",
+            "direction": "long",
+            "source_signal_type": "TREND_LONG",
+        },
+        {
+            "entry_type": "cycle",
+            "entry_date": "2026-04-13",
+            "entry_timestamp": "2026-04-13T22:53:25+00:00",
+            "executed_at": executed,
+            "symbol": "ETH",
+            "environment": "beta",
+            "decision_action": "NO_ACTION",
+            "used_signals": [],
+            "received_signals": [],
+            "notes": "no valid signal",
+            "scan_cycle_phase": "dry_run",
+        },
+    ]
+    journal_path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+
+    payload = build_journal_table(path=journal_path)
+
+    btc_rows = [r for r in payload["scan_rows"] if r["symbol"] == "BTC"]
+    assert len(btc_rows) == 1
+    assert btc_rows[0]["scan_cycle_phase"] == "execute"
+    assert btc_rows[0]["skip_reason"] == "beta does not support standalone stop entries"
+    assert btc_rows[0]["order_created"] is True
+    eth_rows = [r for r in payload["scan_rows"] if r["symbol"] == "ETH"]
+    assert len(eth_rows) == 1
 
 
 def test_build_journal_table_warns_for_large_entry_count(tmp_path: Path) -> None:

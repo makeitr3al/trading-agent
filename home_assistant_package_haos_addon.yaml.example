@@ -38,11 +38,11 @@ input_text:
   trading_agent_markets:
     name: Trading Agent Maerkte
     initial: BTC,ETH,SOL,XRP
-    max: 1024
+    max: 255
     icon: mdi:format-list-bulleted
   trading_agent_addon_slug:
     name: Trading Agent Add-on Slug
-    initial: trading_agent
+    initial: 1bd4c6be_trading_agent
     max: 100
     icon: mdi:puzzle
   trading_agent_challenge_id:
@@ -59,11 +59,11 @@ input_text:
 input_boolean:
   trading_agent_scheduling_aktiv:
     name: Trading Agent Scheduling aktiv
-    initial: false
+    initial: true
     icon: mdi:calendar-clock
   trading_agent_push_aktiv:
     name: Trading Agent Push aktiv
-    initial: false
+    initial: true
     icon: mdi:bell-ring-outline
 
 input_datetime:

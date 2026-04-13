@@ -4,10 +4,13 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from utils.asset_normalizer import AssetInfo
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +239,38 @@ class AssetRegistry:
 
     def is_available(self, name: str) -> bool:
         return self.get(name) is not None
+
+    def validate_perp_coin_for_data_fetch(self, coin: str) -> None:
+        """Raise if ``coin`` is not a known Hyperliquid perp name (crypto universe)."""
+        self.ensure_fresh()
+        crypto_names = {a.name.upper() for a in self.list_crypto()}
+        if not crypto_names:
+            logger.warning("Skipping Hyperliquid perp coin validation: empty crypto universe (offline?)")
+            return
+        upper = coin.strip().upper()
+        if upper in crypto_names:
+            return
+        sample = ", ".join(sorted(crypto_names)[:16])
+        raise ValueError(
+            f"Unknown Hyperliquid perp {coin!r}: not in meta universe. "
+            f"Use a listed perp coin (examples: {sample})."
+        )
+
+    def validate_scan_asset_for_hyperliquid_fetch(self, asset: AssetInfo) -> None:
+        """Preflight for multi-market scan: crypto perps vs HIP-3 / builder assets."""
+        self.ensure_fresh()
+        if asset.is_hip3:
+            hip = self.list_hip3()
+            if not hip:
+                logger.warning("Skipping HIP-3 validation: empty hip3 universe (offline?)")
+                return
+            if self.is_available(asset.asset) or self.is_available(asset.base):
+                return
+            raise ValueError(
+                f"Unknown HIP-3 asset {asset.asset!r}: not in asset registry. "
+                f"Use SCAN_MARKETS=xyz:TICKER for a listed builder market."
+            )
+        self.validate_perp_coin_for_data_fetch(asset.coin or asset.base)
 
     def _try_load_cache(self) -> bool:
         if not self._cache_path.exists():

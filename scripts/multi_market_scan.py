@@ -9,7 +9,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.journal import append_multi_market_scan_failure_journal
 from app.trading_app import MAX_OPEN_ORDER_TRADE_SLOTS, run_app_cycle
+from broker.asset_registry import AssetRegistry
 from broker.challenge_service import get_active_challenge_context
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
@@ -320,7 +322,7 @@ def main() -> None:
             load_hyperliquid_config_from_env() if data_source_settings.data_source == "live" else None
         )
 
-        from utils.asset_normalizer import normalize_asset
+        from utils.asset_normalizer import hyperliquid_candle_coin, normalize_asset
 
         scan_executed_at = datetime.now(timezone.utc).isoformat()
         scan_results: list[dict[str, Any]] = []
@@ -328,8 +330,10 @@ def main() -> None:
         for asset_ticker in scan_settings.assets:
             asset_info = normalize_asset(asset_ticker)
             symbol = asset_info.asset
-            coin = asset_info.coin or asset_info.base
+            coin = hyperliquid_candle_coin(asset_info)
             print(f"Scanning asset={asset_ticker} coin={coin}")
+            if data_source_settings.data_source == "live":
+                AssetRegistry().validate_scan_asset_for_hyperliquid_fetch(asset_info)
             try:
                 data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
                     data_source=data_source_settings.data_source,
@@ -373,6 +377,15 @@ def main() -> None:
                 )
             except Exception as exc:
                 scan_results.append(_failed_market_summary(symbol, coin, exc))
+                if scan_settings.journal_path:
+                    append_multi_market_scan_failure_journal(
+                        scan_settings.journal_path,
+                        symbol=symbol,
+                        environment=environment,
+                        executed_at=scan_executed_at,
+                        error_message=str(exc),
+                        scan_effective_submit_allowed=effective_allow_submit,
+                    )
 
         markets_with_valid_trend = [item for item in scan_results if item["trend_signal_valid"]]
         markets_with_valid_countertrend = [item for item in scan_results if item["countertrend_signal_valid"]]

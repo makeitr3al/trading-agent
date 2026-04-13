@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import pytest
 
-from config.strategy_config import StrategyConfig, build_strategy_config
+from config.strategy_config import StrategyConfig, build_strategy_config, min_strategy_candle_count
 from tests.fixtures.strategy_scenarios import make_config
 
 
 def test_build_strategy_config_uses_live_defaults() -> None:
     assert build_strategy_config() == StrategyConfig()
+
+
+def test_min_strategy_candle_count_matches_default_indicator_windows() -> None:
+    assert min_strategy_candle_count(StrategyConfig()) == max(
+        StrategyConfig().bollinger_period,
+        StrategyConfig().macd_slow_period,
+    )
 
 
 def test_build_strategy_config_applies_runtime_overrides_without_losing_defaults() -> None:

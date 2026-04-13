@@ -49,7 +49,7 @@ def test_live_data_provider_integration_uses_same_internal_candle_model_as_golde
 
     assert len(batch.candles) == len(scenario.candles)
     assert batch.source_name == "hyperliquid_historical"
-    assert batch.candles[0].timestamp == scenario.candles[0].timestamp.replace(tzinfo=timezone.utc)
+    assert batch.candles[0].timestamp == scenario.candles[0].timestamp
     assert batch.candles[-1].close == scenario.candles[-1].close
     assert result.decision.action.value == scenario.expected_decision_action
     assert result.order is not None
