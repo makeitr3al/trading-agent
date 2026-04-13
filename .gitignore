@@ -42,6 +42,9 @@ htmlcov/
 # Local reference docs (not project code)
 broker/propr_docs.txt
 
+# Local debug / try-and-error scripts (not shipped)
+scripts/propr_submit_debug_json.py
+
 # Artifacts (generated / cached data)
 artifacts/asset_registry.json
 artifacts/live_status.json
