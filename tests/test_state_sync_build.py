@@ -515,3 +515,43 @@ def test_build_agent_state_from_propr_data_warns_when_bound_exit_orders_exist_wi
     assert state.take_profit_order_id is None
     assert state.active_trade is None
     assert "exit orders found without active position" in capsys.readouterr().out
+
+
+def test_build_agent_state_omits_partial_fill_pending_when_open_position_exists_for_symbol() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "orderId": "ord-partial",
+                    "side": "buy",
+                    "type": "stop_limit",
+                    "price": 110,
+                    "stopLoss": 100,
+                    "takeProfit": 130,
+                    "status": "partially_filled",
+                }
+            ]
+        },
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.0",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "0.5",
+                    "positionId": "pos-1",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+    )
+
+    assert state.active_trade is not None
+    assert state.active_trade.position_id == "pos-1"
+    assert state.pending_order is None
+    assert state.pending_order_id is None
+    assert state.account_open_entry_orders_count == 1

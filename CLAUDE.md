@@ -96,6 +96,7 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 | `TRADING_AGENT_RUNTIME_CONFIG_PATH` | optional, überschreibt Standardpfad |
 | `TRADING_AGENT_LIVE_STATUS_PATH` / `OPERATOR_LIVE_STATUS_PATH` | optional, Ziel für `live_status.json` (REST-Sync, WS-Daemon, HA-Panel) |
 | `PROPR_REQUIRE_HEALTHY_CORE` | `YES`/`NO` für Core-Health-Guard |
+| `PROPR_STABLE_INTENT_ID` | optional `YES`: Pending-Entry-Submits nutzen deterministisches `intentId` aus Seed (`build_order_submission_preview`); nur nach Abgleich mit Propr-Idempotenz-Verhalten aktivieren |
 
 ---
 

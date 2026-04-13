@@ -110,7 +110,9 @@ flowchart LR
 These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-negotiable architecture constraints**.
 
 - **Decimals:** Money and quantity paths in the broker layer use `Decimal`, not `float`.
-- **Identifiers:** New orders use ULID as `intentId` where applicable.
+- **Identifiers:** New orders use ULID as `intentId` where applicable. With `PROPR_STABLE_INTENT_ID=YES`, pending-entry previews built via `build_order_submission_preview` may use `derive_stable_intent_id(seed)` instead (opt-in; confirm Propr idempotency semantics before relying on it in prod).
+- **Broker reconciliation:** If `submit_agent_order_if_allowed` finds an equivalent pending entry already at the broker, it returns `existing_external_order_id` without submitting again; `run_app_cycle` copies that id into `post_cycle_state.pending_order_id` and does not set `skipped_reason`, so journal and agent state stay aligned with Propr.
+- **Partial fills:** When a symbol-scoped open position exists and a pending entry order is `partially_filled` / `partial_fill`, `build_agent_state_from_propr_data` does not attach that order as `pending_order` (the open position is the exposure source of truth); it remains counted in `account_open_entry_orders_count`.
 - **Environments:** Default development on `PROPR_ENV=beta`. Production requires `PROPR_PROD_CONFIRM=YES` in `.env` (never commit that flag as enabled in examples).
 - **Submit gates:** Real submits require explicit flags (`MANUAL_ALLOW_SUBMIT`, `RUNNER_ALLOW_SUBMIT`, `SCAN_ALLOW_SUBMIT`, etc., per context). **`DATA_SOURCE=golden` hard-blocks submit** regardless of flags.
 - **SymbolSpec:** Live submit is blocked if symbol specification cannot be loaded.
@@ -150,6 +152,7 @@ Answer explicitly when touching cycle behavior, layering, or execution policy:
 - [ ] Are new quantity/price paths using `Decimal` in the broker layer?
 - [ ] Do tests cover the new branch without requiring real Propr prod?
 - [ ] If public cycle behavior or safety rules changed, is **this manifest** (or CLAUDE.md for ops-only detail) updated in the same PR?
+- [ ] If execution reconciliation, partial-fill state, or optional stable `intentId` behavior changed, are §5 invariants and affected tests updated?
 
 ---
 
@@ -157,4 +160,4 @@ Answer explicitly when touching cycle behavior, layering, or execution policy:
 
 Any pull request that changes **public per-cycle behavior**, **layer imports**, or **submit/safety policy** must update this manifest in the same PR when the architectural contract changes. Purely internal refactors that preserve the above contracts do not require manifest edits.
 
-**Version:** Document creation tracks repository state; bump or date this section when making substantive contract changes. **2026-04:** Orchestration split documented — `app/app_cycle_helpers.py`, `utils/propr_response.py`, `broker/propr_payload_parse.py`, `broker/propr_order_position_map.py`, thinner `broker/state_sync.py` facade; dependency rules in §2.2 unchanged.
+**Version:** Document creation tracks repository state; bump or date this section when making substantive contract changes. **2026-04:** Orchestration split documented — `app/app_cycle_helpers.py`, `utils/propr_response.py`, `broker/propr_payload_parse.py`, `broker/propr_order_position_map.py`, thinner `broker/state_sync.py` facade; dependency rules in §2.2 unchanged. **2026-04 (later):** Execution reconciliation (`SubmitAgentOrderResult.existing_external_order_id`), optional `PROPR_STABLE_INTENT_ID` + `derive_stable_intent_id`, partial-fill pending omission when a position exists for the symbol.

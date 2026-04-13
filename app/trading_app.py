@@ -45,6 +45,21 @@ from utils.propr_response import extract_external_order_id
 MAX_OPEN_ORDER_TRADE_SLOTS = 3
 
 
+def _stable_intent_seed_for_entry_order(
+    *,
+    account_id: str,
+    symbol: str,
+    executed_at: str | None,
+    order: Order,
+) -> str | None:
+    if executed_at is None or not str(executed_at).strip():
+        return None
+    return (
+        f"{account_id}|{symbol}|{str(executed_at).strip()}|{order.order_type}|{order.entry}|"
+        f"{order.stop_loss}|{order.take_profit}|{order.position_size}|{order.signal_source}"
+    )
+
+
 class AppCycleResult(BaseModel):
     challenge_context: ActiveChallengeContext | None
     synced_state: AgentState | None
@@ -411,6 +426,13 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
         ctx.skipped_reason = pending_order_size_reason
         return ctx.build_result()
 
+    stable_seed = _stable_intent_seed_for_entry_order(
+        account_id=account_id,
+        symbol=ctx.symbol,
+        executed_at=ctx.executed_at,
+        order=ctx.post_cycle_state.pending_order,
+    )
+
     if ctx.synced_state.pending_order is not None:
         ctx.execution_response = safe_replace_pending_order(
             order_service=ctx.order_service,
@@ -418,6 +440,7 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
             symbol=ctx.symbol,
             state=ctx.synced_state,
             new_order=ctx.post_cycle_state.pending_order,
+            stable_intent_seed=stable_seed,
         )
         ctx.replaced_order = True
         if isinstance(ctx.execution_response, dict):
@@ -434,6 +457,7 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
             symbol=ctx.symbol,
             state=ctx.synced_state,
             order=ctx.post_cycle_state.pending_order,
+            stable_intent_seed=stable_seed,
         )
         ctx.execution_response = submit_outcome.response
         if submit_outcome.response is not None:
@@ -442,6 +466,10 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
                 update={
                     "pending_order_id": extract_external_order_id(submit_outcome.response),
                 }
+            )
+        elif submit_outcome.existing_external_order_id is not None:
+            ctx.post_cycle_state = ctx.post_cycle_state.model_copy(
+                update={"pending_order_id": submit_outcome.existing_external_order_id},
             )
         elif ctx.skipped_reason is None and submit_outcome.skip_reason is not None:
             ctx.skipped_reason = submit_outcome.skip_reason
@@ -470,6 +498,9 @@ def run_app_cycle(
     scan_effective_submit_allowed: bool | None = None,
     scan_cycle_phase: str | None = None,
 ) -> AppCycleResult:
+    if executed_at is None:
+        executed_at = datetime.now(timezone.utc).isoformat()
+
     ctx = _CycleContext(
         client=client,
         order_service=order_service,

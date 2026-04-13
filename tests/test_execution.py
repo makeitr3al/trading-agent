@@ -36,8 +36,8 @@ class FakeProprOrderService:
         self.calls: list[tuple[str, str, object]] = []
         self.client = FakeProprClient(orders_payload) if orders_payload is not None else None
 
-    def submit_pending_order(self, account_id: str, order: Order, symbol: str) -> dict:
-        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol}))
+    def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict:
+        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol, **kwargs}))
         return {"id": "external-new-order", "status": "submitted"}
 
     def submit_market_close(self, account_id: str, active_trade: Trade, symbol: str) -> dict:
@@ -176,7 +176,7 @@ def test_submit_agent_order_if_allowed_returns_none_when_blocked() -> None:
         order=_make_order(),
     )
 
-    assert result == SubmitAgentOrderResult(None, "submit blocked: pending order already in agent state")
+    assert result == SubmitAgentOrderResult(None, "submit blocked: pending order already in agent state", None)
     assert service.calls == []
 
 
@@ -192,9 +192,28 @@ def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
         order=_make_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
     assert service.calls[0][0] == "submit"
 
+
+def test_submit_agent_order_if_allowed_passes_stable_intent_seed_to_submit_pending_order() -> None:
+    captured: dict[str, object] = {}
+
+    class TrackingService(FakeProprOrderService):
+        def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict:
+            captured.update(kwargs)
+            return super().submit_pending_order(account_id, order, symbol, **kwargs)
+
+    service = TrackingService()
+    submit_agent_order_if_allowed(
+        service,
+        "account-1",
+        "EURUSD",
+        AgentState(),
+        _make_order(),
+        stable_intent_seed="cycle-seed-1",
+    )
+    assert captured.get("stable_intent_seed") == "cycle-seed-1"
 
 
 def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pending_order_exists() -> None:
@@ -210,7 +229,8 @@ def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pen
 
     assert result == SubmitAgentOrderResult(
         None,
-        "submit skipped: equivalent pending order already exists at broker",
+        None,
+        "external-existing-order",
     )
     assert service.calls == []
     assert service.client is not None
@@ -231,7 +251,7 @@ def test_submit_agent_order_if_allowed_ignores_equivalent_order_on_other_symbol(
         order=_make_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
     assert service.calls[0][0] == "submit"
 
 
@@ -251,14 +271,14 @@ def test_submit_agent_order_if_allowed_ignores_reduce_only_exit_orders_when_dedu
         order=_make_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
     assert service.calls[0][0] == "submit"
 
 
 
 class FakeProprOrderServiceSubmitReturnsNone(FakeProprOrderService):
-    def submit_pending_order(self, account_id: str, order: Order, symbol: str) -> dict | None:
-        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol}))
+    def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict | None:
+        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol, **kwargs}))
         return None
 
 
@@ -273,7 +293,7 @@ def test_submit_agent_order_if_allowed_records_skip_when_broker_returns_no_respo
         order=_make_order(),
     )
 
-    assert result == SubmitAgentOrderResult(None, "pending order submit returned no confirmation")
+    assert result == SubmitAgentOrderResult(None, "pending order submit returned no confirmation", None)
     assert service.calls[0][0] == "submit"
 
 
@@ -339,7 +359,9 @@ def test_safe_replace_pending_order_submits_directly_when_no_replacement_is_need
     )
 
     assert result == {"id": "external-new-order", "status": "submitted"}
-    assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+    assert service.calls == [
+        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+    ]
 
 
 
@@ -380,7 +402,9 @@ def test_safe_replace_pending_order_submits_fresh_when_pending_order_id_is_missi
         "cancel": None,
         "submit": {"id": "external-new-order", "status": "submitted"},
     }
-    assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+    assert service.calls == [
+        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+    ]
 
 
 
@@ -421,7 +445,9 @@ def test_safe_replace_pending_order_submits_fresh_when_local_pending_order_id_is
         "cancel": None,
         "submit": {"id": "external-new-order", "status": "submitted"},
     }
-    assert service.calls == [("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD"})]
+    assert service.calls == [
+        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+    ]
 
 
 

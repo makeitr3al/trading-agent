@@ -12,10 +12,12 @@ from broker.propr_order_position_map import (
 from broker.propr_payload_parse import (
     _extract_decimal,
     _get_items,
+    _normalize_status,
     _payload_matches_symbol,
 )
 from models.agent_state import AgentState
 from models.order import Order, OrderStatus
+from models.trade import Trade
 from utils.propr_response import extract_external_order_id, get_first_key
 
 # TODO: Later add trade history handling.
@@ -185,6 +187,25 @@ def _resolve_exit_order_ids_for_active_position(
     return []
 
 
+def _mapped_positions_for_symbol(
+    positions_payload: dict | list[dict],
+    normalized_symbol: str | None,
+) -> list[Trade]:
+    mapped_position_entries = [
+        (item, position)
+        for item, position in (
+            (item, map_propr_position_to_internal(item))
+            for item in _get_items(positions_payload)
+        )
+        if position is not None
+    ]
+    return [
+        position
+        for item, position in mapped_position_entries
+        if _payload_matches_symbol(item, normalized_symbol)
+    ]
+
+
 def build_agent_state_from_propr_data(
     orders_payload: dict | list[dict],
     positions_payload: dict | list[dict],
@@ -192,6 +213,8 @@ def build_agent_state_from_propr_data(
     symbol: str | None = None,
 ) -> AgentState:
     normalized_symbol = symbol.strip().upper() if isinstance(symbol, str) and symbol.strip() else None
+
+    mapped_positions = _mapped_positions_for_symbol(positions_payload, normalized_symbol)
 
     all_valid_order_entries: list[tuple[Order, str | None]] = []
     valid_order_entries: list[tuple[Order, str | None]] = []
@@ -206,7 +229,12 @@ def build_agent_state_from_propr_data(
             if mapped_order is not None and mapped_order.status == OrderStatus.PENDING:
                 all_valid_order_entries.append((mapped_order, external_order_id))
                 if _payload_matches_symbol(item, normalized_symbol):
-                    valid_order_entries.append((mapped_order, external_order_id))
+                    raw_status = _normalize_status(get_first_key(item, ["status"]))
+                    partial_entry = raw_status in {"partially_filled", "partial_fill"}
+                    if normalized_symbol is not None and mapped_positions and partial_entry:
+                        pass
+                    else:
+                        valid_order_entries.append((mapped_order, external_order_id))
             continue
 
         if not _payload_matches_symbol(item, normalized_symbol):
@@ -221,20 +249,6 @@ def build_agent_state_from_propr_data(
         if order_classification == "take_profit_exit":
             take_profit_exit_entries.append((external_order_id, linked_position_id))
             continue
-
-    mapped_position_entries = [
-        (item, position)
-        for item, position in (
-            (item, map_propr_position_to_internal(item))
-            for item in _get_items(positions_payload)
-        )
-        if position is not None
-    ]
-    mapped_positions = [
-        position
-        for item, position in mapped_position_entries
-        if _payload_matches_symbol(item, normalized_symbol)
-    ]
 
     if len(valid_order_entries) > 1:
         raise ValueError(

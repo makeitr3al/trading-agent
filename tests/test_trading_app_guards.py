@@ -164,7 +164,7 @@ def test_app_cycle_exposes_asset_guard_result_when_execution_is_allowed(monkeypa
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
     monkeypatch.setattr(
         "app.trading_app.submit_agent_order_if_allowed",
-        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+        lambda *args, **kwargs: SubmitAgentOrderResult({"submitted": True}, None, None),
     )
 
     result = run_app_cycle(
@@ -315,7 +315,7 @@ def test_execution_proceeds_when_symbol_spec_is_present_and_guards_pass(monkeypa
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
     monkeypatch.setattr(
         "app.trading_app.submit_agent_order_if_allowed",
-        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+        lambda *args, **kwargs: SubmitAgentOrderResult({"submitted": True}, None, None),
     )
 
     result = run_app_cycle(

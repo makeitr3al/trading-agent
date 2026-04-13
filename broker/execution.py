@@ -12,10 +12,11 @@ from broker.order_service import (
 )
 from broker.state_sync import map_propr_order_to_internal
 
-# TODO: Later add real idempotency.
-# TODO: Later add duplicate detection based on external order ids.
-# TODO: Later sync with Propr open orders before submit.
-# TODO: Later handle partial fills.
+# Reconciliation: ``find_equivalent_external_pending_order_id`` + ``get_orders`` before submit;
+# ``SubmitAgentOrderResult.existing_external_order_id`` aligns agent state when an equivalent broker order exists.
+# Optional stable ``intent_id``: ``PROPR_STABLE_INTENT_ID=YES`` + seed via ``order_service.submit_pending_order`` (see order_service).
+# Partial fills: ``build_agent_state_from_propr_data`` omits symbol-scoped ``pending_order`` when an open position exists
+# and the entry order is ``partially_filled`` (position is source of truth for exposure).
 
 
 FLOAT_TOLERANCE = 1e-9
@@ -355,6 +356,7 @@ class SubmitAgentOrderResult:
 
     response: dict | None
     skip_reason: str | None
+    existing_external_order_id: str | None = None
 
 
 def submit_agent_order_if_allowed(
@@ -363,10 +365,11 @@ def submit_agent_order_if_allowed(
     symbol: str,
     state: AgentState,
     order: Order | None,
+    stable_intent_seed: str | None = None,
 ) -> SubmitAgentOrderResult:
     blocked = _submit_agent_order_skip_reason(state, order)
     if blocked is not None:
-        return SubmitAgentOrderResult(None, blocked)
+        return SubmitAgentOrderResult(None, blocked, None)
 
     existing_order_id = find_equivalent_external_pending_order_id(
         order_service=order_service,
@@ -375,15 +378,14 @@ def submit_agent_order_if_allowed(
         order=order,
     )
     if existing_order_id is not None:
-        return SubmitAgentOrderResult(
-            None,
-            "submit skipped: equivalent pending order already exists at broker",
-        )
+        return SubmitAgentOrderResult(None, None, existing_order_id)
 
-    broker_response = order_service.submit_pending_order(account_id, order, symbol)
+    broker_response = order_service.submit_pending_order(
+        account_id, order, symbol, stable_intent_seed=stable_intent_seed
+    )
     if broker_response is None:
-        return SubmitAgentOrderResult(None, "pending order submit returned no confirmation")
-    return SubmitAgentOrderResult(broker_response, None)
+        return SubmitAgentOrderResult(None, "pending order submit returned no confirmation", None)
+    return SubmitAgentOrderResult(broker_response, None, None)
 
 
 
@@ -427,10 +429,13 @@ def safe_replace_pending_order(
     symbol: str,
     state: AgentState,
     new_order: Order | None,
+    stable_intent_seed: str | None = None,
 ) -> dict | None:
     if not should_cancel_existing_pending_order(state, new_order):
         if new_order is not None and should_submit_order(state, new_order):
-            return order_service.submit_pending_order(account_id, new_order, symbol)
+            return order_service.submit_pending_order(
+                account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+            )
         return None
 
     if new_order is None:
@@ -450,7 +455,9 @@ def safe_replace_pending_order(
                 return _build_reused_pending_order_response(existing_order_id)
 
         cancel_response = order_service.cancel_order(account_id, state.pending_order_id)
-        submit_response = order_service.submit_pending_order(account_id, new_order, symbol)
+        submit_response = order_service.submit_pending_order(
+            account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+        )
         return {
             "cancel": cancel_response,
             "submit": submit_response,
@@ -465,7 +472,9 @@ def safe_replace_pending_order(
     if equivalent_order_id is not None:
         return _build_reused_pending_order_response(equivalent_order_id)
 
-    submit_response = order_service.submit_pending_order(account_id, new_order, symbol)
+    submit_response = order_service.submit_pending_order(
+        account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+    )
     return {
         "cancel": None,
         "submit": submit_response,

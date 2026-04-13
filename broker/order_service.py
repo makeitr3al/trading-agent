@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from decimal import Decimal
 from typing import Any
 
@@ -81,6 +83,22 @@ def generate_intent_id() -> str:
     return str(ULID())
 
 
+def _stable_intent_id_env_enabled() -> bool:
+    return os.environ.get("PROPR_STABLE_INTENT_ID", "").strip().upper() == "YES"
+
+
+def derive_stable_intent_id(seed: str) -> str:
+    """Deterministic 26-char id from seed (Crockford-ish charset) for optional submit idempotency."""
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    out: list[str] = []
+    n = int(digest[:32], 16)
+    for _ in range(26):
+        n, r = divmod(n, 32)
+        out.append(alphabet[r])
+    return "".join(out)
+
+
 
 def apply_symbol_spec_to_order(order: Order, symbol_spec: SymbolSpec | None) -> Order:
     if symbol_spec is None:
@@ -111,6 +129,7 @@ def build_manual_order_submission_preview(
     internal_stop_loss: float | int | str | Decimal | None = None,
     internal_take_profit: float | int | str | Decimal | None = None,
     position_id: str | None = None,
+    intent_id: str | None = None,
 ) -> dict[str, Any]:
     asset, base, quote = _parse_symbol(symbol)
     normalized_side = _require_non_empty(side, "side").lower()
@@ -132,7 +151,7 @@ def build_manual_order_submission_preview(
         "time_in_force": time_in_force or ("IOC" if normalized_order_type == "market" else "GTC"),
         "reduce_only": reduce_only,
         "close_position": close_position,
-        "intent_id": generate_intent_id(),
+        "intent_id": intent_id or generate_intent_id(),
         # The sandbox may require position_id for conditional exit orders.
         "position_id": position_id,
     }
@@ -159,6 +178,7 @@ def build_order_submission_preview(
     reduce_only: bool = False,
     close_position: bool = False,
     symbol_spec: SymbolSpec | None = None,
+    stable_intent_seed: str | None = None,
 ) -> dict[str, Any]:
     prepared_order = apply_symbol_spec_to_order(order, symbol_spec)
 
@@ -166,6 +186,10 @@ def build_order_submission_preview(
         raise ValueError("position_size is required")
     if _to_decimal(prepared_order.position_size) <= Decimal("0"):
         raise ValueError("position_size must be positive")
+
+    resolved_intent: str | None = None
+    if stable_intent_seed is not None and _stable_intent_id_env_enabled():
+        resolved_intent = derive_stable_intent_id(stable_intent_seed)
 
     params = build_manual_order_submission_preview(
         symbol=symbol,
@@ -177,6 +201,7 @@ def build_order_submission_preview(
         close_position=close_position,
         internal_stop_loss=prepared_order.stop_loss,
         internal_take_profit=prepared_order.take_profit,
+        intent_id=resolved_intent,
     )
 
     if prepared_order.order_type == OrderType.BUY_LIMIT:
@@ -311,6 +336,7 @@ def map_internal_order_to_propr_payload(
     reduce_only: bool = False,
     close_position: bool = False,
     symbol_spec: SymbolSpec | None = None,
+    stable_intent_seed: str | None = None,
 ) -> dict[str, Any]:
     return build_order_submission_preview(
         order,
@@ -318,6 +344,7 @@ def map_internal_order_to_propr_payload(
         reduce_only=reduce_only,
         close_position=close_position,
         symbol_spec=symbol_spec,
+        stable_intent_seed=stable_intent_seed,
     )
 
 
@@ -385,6 +412,7 @@ class ProprOrderService:
         close_position: bool = False,
         submission_preview: dict[str, Any] | None = None,
         symbol_spec: SymbolSpec | None = None,
+        stable_intent_seed: str | None = None,
     ) -> dict[str, Any]:
         normalized_account_id = _require_non_empty(account_id, "account_id")
         preview = submission_preview or build_order_submission_preview(
@@ -393,6 +421,7 @@ class ProprOrderService:
             reduce_only=reduce_only,
             close_position=close_position,
             symbol_spec=symbol_spec,
+            stable_intent_seed=stable_intent_seed,
         )
         return self.submit_order_preview(normalized_account_id, preview)
 
@@ -441,6 +470,7 @@ class ProprOrderService:
 
 __all__ = [
     "generate_intent_id",
+    "derive_stable_intent_id",
     "apply_symbol_spec_to_order",
     "build_manual_order_submission_preview",
     "build_order_submission_preview",

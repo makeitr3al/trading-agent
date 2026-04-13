@@ -94,7 +94,7 @@ def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatc
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
     monkeypatch.setattr(
         "app.trading_app.submit_agent_order_if_allowed",
-        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+        lambda *args, **kwargs: SubmitAgentOrderResult({"submitted": True}, None, None),
     )
 
     result = run_app_cycle(
