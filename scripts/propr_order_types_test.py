@@ -360,7 +360,11 @@ def _run_pending_order_tests(
                 preview,
             )
         except ProprAPIError as exc:
-            msg = str(exc.message or exc).lower()
+            raw_msg = getattr(exc, "message", None)
+            text = str(raw_msg) if raw_msg is not None else ""
+            if not text.strip():
+                text = str(exc)
+            msg = text.lower()
             if exc.code == 13056 or "conditional_order_requires_position_or_group" in msg:
                 print(f"  API rejected standalone conditional entry (expected on some Beta accounts): {exc}")
                 results.append((order_type.value, "SKIPPED_API_REQUIRES_POSITION_OR_GROUP"))

@@ -1,10 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.app_cycle_helpers import (
+    _apply_symbol_specific_position_size,
+    _beta_blocks_standalone_entry_order,
+    _count_open_order_trade_slots,
+    _validate_pending_order_execution_size,
+)
 from app.journal import append_journal_entries, build_journal_entries
 from app.risk_guard import RiskGuardResult, evaluate_execution_guards
 from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
@@ -16,19 +21,19 @@ from broker.execution import (
     submit_agent_order_if_allowed,
 )
 from broker.health_guard import HealthGuardResult, fetch_and_check_core_service_health
-from broker.order_service import ProprOrderService, apply_symbol_spec_to_order
+from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.state_sync import sync_agent_state_from_propr
 from config.strategy_config import StrategyConfig
 from models.candle import Candle
 from models.journal import JournalEntry
-from models.order import Order, OrderType
+from models.order import Order
 from models.propr_challenge import ActiveChallengeContext
 from models.runner_result import StrategyRunResult
 from models.symbol_spec import SymbolSpec
 from strategy.engine import run_agent_cycle
-from strategy.position_sizer import calculate_position_size, evaluate_position_size_execution
 from strategy.state import AgentState
+from utils.propr_response import extract_external_order_id
 
 # TODO: Later add challenge-specific risk limits.
 # TODO: Later load account balance directly from Propr.
@@ -38,100 +43,6 @@ from strategy.state import AgentState
 
 
 MAX_OPEN_ORDER_TRADE_SLOTS = 3
-
-
-def _beta_blocks_standalone_entry_order(order: Order | None, environment: str | None) -> bool:
-    """Skip API submit for standalone stop-limit entries on Beta: Propr returns 13056 conditional_order_requires_position_or_group."""
-    if (environment or "").strip().lower() != "beta" or order is None:
-        return False
-    return order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
-
-
-def _count_open_order_trade_slots(state: AgentState | None) -> int:
-    if state is None:
-        return 0
-
-    return (
-        int(getattr(state, "account_open_entry_orders_count", 0) or 0)
-        + int(getattr(state, "account_open_positions_count", 0) or 0)
-    )
-
-
-def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
-    for key in keys:
-        if key in payload and payload[key] is not None:
-            return payload[key]
-    return None
-
-
-
-def _extract_external_order_id(payload: dict[str, Any] | None) -> str | None:
-    if payload is None:
-        return None
-
-    direct_value = _extract_first(payload, ["id", "orderId", "order_id"])
-    if direct_value is not None:
-        text = str(direct_value).strip()
-        return text or None
-
-    nested_payload = payload.get("data")
-    if isinstance(nested_payload, list) and nested_payload:
-        first_item = nested_payload[0]
-        if isinstance(first_item, dict):
-            nested_value = _extract_first(first_item, ["id", "orderId", "order_id"])
-            if nested_value is not None:
-                text = str(nested_value).strip()
-                return text or None
-
-    if isinstance(nested_payload, dict):
-        nested_value = _extract_first(nested_payload, ["id", "orderId", "order_id"])
-        if nested_value is not None:
-            text = str(nested_value).strip()
-            return text or None
-
-    return None
-
-
-
-def _apply_symbol_specific_position_size(
-    order: Order,
-    config: StrategyConfig,
-    account_balance: float,
-    desired_leverage: int,
-    symbol_spec: SymbolSpec,
-) -> Order:
-    sizing_result = calculate_position_size(
-        entry=order.entry,
-        stop_loss=order.stop_loss,
-        account_balance=account_balance,
-        risk_per_trade_pct=config.risk_per_trade_pct,
-        desired_leverage=desired_leverage,
-        symbol_spec=symbol_spec,
-    )
-    prepared_order = order.model_copy(update={"position_size": sizing_result.position_size})
-    return apply_symbol_spec_to_order(prepared_order, symbol_spec)
-
-
-
-def _validate_pending_order_execution_size(
-    order: Order,
-    account_balance: float,
-    desired_leverage: int,
-    symbol_spec: SymbolSpec | None,
-) -> str | None:
-    if order.position_size is None:
-        return "position size unavailable"
-
-    sizing_execution_result = evaluate_position_size_execution(
-        entry=order.entry,
-        position_size=order.position_size,
-        account_balance=account_balance,
-        desired_leverage=desired_leverage,
-        max_leverage=symbol_spec.max_leverage if symbol_spec is not None else None,
-    )
-    return sizing_execution_result.reason
-
-
 
 
 class AppCycleResult(BaseModel):
@@ -513,26 +424,27 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
             submit_response = ctx.execution_response.get("submit")
             ctx.post_cycle_state = ctx.post_cycle_state.model_copy(
                 update={
-                    "pending_order_id": _extract_external_order_id(submit_response),
+                    "pending_order_id": extract_external_order_id(submit_response),
                 }
             )
     else:
-        ctx.execution_response = submit_agent_order_if_allowed(
+        submit_outcome = submit_agent_order_if_allowed(
             order_service=ctx.order_service,
             account_id=account_id,
             symbol=ctx.symbol,
             state=ctx.synced_state,
             order=ctx.post_cycle_state.pending_order,
         )
-        if ctx.execution_response is not None:
+        ctx.execution_response = submit_outcome.response
+        if submit_outcome.response is not None:
             ctx.submitted_order = True
             ctx.post_cycle_state = ctx.post_cycle_state.model_copy(
                 update={
-                    "pending_order_id": _extract_external_order_id(ctx.execution_response),
+                    "pending_order_id": extract_external_order_id(submit_outcome.response),
                 }
             )
-        elif ctx.skipped_reason is None:
-            ctx.skipped_reason = "pending order submit returned no confirmation"
+        elif ctx.skipped_reason is None and submit_outcome.skip_reason is not None:
+            ctx.skipped_reason = submit_outcome.skip_reason
 
     return None
 

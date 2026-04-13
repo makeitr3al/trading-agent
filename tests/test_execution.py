@@ -12,6 +12,7 @@ from broker.execution import (
     should_close_active_trade,
     should_submit_order,
     submit_active_trade_close_if_allowed,
+    SubmitAgentOrderResult,
     submit_agent_order_if_allowed,
 )
 from models.agent_state import AgentState
@@ -175,7 +176,7 @@ def test_submit_agent_order_if_allowed_returns_none_when_blocked() -> None:
         order=_make_order(),
     )
 
-    assert result is None
+    assert result == SubmitAgentOrderResult(None, "submit blocked: pending order already in agent state")
     assert service.calls == []
 
 
@@ -191,7 +192,7 @@ def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
         order=_make_order(),
     )
 
-    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
     assert service.calls[0][0] == "submit"
 
 
@@ -207,7 +208,10 @@ def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pen
         order=_make_order(),
     )
 
-    assert result is None
+    assert result == SubmitAgentOrderResult(
+        None,
+        "submit skipped: equivalent pending order already exists at broker",
+    )
     assert service.calls == []
     assert service.client is not None
     assert service.client.get_orders_calls == ["account-1"]
@@ -227,7 +231,7 @@ def test_submit_agent_order_if_allowed_ignores_equivalent_order_on_other_symbol(
         order=_make_order(),
     )
 
-    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
     assert service.calls[0][0] == "submit"
 
 
@@ -247,7 +251,29 @@ def test_submit_agent_order_if_allowed_ignores_reduce_only_exit_orders_when_dedu
         order=_make_order(),
     )
 
-    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None)
+    assert service.calls[0][0] == "submit"
+
+
+
+class FakeProprOrderServiceSubmitReturnsNone(FakeProprOrderService):
+    def submit_pending_order(self, account_id: str, order: Order, symbol: str) -> dict | None:
+        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol}))
+        return None
+
+
+def test_submit_agent_order_if_allowed_records_skip_when_broker_returns_no_response() -> None:
+    service = FakeProprOrderServiceSubmitReturnsNone()
+
+    result = submit_agent_order_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=AgentState(),
+        order=_make_order(),
+    )
+
+    assert result == SubmitAgentOrderResult(None, "pending order submit returned no confirmation")
     assert service.calls[0][0] == "submit"
 
 

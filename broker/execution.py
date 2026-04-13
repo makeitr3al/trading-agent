@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from models.agent_state import AgentState
@@ -331,18 +332,29 @@ def _find_equivalent_external_exit_order_payload(
 
 
 
+def _submit_agent_order_skip_reason(state: AgentState, order: Order | None) -> str | None:
+    if order is None:
+        return "submit blocked: order is None"
+    if state.active_trade is not None:
+        return "submit blocked: active trade present"
+    if state.pending_order is not None:
+        return "submit blocked: pending order already in agent state"
+    return None
+
+
 def should_submit_order(
     state: AgentState,
     order: Order | None,
 ) -> bool:
-    if order is None:
-        return False
-    if state.active_trade is not None:
-        return False
-    if state.pending_order is not None:
-        return False
-    return True
+    return _submit_agent_order_skip_reason(state, order) is None
 
+
+@dataclass(frozen=True)
+class SubmitAgentOrderResult:
+    """Outcome of ``submit_agent_order_if_allowed`` (response body and optional skip explanation)."""
+
+    response: dict | None
+    skip_reason: str | None
 
 
 def submit_agent_order_if_allowed(
@@ -351,12 +363,10 @@ def submit_agent_order_if_allowed(
     symbol: str,
     state: AgentState,
     order: Order | None,
-) -> dict | None:
-    if not should_submit_order(state, order):
-        return None
-
-    if order is None:
-        return None
+) -> SubmitAgentOrderResult:
+    blocked = _submit_agent_order_skip_reason(state, order)
+    if blocked is not None:
+        return SubmitAgentOrderResult(None, blocked)
 
     existing_order_id = find_equivalent_external_pending_order_id(
         order_service=order_service,
@@ -365,9 +375,15 @@ def submit_agent_order_if_allowed(
         order=order,
     )
     if existing_order_id is not None:
-        return None
+        return SubmitAgentOrderResult(
+            None,
+            "submit skipped: equivalent pending order already exists at broker",
+        )
 
-    return order_service.submit_pending_order(account_id, order, symbol)
+    broker_response = order_service.submit_pending_order(account_id, order, symbol)
+    if broker_response is None:
+        return SubmitAgentOrderResult(None, "pending order submit returned no confirmation")
+    return SubmitAgentOrderResult(broker_response, None)
 
 
 
@@ -641,6 +657,7 @@ def manage_active_trade_exit_orders(
 __all__ = [
     "find_equivalent_external_pending_order_id",
     "should_submit_order",
+    "SubmitAgentOrderResult",
     "submit_agent_order_if_allowed",
     "should_close_active_trade",
     "submit_active_trade_close_if_allowed",

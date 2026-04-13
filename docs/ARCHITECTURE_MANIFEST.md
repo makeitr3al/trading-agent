@@ -28,14 +28,14 @@
 
 | Layer | Path | Responsibility |
 |--------|------|----------------|
-| Runtime / orchestration | `app/` | One cycle: call strategy, guards, broker I/O, journal. |
+| Runtime / orchestration | `app/` | One cycle: call strategy, guards, broker I/O, journal. Per-cycle helpers (sizing, beta submit rules, slot counts) live in `app/app_cycle_helpers.py`; `app/trading_app.py` remains the phase pipeline and public `run_app_cycle` entry. |
 | Strategy | `strategy/` | Indicators-driven regime, signals, decisions, sizing logic; no direct HTTP to Propr. |
-| Broker integration | `broker/` | Propr client/SDK, orders, execution helpers, state sync, symbol/spec, health/asset guards, registry. |
+| Broker integration | `broker/` | Propr client/SDK, orders, execution helpers, state sync (facade), symbol/spec, health/asset guards, registry. Propr REST-shaped **payload parsing** is in `broker/propr_payload_parse.py`; **order/position → models** mapping in `broker/propr_order_position_map.py`; `broker/state_sync.py` composes them for `AgentState` and re-exports stable symbols (`map_propr_*`, `build_agent_state_from_propr_data`, `_get_items`, etc.). |
 | Configuration | `config/` | Typed settings (Propr, Hyperliquid, strategy). |
 | Domain models | `models/` | Shared Pydantic/dataclass types (candles, orders, state, journal entries). |
 | Indicators | `indicators/` | Pure math (e.g. Bollinger, MACD). |
 | Data access | `data/providers/` | `CandleDataProvider` implementations (live, golden, historical). |
-| Utilities | `utils/` | Env loading, runtime status/overrides, operator tooling. |
+| Utilities | `utils/` | Env loading, runtime status/overrides, operator tooling. Shared **Propr response JSON** helpers (`get_first_key`, `extract_external_order_id`) live in `utils/propr_response.py` — used by `app/` and `broker/` without importing each other for that concern. |
 
 **Propr integration:** All HTTP/SDK calls to Propr go through **`broker/`** (`propr_client`, `order_service`, `state_sync`, `execution`, etc.). The published **`propr_sdk`** Python package is imported only from **`broker/propr_sdk.py`** — it is not a second app-layer tree.
 
@@ -50,7 +50,7 @@
 
 ### 2.3 Propr I/O boundary
 
-- **`app/trading_app.py`** uses **`broker.*`** only for Propr execution and state sync.
+- **`app/trading_app.py`** uses **`broker.*`** for Propr execution and state sync, and **`utils.propr_response`** for shared REST response key / external order id extraction (no duplicate ad-hoc parsers in `app/`).
 - Do not add a parallel in-repo package for Propr calls; extend **`broker/`** (and **`propr_sdk`** via `broker/propr_sdk.py` if the SDK surface changes).
 
 ---
@@ -97,7 +97,7 @@ flowchart LR
 
 1. **Input:** `DataBatch` from a `CandleDataProvider` (`data/providers/base.py`: candles, optional symbol, config, balance, active trade, `AgentState`).
 2. **Strategy:** `strategy.engine.run_agent_cycle` runs signal/regime/decision logic and produces a `StrategyRunResult` (and order intent shapes as defined by models/strategy).
-3. **State:** `broker.state_sync.sync_agent_state_from_propr` refreshes `AgentState` from Propr when the cycle uses live broker state.
+3. **State:** `broker.state_sync.sync_agent_state_from_propr` refreshes `AgentState` from Propr when the cycle uses live broker state. Implementation is split across `state_sync` (orchestration + `AgentState` build), `propr_order_position_map`, `propr_payload_parse`, and `utils.propr_response` for duplicated key/id logic — import **through** `broker.state_sync` (or `execution`’s existing imports) unless you are editing those internals.
 4. **Execution:** Guards in `app` + `broker.execution` / `broker.order_service` submit, replace, or cancel on Propr as policy allows.
 5. **Observability:** `app.journal` appends structured journal entries.
 
@@ -126,7 +126,7 @@ These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-nego
 - **New signal or regime rule:** Implement inside `strategy/` using `models` and `config`; expose through `agent_cycle` / `decision_engine` as appropriate. Do not add Propr calls in `strategy/`.
 - **New guard:** Add evaluation in `app/risk_guard.py`, `broker/asset_guard.py`, or `broker/health_guard.py` and invoke from `run_app_cycle` (or dedicated broker helper called from `app`).
 - **New data source:** New class under `data/providers/` satisfying `CandleDataProvider`; wire via env/factory in the same places existing providers are selected.
-- **New order type or mapper:** Extend `broker/order_service.py`, `broker/propr_sdk.py`, or related mappers; keep `intentId` and Decimal rules.
+- **New order type or mapper:** Extend `broker/order_service.py`, `broker/propr_sdk.py`, `broker/propr_order_position_map.py` / `broker/propr_payload_parse.py` as appropriate; keep `intentId` and Decimal rules. Prefer extending shared key/id helpers in `utils/propr_response.py` when both `app` and `broker` need the same response shape.
 
 ---
 
@@ -157,4 +157,4 @@ Answer explicitly when touching cycle behavior, layering, or execution policy:
 
 Any pull request that changes **public per-cycle behavior**, **layer imports**, or **submit/safety policy** must update this manifest in the same PR when the architectural contract changes. Purely internal refactors that preserve the above contracts do not require manifest edits.
 
-**Version:** Document creation tracks repository state; bump or date this section when making substantive contract changes.
+**Version:** Document creation tracks repository state; bump or date this section when making substantive contract changes. **2026-04:** Orchestration split documented — `app/app_cycle_helpers.py`, `utils/propr_response.py`, `broker/propr_payload_parse.py`, `broker/propr_order_position_map.py`, thinner `broker/state_sync.py` facade; dependency rules in §2.2 unchanged.

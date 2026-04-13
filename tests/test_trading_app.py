@@ -8,6 +8,7 @@ import pytest
 
 from app.trading_app import AppCycleResult, run_app_cycle
 from broker.asset_guard import AssetGuardResult
+from broker.execution import SubmitAgentOrderResult
 from broker.health_guard import HealthGuardResult
 from broker.propr_client import ProprClient
 from config.strategy_config import StrategyConfig
@@ -178,7 +179,10 @@ def test_submits_new_order_when_no_synced_pending_order_exists_and_post_cycle_st
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+    )
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -345,7 +349,10 @@ def test_still_allows_execution_when_guards_pass(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=5))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+    )
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -426,7 +433,13 @@ def test_app_cycle_stores_new_pending_order_id_from_submit_response_when_availab
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="EUR", desired_leverage=desired_leverage, max_leverage=2))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"data": [{"orderId": "urn:prp-order:123"}]})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult(
+            {"data": [{"orderId": "urn:prp-order:123"}]},
+            None,
+        ),
+    )
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -609,7 +622,10 @@ def test_app_cycle_exposes_asset_guard_result_when_execution_is_allowed(monkeypa
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+    )
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -761,7 +777,10 @@ def test_execution_proceeds_when_symbol_spec_is_present_and_guards_pass(monkeypa
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+    )
 
     result = run_app_cycle(
         client=FakeClient(),
@@ -997,7 +1016,10 @@ def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatc
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (_make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
-    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", lambda order_service, account_id, symbol, state, order: {"submitted": True})
+    monkeypatch.setattr(
+        "app.trading_app.submit_agent_order_if_allowed",
+        lambda order_service, account_id, symbol, state, order: SubmitAgentOrderResult({"submitted": True}, None),
+    )
 
     result = run_app_cycle(
         client=FakeClient(environment="prod"),

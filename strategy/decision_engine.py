@@ -65,6 +65,7 @@ def decide_next_action(
                     selected_signal_type=selected_signal_type,
                 )
 
+            # SHORT trend: inverted vs LONG w.r.t. signal_bar_close (intended; symmetric reversal rule).
             if current_price < c_sig:
                 return DecisionResult(
                     action=DecisionAction.ADJUST_TREND_STOP_TO_SIGNAL_BAR_CLOSE,
