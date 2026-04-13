@@ -39,6 +39,72 @@ _POSITION_SUMMARY_ROW_PNL_KEYS = [
     "profit_loss",
 ]
 
+# Exit-order fields used when REST positions omit SL/TP (exits live on orders only).
+_ORDER_SL_VALUE_KEYS = [
+    "internal_stop_loss",
+    "stopLoss",
+    "stop_loss",
+    "triggerPrice",
+    "trigger_price",
+    "stopPrice",
+    "stop_price",
+    "price",
+]
+_ORDER_TP_VALUE_KEYS = [
+    "internal_take_profit",
+    "takeProfit",
+    "take_profit",
+    "limitPrice",
+    "limit_price",
+    "price",
+]
+
+
+def enrich_positions_payload_with_exit_levels_from_orders(
+    orders_payload: dict | list[dict],
+    positions_payload: dict | list[dict],
+) -> dict[str, Any]:
+    """Copy position rows and fill missing stopLoss/takeProfit from linked open exit orders (same positionId)."""
+    items: list[dict[str, Any]] = [dict(x) for x in _get_items(positions_payload) if isinstance(x, dict)]
+    exit_sl: dict[str, Any] = {}
+    exit_tp: dict[str, Any] = {}
+    for order in _get_items(orders_payload):
+        if not isinstance(order, dict):
+            continue
+        pos_id_raw = get_first_key(order, ["positionId", "position_id"])
+        if pos_id_raw is None:
+            continue
+        pos_key = str(pos_id_raw).strip()
+        if not pos_key:
+            continue
+        kind = _classify_open_order_payload(order)
+        if kind == "stop_loss_exit":
+            price = get_first_key(order, _ORDER_SL_VALUE_KEYS)
+            if price is not None and pos_key not in exit_sl:
+                exit_sl[pos_key] = price
+        elif kind == "take_profit_exit":
+            price = get_first_key(order, _ORDER_TP_VALUE_KEYS)
+            if price is not None and pos_key not in exit_tp:
+                exit_tp[pos_key] = price
+    for row in items:
+        pos_key_raw = get_first_key(row, ["positionId", "position_id", "id"])
+        if pos_key_raw is None:
+            continue
+        pos_key = str(pos_key_raw).strip()
+        if not pos_key:
+            continue
+        existing_sl = get_first_key(row, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"])
+        existing_tp = get_first_key(row, ["take_profit", "takeProfit", "tp", "internal_take_profit"])
+        if existing_sl is None and pos_key in exit_sl:
+            row["stopLoss"] = exit_sl[pos_key]
+        if existing_tp is None and pos_key in exit_tp:
+            row["takeProfit"] = exit_tp[pos_key]
+    if isinstance(positions_payload, dict):
+        merged = dict(positions_payload)
+        merged["data"] = items
+        return merged
+    return {"data": items}
+
 
 def summarize_open_position_rows(items: list[dict]) -> list[dict[str, Any]]:
     """Build display rows for open positions (REST or WebSocket payloads)."""
@@ -308,20 +374,47 @@ def build_agent_state_from_propr_data(
     )
 
 
+def _load_orders_and_enriched_positions(
+    client: ProprClient,
+    account_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    orders_payload = client.get_orders(account_id)
+    positions_payload = client.get_positions(account_id)
+    enriched_positions = enrich_positions_payload_with_exit_levels_from_orders(orders_payload, positions_payload)
+    return orders_payload, enriched_positions
+
+
 def sync_agent_state_from_propr(
     client: ProprClient,
     account_id: str,
     previous_state: AgentState | None = None,
     symbol: str | None = None,
 ) -> AgentState:
-    orders_payload = client.get_orders(account_id)
-    positions_payload = client.get_positions(account_id)
+    orders_payload, enriched_positions = _load_orders_and_enriched_positions(client, account_id)
     return build_agent_state_from_propr_data(
         orders_payload=orders_payload,
-        positions_payload=positions_payload,
+        positions_payload=enriched_positions,
         previous_state=previous_state,
         symbol=symbol,
     )
+
+
+def sync_agent_state_from_propr_with_position_summary(
+    client: ProprClient,
+    account_id: str,
+    previous_state: AgentState | None = None,
+    symbol: str | None = None,
+) -> tuple[AgentState, list[dict[str, Any]]]:
+    """Like ``sync_agent_state_from_propr`` but also returns ``summarize_open_position_rows`` using enriched payloads."""
+    orders_payload, enriched_positions = _load_orders_and_enriched_positions(client, account_id)
+    state = build_agent_state_from_propr_data(
+        orders_payload=orders_payload,
+        positions_payload=enriched_positions,
+        previous_state=previous_state,
+        symbol=symbol,
+    )
+    summary = summarize_open_position_rows(_get_items(enriched_positions))
+    return state, summary
 
 
 __all__ = [
@@ -330,7 +423,9 @@ __all__ = [
     "_extract_account_open_positions_count_from_payload",
     "_extract_account_unrealized_pnl_from_payload",
     "build_agent_state_from_propr_data",
+    "enrich_positions_payload_with_exit_levels_from_orders",
     "sync_agent_state_from_propr",
+    "sync_agent_state_from_propr_with_position_summary",
     "summarize_open_position_rows",
     "_get_items",
 ]

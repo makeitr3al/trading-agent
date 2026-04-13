@@ -72,3 +72,14 @@ def test_load_live_status_returns_defaults_for_missing_file(tmp_path: Path) -> N
     assert payload["account_open_positions_count"] == 0
     assert payload["account_unrealized_pnl"] is None
     assert payload["websocket_connected"] is False
+    assert payload.get("account_total_margin_balance") is None
+
+
+def test_build_live_status_payload_includes_account_total_margin_balance() -> None:
+    payload = build_live_status_payload(
+        environment="beta",
+        state=None,
+        source="poll",
+        account_total_margin_balance=20050.5,
+    )
+    assert payload["account_total_margin_balance"] == 20050.5

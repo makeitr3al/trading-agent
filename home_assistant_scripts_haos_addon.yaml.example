@@ -69,15 +69,11 @@ trading_agent_load_current_config_haos:
             entity_id: input_datetime.trading_agent_schedule_time
           data:
             time: "{{ operator_schedule_time[:5] }}"
-        - if:
-            - condition: template
-              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') is not none }}"
-          then:
-            - action: input_text.set_value
-              target:
-                entity_id: input_text.trading_agent_challenge_id
-              data:
-                value: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') }}"
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.trading_agent_challenge_id
+          data:
+            value: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') | default('', true) }}"
         - choose:
             - conditions:
                 - condition: template

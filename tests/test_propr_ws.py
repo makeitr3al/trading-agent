@@ -99,6 +99,42 @@ def test_connect_persists_live_status_updates(monkeypatch: pytest.MonkeyPatch, t
     assert payload["open_positions_summary"][0]["direction"] == "long"
 
 
+def test_extract_live_status_payload_pairs_pnl_with_max_position_count_tier() -> None:
+    """Stale account PnL on a zero-position snapshot must not win when ``data`` shows open positions."""
+    client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
+    open_row_a = {
+        "status": "open",
+        "positionSide": "long",
+        "entryPrice": "100.5",
+        "stopLoss": "95.0",
+        "takeProfit": "110.0",
+        "quantity": "1.25",
+        "positionId": "btc-position",
+        "unrealizedPnl": "2",
+    }
+    open_row_b = {
+        "status": "open",
+        "positionSide": "short",
+        "entry": 100,
+        "stopLoss": 105,
+        "takeProfit": 90,
+        "quantity": "2",
+        "positionId": "eth-position",
+        "unrealizedPnl": "2",
+    }
+    payload = client.extract_live_status_payload(
+        {
+            "type": "position.updated",
+            "positions": {"accountUnrealizedPnl": "100", "data": []},
+            "data": [open_row_a, open_row_b],
+            "accountUnrealizedPnl": "50",
+        }
+    )
+    assert payload is not None
+    assert payload["account_open_positions_count"] == 2
+    assert payload["account_unrealized_pnl"] == 50.0
+
+
 def test_extract_live_status_payload_empty_data_list() -> None:
     client = ProprWebSocketClient(ProprConfig(environment="beta", api_key="key"))
     payload = client.extract_live_status_payload(

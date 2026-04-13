@@ -27,6 +27,7 @@ DEFAULT_LIVE_STATUS = {
     "open_positions_summary": None,
     "challenges_overview": None,
     "active_challenges_count": None,
+    "account_total_margin_balance": None,
 }
 
 
@@ -68,6 +69,7 @@ def build_live_status_payload(
     open_positions_summary: Sequence[dict[str, Any]] | None = None,
     challenges_overview: Sequence[dict[str, Any]] | None = None,
     active_challenges_count: int | None = None,
+    account_total_margin_balance: float | None = None,
 ) -> dict[str, Any]:
     effective_pnl = account_unrealized_pnl
     if effective_pnl is None and state is not None:
@@ -99,6 +101,7 @@ def build_live_status_payload(
         if challenges_overview is not None
         else None,
         "active_challenges_count": active_challenges_count,
+        "account_total_margin_balance": account_total_margin_balance,
     }
 
 

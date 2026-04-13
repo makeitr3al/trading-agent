@@ -111,24 +111,32 @@ class ProprWebSocketClient:
             candidates.append(payload["data"])
         candidates.append(payload)
 
-        pnl_value: float | None = None
-        open_positions_count: int | None = None
+        # Pair PnL with the same "view" as position count: use max(count) across candidates, then
+        # take unrealized PnL from the last candidate that achieved that count with a non-None PnL
+        # (candidates end with the full payload, which usually carries account-level totals).
+        # If none of those rows expose PnL, fall back to the first non-None PnL anywhere (legacy behaviour).
+        per_candidate: list[tuple[float | None, int]] = []
         for candidate in candidates:
             if isinstance(candidate, dict):
                 maybe_pnl = _extract_account_unrealized_pnl_from_payload(candidate)
-                if maybe_pnl is not None and pnl_value is None:
-                    pnl_value = maybe_pnl
                 maybe_count = _extract_account_open_positions_count_from_payload(candidate)
-                if open_positions_count is None and maybe_count is not None:
-                    open_positions_count = maybe_count
+                per_candidate.append((maybe_pnl, maybe_count))
             elif isinstance(candidate, list):
                 wrapped = {"data": candidate}
                 maybe_pnl = _extract_account_unrealized_pnl_from_payload(wrapped)
-                if maybe_pnl is not None and pnl_value is None:
-                    pnl_value = maybe_pnl
                 maybe_count = _extract_account_open_positions_count_from_payload(wrapped)
-                if open_positions_count is None and maybe_count is not None:
-                    open_positions_count = maybe_count
+                per_candidate.append((maybe_pnl, maybe_count))
+
+        open_positions_count = max((c for _, c in per_candidate), default=0)
+        pnl_value: float | None = None
+        for maybe_pnl, maybe_count in per_candidate:
+            if maybe_count == open_positions_count and maybe_pnl is not None:
+                pnl_value = maybe_pnl
+        if pnl_value is None:
+            for maybe_pnl, _ in per_candidate:
+                if maybe_pnl is not None:
+                    pnl_value = maybe_pnl
+                    break
 
         balance_fields: dict[str, Any] = {}
         for candidate in candidates:
@@ -146,7 +154,7 @@ class ProprWebSocketClient:
 
         if (
             pnl_value is None
-            and open_positions_count is None
+            and open_positions_count == 0
             and not balance_fields
             and open_positions_summary is None
         ):
@@ -163,7 +171,7 @@ class ProprWebSocketClient:
         result.update(balance_fields)
         if open_positions_summary is not None:
             result["open_positions_summary"] = open_positions_summary
-        elif open_positions_count is not None and open_positions_count == 0:
+        elif open_positions_count == 0:
             result["open_positions_summary"] = []
         return result
 

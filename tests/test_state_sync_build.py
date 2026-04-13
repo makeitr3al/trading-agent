@@ -14,6 +14,7 @@ import pytest
 from broker.state_sync import (
     _extract_account_unrealized_pnl_from_payload,
     build_agent_state_from_propr_data,
+    enrich_positions_payload_with_exit_levels_from_orders,
 )
 from models.agent_state import AgentState
 
@@ -555,3 +556,45 @@ def test_build_agent_state_omits_partial_fill_pending_when_open_position_exists_
     assert state.pending_order is None
     assert state.pending_order_id is None
     assert state.account_open_entry_orders_count == 1
+
+
+def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
+    orders = {
+        "data": [
+            {
+                "orderId": "sl-1",
+                "type": "stop_market",
+                "side": "sell",
+                "positionId": "pos-1",
+                "reduceOnly": True,
+                "status": "open",
+                "triggerPrice": "88.5",
+            },
+            {
+                "orderId": "tp-1",
+                "type": "take_profit_limit",
+                "side": "sell",
+                "positionId": "pos-1",
+                "reduceOnly": True,
+                "status": "open",
+                "limitPrice": "115.25",
+            },
+        ]
+    }
+    positions = {
+        "data": [
+            {
+                "status": "open",
+                "positionSide": "long",
+                "entryPrice": "100",
+                "quantity": "0.1",
+                "positionId": "pos-1",
+            },
+        ]
+    }
+    enriched = enrich_positions_payload_with_exit_levels_from_orders(orders, positions)
+    state = build_agent_state_from_propr_data(orders_payload=orders, positions_payload=enriched)
+    assert state.account_open_positions_count == 1
+    assert state.active_trade is not None
+    assert state.active_trade.stop_loss == pytest.approx(88.5)
+    assert state.active_trade.take_profit == pytest.approx(115.25)

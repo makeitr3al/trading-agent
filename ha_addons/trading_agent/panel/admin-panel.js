@@ -6,6 +6,7 @@ const PANEL_VERSION = "__PANEL_VERSION__";
 
 const CHALLENGES_URL = "/local/trading-agent/challenges.json";
 const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
+const TA_CHALLENGE_LS_KEY = "trading_agent_panel_challenge_id";
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -117,6 +118,40 @@ function formatCurrency(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(numeric);
+}
+
+/** Plain-text markets summary for Status card (Steuerung-style counts when registry is loaded). */
+function summarizeMarketsForStatusPanel(rawMarkets, registry) {
+  const raw = String(rawMarkets ?? "").trim();
+  if (!raw) return "-";
+  const selected = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  if (!selected.size) return "-";
+  if (!Array.isArray(registry) || !registry.length) {
+    const tickers = [...selected];
+    const preview = tickers.slice(0, 4).join(", ");
+    const suffix = tickers.length > 4 ? "…" : "";
+    return escapeHtml(`${tickers.length} Maerkte: ${preview}${suffix}`);
+  }
+  const crypto = registry.filter((a) => a.asset_type === "crypto");
+  const hip3 = registry.filter((a) => a.asset_type === "hip3");
+  let nCrypto = 0;
+  let nHip3 = 0;
+  for (const a of crypto) {
+    if (selected.has(a.name) || selected.has(a.propr_asset)) nCrypto += 1;
+  }
+  for (const a of hip3) {
+    if (selected.has(a.name) || selected.has(a.propr_asset)) nHip3 += 1;
+  }
+  const parts = [];
+  if (nCrypto) parts.push(`${nCrypto} Crypto Perps`);
+  if (nHip3) parts.push(`${nHip3} Stocks & Commodities`);
+  if (!parts.length) {
+    const tickers = [...selected];
+    const preview = tickers.slice(0, 4).join(", ");
+    const suffix = tickers.length > 4 ? "…" : "";
+    return escapeHtml(`${tickers.length} Maerkte: ${preview}${suffix}`);
+  }
+  return escapeHtml(`${selected.size} ausgewaehlt (${parts.join(", ")})`);
 }
 
 function formatPnl(value) {
@@ -427,6 +462,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._marketGroupsExpanded = {};
     this._marketFilter = "";
     this._persistOperatorTimer = null;
+    this._challengeHydrateAttempted = false;
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
   }
   connectedCallback() {
@@ -508,6 +544,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       open_positions_summary: entity.attributes?.open_positions_summary,
       challenges_overview: entity.attributes?.challenges_overview,
       active_challenges_count: entity.attributes?.active_challenges_count,
+      account_total_margin_balance: entity.attributes?.account_total_margin_balance,
     };
   }
 
@@ -517,6 +554,18 @@ class TradingAgentAdminPanel extends HTMLElement {
     if (runId && !["unknown", "unavailable"].includes(runId) && runId !== this.lastRunId) {
       this.lastRunId = runId;
       this.refreshJournal();
+    }
+    if (value && !this._challengeHydrateAttempted) {
+      this._challengeHydrateAttempted = true;
+      try {
+        const stored = (typeof localStorage !== "undefined" && localStorage.getItem(TA_CHALLENGE_LS_KEY)) || "";
+        const cur = String(value.states?.[ENTITIES.challengeId]?.state ?? "").trim();
+        if (!cur && stored.trim()) {
+          this.setEntityValue(ENTITIES.challengeId, stored.trim()).then(() => this._schedulePersistOperatorConfig());
+        }
+      } catch (_) {
+        /* ignore */
+      }
     }
     this.render();
   }
@@ -815,6 +864,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       ? cov.map((c) => `<tr>
           <td>${escapeHtml(c.challenge_name ?? c.challenge_id ?? c.account_id ?? "-")}</td>
           <td class="num">${formatPnl(c.account_unrealized_pnl)}</td>
+          <td class="num">${formatCurrency(c.margin_balance)}</td>
           <td class="num">${escapeHtml(String(c.account_open_positions_count ?? 0))}</td>
         </tr>`).join("")
       : "";
@@ -823,7 +873,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           <h3>Alle aktiven Challenges (${cov.length})</h3>
           <p class="muted">Summe unrealisiertes PnL und alle offenen Positionen ueber alle Challenge-Konten (REST nach jedem Add-on-Lauf).</p>
           <table class="overview-table">
-            <thead><tr><th>Challenge</th><th class="num">Unreal. PnL</th><th class="num">Offene Pos.</th></tr></thead>
+            <thead><tr><th>Challenge</th><th class="num">Unreal. PnL</th><th class="num">Margin</th><th class="num">Offene Pos.</th></tr></thead>
             <tbody>${multiChallengeRows}</tbody>
           </table>
         </section>`
@@ -880,6 +930,7 @@ class TradingAgentAdminPanel extends HTMLElement {
         </div>`
       : "";
 
+    const marketsSummaryHtml = summarizeMarketsForStatusPanel(operator?.attributes?.markets, this.assetRegistry);
     return `<div class="stack">
       ${allChallengesCard}
       ${activePositionCard}
@@ -890,13 +941,16 @@ class TradingAgentAdminPanel extends HTMLElement {
           ["Modus", operator?.state, true],
           ["Umgebung", operator?.attributes?.environment, true],
           ["Leverage", operator?.attributes?.leverage],
-          ["Maerkte", operator?.attributes?.markets],
+          ["Maerkte", operator?.attributes?.markets, false, () => marketsSummaryHtml],
           ["Scheduling", operator?.attributes?.scheduling_enabled],
           ["Zeit", operator?.attributes?.schedule_time],
         ])}
         ${this.statusCard("Live-Status", [
           ["PnL (Summe)", ld?.account_unrealized_pnl, false, formatPnl],
           ["Offene Positionen (Summe)", ld?.account_open_positions_count],
+          ...(ld?.account_total_margin_balance != null && ld?.account_total_margin_balance !== ""
+            ? [["Gesamt Margin (Konten)", ld?.account_total_margin_balance, false, formatCurrency]]
+            : []),
           ...(Number(ld?.active_challenges_count) > 1
             ? [["Aktive Challenges", ld?.active_challenges_count]]
             : []),
@@ -1352,10 +1406,18 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
     const entityId = target.dataset.entity;
     if (entityId) {
-      await this.setEntityValue(
-        entityId,
-        target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value,
-      );
+      const nextVal = target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value;
+      await this.setEntityValue(entityId, nextVal);
+      if (entityId === ENTITIES.challengeId) {
+        try {
+          if (typeof localStorage !== "undefined") {
+            if (String(nextVal ?? "").trim()) localStorage.setItem(TA_CHALLENGE_LS_KEY, String(nextVal).trim());
+            else localStorage.removeItem(TA_CHALLENGE_LS_KEY);
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
       this._schedulePersistOperatorConfig();
       return;
     }
@@ -1431,9 +1493,9 @@ class TradingAgentAdminPanel extends HTMLElement {
       input, select { width: 100%; border: 1px solid #d4ddea; border-radius: 12px; padding: 10px 12px; box-sizing: border-box; background: #f9fbfd; color: #162133; }
       .button-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
       .status-list { display: flex; flex-direction: column; gap: 10px; }
-      .status-row { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
-      .label { color: #5d6b81; }
-      .value { text-align: right; }
+      .status-row { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; align-items: flex-start; }
+      .label { color: #5d6b81; flex-shrink: 0; max-width: 42%; }
+      .value { text-align: right; min-width: 0; max-width: 58%; word-break: break-word; overflow-wrap: anywhere; }
       .muted { color: #6a7890; margin: 0 0 12px 0; font-size: 13px; }
       .overview-table { width: 100%; border-collapse: collapse; min-width: 0; font-size: 13px; }
       .overview-table th, .overview-table td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
@@ -1514,6 +1576,7 @@ class TradingAgentAdminPanel extends HTMLElement {
           <span class="chip">Run ID: ${formatValue(this.entity(ENTITIES.runSummary)?.state)}</span>
           <span class="chip">PnL: ${formatPnl(ld?.account_unrealized_pnl)}</span>
           <span class="chip">Offene Positionen: ${formatValue(ld?.account_open_positions_count)}</span>
+          ${ld?.account_total_margin_balance != null && ld?.account_total_margin_balance !== "" ? `<span class="chip">Gesamt Margin: ${formatCurrency(ld.account_total_margin_balance)}</span>` : ""}
           ${Number(ld?.active_challenges_count) > 1 ? `<span class="chip">Challenges: ${escapeHtml(String(ld.active_challenges_count))}</span>` : ""}
           <span class="chip">Tests: ${formatValue(this.entity(ENTITIES.tests)?.state)}</span>
           <span class="chip">Panel: ${escapeHtml(PANEL_VERSION)}</span>
