@@ -11,6 +11,7 @@ from config.hyperliquid_config import HyperliquidConfig
 from data.providers.hyperliquid_historical_provider import HyperliquidHistoricalProvider
 from fixtures.strategy_scenarios import valid_trend_long_scenario
 from strategy.engine import run_strategy_cycle
+from fixtures.time_helpers import after_last_closed_bar
 
 
 class FakeHyperliquidHttpClient:
@@ -45,6 +46,7 @@ def test_live_data_provider_integration_uses_same_internal_candle_model_as_golde
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(batch.candles),
     )
 
     assert len(batch.candles) == len(scenario.candles)

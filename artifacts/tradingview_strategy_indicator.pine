@@ -9,12 +9,13 @@ macdSlowPeriod = input.int(26, "MACD Slow Period", minval=1)
 macdSignalPeriod = input.int(9, "MACD Signal Period", minval=1)
 insideBufferPct = input.float(0.20, "Inside Buffer Pct", minval=0.0, step=0.01)
 outsideBufferPct = input.float(0.20, "Outside Buffer Pct", minval=0.0, step=0.01)
-outsideBandSweetSpot = input.float(0.0, "Outside Band Sweet Spot", minval=0.0, step=0.0001)
+outsideBandSweetSpotPct = input.float(0.02, "Outside Band Sweet Spot Pct", minval=0.0, step=0.001)
 buySpread = input.float(0.0, "Buy Spread", minval=0.0, step=0.0001)
 minBandwidthAvgPeriod = input.int(30, "Min Bandwidth Avg Period", minval=1)
 minBandwidthRatio = input.float(0.70, "Min Bandwidth Ratio", minval=0.0, step=0.01)
 maxBarsSinceRegimeStartForTrendSignal = input.int(6, "Max Bars Since Regime Start For Trend", minval=1)
 trendTpRr = input.float(2.0, "Trend TP RR", minval=0.1, step=0.1)
+breakEvenRr = input.float(1.0, "Break Even RR", minval=0.1, step=0.1)
 showRegimeBackground = input.bool(true, "Show Regime Background")
 colorBarsByRegime = input.bool(false, "Color Bars By Regime")
 showSignalMarkers = input.bool(true, "Show Signal Markers")
@@ -24,6 +25,14 @@ showSweetSpotMarkers = input.bool(true, "Show Sweet Spot Markers")
 showTradeManagementMarkers = input.bool(true, "Show Trade Management Markers")
 showSignalLevels = input.bool(true, "Show Signal Levels")
 showStatusTable = input.bool(true, "Show Status Table")
+
+buySpreadNorm = math.max(buySpread, 0.0)
+
+bool _isBuyOrderType(string orderType) =>
+    orderType == "buy_stop" or orderType == "buy_limit"
+
+_applyBuySpreadToLevels(string orderType, float entry, float stopLoss, float takeProfit, float spread) =>
+    _isBuyOrderType(orderType) ? array.from(entry + spread, stopLoss + spread, takeProfit + spread) : array.from(entry, stopLoss, takeProfit)
 
 bbMiddle = ta.sma(close, bollingerPeriod)
 float bbSquaredDeviationSum = 0.0
@@ -66,7 +75,8 @@ closeDeepOutsideBands = regimeBullish ? (hasBollingerData and close >= bbUpper +
 neutralCloseDeepOutsideShort = hasBollingerData and close >= bbUpper + neutralRequiredOutsideDistanceShort
 neutralCloseDeepOutsideLong = hasBollingerData and close <= bbLower - neutralRequiredOutsideDistanceLong
 countertrendCloseDeepOutside = regimeNeutral ? (neutralCloseDeepOutsideShort or neutralCloseDeepOutsideLong) : closeDeepOutsideBands
-closeInOuterBandSweetSpot = regimeBullish ? (hasBollingerData and close >= bbUpper - outsideBandSweetSpot) : regimeBearish ? (hasBollingerData and close <= bbLower + outsideBandSweetSpot) : false
+sweetSpotTolerance = hasBollingerData ? outsideBandSweetSpotPct * relevantHalfBandwidth : na
+closeInOuterBandSweetSpot = regimeBullish ? (hasBollingerData and not na(sweetSpotTolerance) and close >= bbUpper - sweetSpotTolerance) : regimeBearish ? (hasBollingerData and not na(sweetSpotTolerance) and close <= bbLower + sweetSpotTolerance) : false
 closeOutsideBands = hasBollingerData and (close > bbUpper or close < bbLower)
 closeOutsideTrigger = closeDeepOutsideBands or closeInOuterBandSweetSpot
 outsideTriggerReason = closeDeepOutsideBands ? "outside buffer" : closeInOuterBandSweetSpot ? "sweet spot" : "n/a"
@@ -98,8 +108,8 @@ else
     trendValid := true
     trendReason := "trend signal detected"
     if regimeBullish
-        trendEntry := bbUpper + buySpread
-        trendStop := bbMiddle + buySpread
+        trendEntry := bbUpper
+        trendStop := bbMiddle
         trendTakeProfit := trendEntry + trendTpRr * (trendEntry - trendStop)
     else
         trendEntry := bbLower
@@ -125,15 +135,21 @@ else
     countertrendValid := true
     countertrendReason := "countertrend signal detected"
     if countertrendSignalType == "COUNTERTREND_SHORT"
-        countertrendOrderType := "sell_limit"
+        // Limit vs stop depends on the current tradable price vs the signal entry.
+        // Using `open` here avoids the degenerate `close >= close` case and better matches
+        // how live execution can see a different price than the signal candle close.
         countertrendEntry := close
+        countertrendOrderType := open >= countertrendEntry ? "sell_limit" : "sell_stop"
         countertrendStop := countertrendEntry + (countertrendEntry - bbMiddle)
         countertrendTakeProfit := bbMiddle
     else
-        countertrendOrderType := "buy_limit"
-        countertrendEntry := close + buySpread
-        countertrendStop := (close - (bbMiddle - close)) + buySpread
-        countertrendTakeProfit := bbMiddle + buySpread
+        // Limit vs stop depends on the current tradable price vs the signal entry.
+        // Using `open` here avoids the degenerate `close >= close` case and better matches
+        // how live execution can see a different price than the signal candle close.
+        countertrendEntry := close
+        countertrendOrderType := open >= countertrendEntry ? "buy_limit" : "buy_stop"
+        countertrendStop := (close - (bbMiddle - close))
+        countertrendTakeProfit := bbMiddle
 
 trendOrderType = regimeBullish ? "buy_stop" : regimeBearish ? "sell_stop" : "n/a"
 trendDirection = regimeBullish ? 1 : regimeBearish ? -1 : 0
@@ -153,11 +169,6 @@ var float simActiveStop = na
 var float simActiveTakeProfit = na
 var bool simActiveBreakEven = false
 
-var bool regimeConsumed = false
-var bool countertrendLongConsumedInRegime = false
-var bool countertrendShortConsumedInRegime = false
-var bool mbbRetestRequired = false
-
 bool trendSignalMarker = false
 bool countertrendSignalMarker = false
 bool pendingPlacedMarker = false
@@ -171,42 +182,6 @@ string cycleAction = "n/a"
 string fillLabel = ""
 string exitLabel = ""
 string pendingLabel = ""
-
-if countertrendValid
-    bool countertrendConsumedForDirection = countertrendDirection == 1 ? countertrendLongConsumedInRegime : countertrendDirection == -1 ? countertrendShortConsumedInRegime : false
-    if countertrendConsumedForDirection
-        countertrendValid := false
-        countertrendReason := "countertrend regime direction consumed"
-        countertrendEntry := na
-        countertrendStop := na
-        countertrendTakeProfit := na
-
-if regimeChanged
-    regimeConsumed := false
-    countertrendLongConsumedInRegime := false
-    countertrendShortConsumedInRegime := false
-
-bool mbbRetestLockedThisBar = mbbRetestRequired
-if mbbRetestLockedThisBar
-    if trendValid
-        trendValid := false
-        trendReason := "waiting for middle band retest"
-        trendEntry := na
-        trendStop := na
-        trendTakeProfit := na
-    if countertrendValid
-        countertrendValid := false
-        countertrendReason := "waiting for middle band retest"
-        countertrendEntry := na
-        countertrendStop := na
-        countertrendTakeProfit := na
-        countertrendOrderType := "n/a"
-
-if countertrendValid
-    if countertrendDirection == 1
-        countertrendLongConsumedInRegime := true
-    else if countertrendDirection == -1
-        countertrendShortConsumedInRegime := true
 
 bool pendingWasFilled = false
 string filledPendingKind = "none"
@@ -246,7 +221,7 @@ activeCountertrendTrade = simActiveDirection != 0 and simActiveKind == "countert
 if activeCountertrendTrade
     float managementMiddle = not na(bbMiddle[1]) ? bbMiddle[1] : bbMiddle
     if not na(managementMiddle)
-        float updatedCounterTp = simActiveDirection == 1 ? managementMiddle + buySpread : managementMiddle
+        float updatedCounterTp = simActiveDirection == 1 ? managementMiddle + buySpreadNorm : managementMiddle
         if simActiveTakeProfit != updatedCounterTp
             tpAdjustMarker := true
         simActiveTakeProfit := updatedCounterTp
@@ -268,39 +243,63 @@ if activeTrendTrade
     float tradeRelevantHalfBandwidth = simActiveDirection == 1 ? (bbUpper - bbMiddle) : (bbMiddle - bbLower)
     float tradeRequiredOutsideDistance = not na(tradeRelevantHalfBandwidth) ? outsideBufferPct * tradeRelevantHalfBandwidth : na
     bool tradeCloseDeepOutside = simActiveDirection == 1 ? (hasBollingerData and not na(tradeRequiredOutsideDistance) and close >= bbUpper + tradeRequiredOutsideDistance) : (hasBollingerData and not na(tradeRequiredOutsideDistance) and close <= bbLower - tradeRequiredOutsideDistance)
-    bool tradeCloseInSweetSpot = simActiveDirection == 1 ? (hasBollingerData and close >= bbUpper - outsideBandSweetSpot) : (hasBollingerData and close <= bbLower + outsideBandSweetSpot)
+    float tradeSweetSpotTolerance = hasBollingerData and not na(tradeRelevantHalfBandwidth) ? outsideBandSweetSpotPct * tradeRelevantHalfBandwidth : na
+    bool tradeCloseInSweetSpot = simActiveDirection == 1 ? (hasBollingerData and not na(tradeSweetSpotTolerance) and close >= bbUpper - tradeSweetSpotTolerance) : (hasBollingerData and not na(tradeSweetSpotTolerance) and close <= bbLower + tradeSweetSpotTolerance)
     bool simulatedTrendExitTriggered = tradeCloseDeepOutside or tradeCloseInSweetSpot
     bool canTightenToLastClose = simActiveDirection == 1 ? (close > simActiveEntry and close > simActiveStop) : (close < simActiveEntry and close < simActiveStop)
 
-    if simulatedTrendExitTriggered
-        regimeConsumed := true
-        if canTightenToLastClose
-            simActiveStop := simActiveDirection == 1 ? math.max(simActiveStop, close) : math.min(simActiveStop, close)
-            stopAdjustMarker := true
-            cycleAction := "Trend Stop -> Last Close"
+    bool decisionTrigger = countertrendValid or simulatedTrendExitTriggered
+    if decisionTrigger
+        if countertrendValid
+            // Python parity: decide_next_action() can tighten to countertrend signal-bar close, or close if price moved against it.
+            float counterSigClose = close
+            // Use `open` as the "current tradable price" proxy so we can meaningfully compare
+            // against the signal candle close (avoids the degenerate close-vs-close comparison).
+            bool closeAgainstSignal = simActiveDirection == 1 ? open < counterSigClose : open > counterSigClose
+            if closeAgainstSignal
+                simActiveDirection := 0
+                simActiveKind := "none"
+                simActiveEntry := na
+                simActiveStop := na
+                simActiveTakeProfit := na
+                simActiveBreakEven := false
+                exitMarker := true
+                exitLabel := "Trend Exit"
+                cycleAction := "Countertrend Closes Trend"
+            else
+                float updatedStopToSig = simActiveDirection == 1 ? math.max(simActiveStop, counterSigClose) : math.min(simActiveStop, counterSigClose)
+                if updatedStopToSig != simActiveStop
+                    stopAdjustMarker := true
+                    cycleAction := "Trend Stop -> Counter Sig Close"
+                simActiveStop := updatedStopToSig
         else
-            simActiveDirection := 0
-            simActiveKind := "none"
-            simActiveEntry := na
-            simActiveStop := na
-            simActiveTakeProfit := na
-            simActiveBreakEven := false
-            exitMarker := true
-            exitLabel := "Trend Exit"
-            cycleAction := exitLabel
+            if canTightenToLastClose
+                simActiveStop := simActiveDirection == 1 ? math.max(simActiveStop, close) : math.min(simActiveStop, close)
+                stopAdjustMarker := true
+                cycleAction := "Trend Stop -> Last Close"
+            else
+                simActiveDirection := 0
+                simActiveKind := "none"
+                simActiveEntry := na
+                simActiveStop := na
+                simActiveTakeProfit := na
+                simActiveBreakEven := false
+                exitMarker := true
+                exitLabel := "Trend Exit"
+                cycleAction := exitLabel
     else
         if simActiveBreakEven
             simActiveStop := simActiveEntry
         else
             float currentRisk = simActiveDirection == 1 ? (simActiveEntry - simActiveStop) : (simActiveStop - simActiveEntry)
             float currentProfit = simActiveDirection == 1 ? (close - simActiveEntry) : (simActiveEntry - close)
-            if currentRisk > 0 and currentProfit >= currentRisk
+            if currentRisk > 0 and currentProfit >= currentRisk * breakEvenRr
                 simActiveStop := simActiveEntry
                 simActiveBreakEven := true
                 stopAdjustMarker := true
                 cycleAction := "Trend Break-even"
             else
-                float targetTrendStop = simActiveDirection == 1 ? bbMiddle + buySpread : bbMiddle
+                float targetTrendStop = simActiveDirection == 1 ? bbMiddle + buySpreadNorm : bbMiddle
                 float updatedTrendStop = simActiveDirection == 1 ? math.max(simActiveStop, targetTrendStop) : math.min(simActiveStop, targetTrendStop)
                 if updatedTrendStop != simActiveStop
                     stopAdjustMarker := true
@@ -319,9 +318,10 @@ if not activeTradeExists
         newPendingDirection = countertrendDirection
         newPendingKind = "countertrend"
         newPendingOrderType = countertrendOrderType
-        newPendingEntry = countertrendEntry
-        newPendingStop = countertrendStop
-        newPendingTakeProfit = countertrendTakeProfit
+        float[] counterLevels = _applyBuySpreadToLevels(newPendingOrderType, countertrendEntry, countertrendStop, countertrendTakeProfit, buySpreadNorm)
+        newPendingEntry = array.get(counterLevels, 0)
+        newPendingStop = array.get(counterLevels, 1)
+        newPendingTakeProfit = array.get(counterLevels, 2)
         if simPendingDirection != 0 and (simPendingEntry != newPendingEntry or simPendingStop != newPendingStop or simPendingTakeProfit != newPendingTakeProfit or simPendingKind != newPendingKind)
             pendingRefreshedMarker := true
             pendingLabel := "Counter Pending"
@@ -335,14 +335,14 @@ if not activeTradeExists
         simPendingStop := newPendingStop
         simPendingTakeProfit := newPendingTakeProfit
         cycleAction := pendingLabel
-    else if trendValid and not regimeConsumed
+    else if trendValid
         newPendingDirection = trendDirection
         newPendingKind = "trend"
         newPendingOrderType = trendOrderType
-        newPendingEntry = trendEntry
-        newPendingStop = trendStop
-        newPendingTakeProfit = trendTakeProfit
-        regimeConsumed := true
+        float[] trendLevels = _applyBuySpreadToLevels(newPendingOrderType, trendEntry, trendStop, trendTakeProfit, buySpreadNorm)
+        newPendingEntry = array.get(trendLevels, 0)
+        newPendingStop = array.get(trendLevels, 1)
+        newPendingTakeProfit = array.get(trendLevels, 2)
         if sameTrendPendingType and (simPendingEntry != newPendingEntry or simPendingStop != newPendingStop or simPendingTakeProfit != newPendingTakeProfit)
             pendingRefreshedMarker := true
             pendingLabel := "Trend Refresh"
@@ -367,12 +367,6 @@ if not activeTradeExists
         simPendingEntry := na
         simPendingStop := na
         simPendingTakeProfit := na
-
-middleBandTouched = hasBollingerData and low <= bbMiddle and high >= bbMiddle
-if closeOutsideBands
-    mbbRetestRequired := true
-else if middleBandTouched
-    mbbRetestRequired := false
 
 activeTradeState = simActiveDirection == 1 ? (simActiveKind == "trend" ? "trend long active" : "counter long active") : simActiveDirection == -1 ? (simActiveKind == "trend" ? "trend short active" : "counter short active") : "flat"
 pendingTradeState = simPendingDirection == 1 ? (simPendingKind == "trend" ? "trend pending long" : "counter pending long") : simPendingDirection == -1 ? (simPendingKind == "trend" ? "trend pending short" : "counter pending short") : "none"
@@ -424,7 +418,7 @@ plot(showSignalLevels and simActiveDirection != 0 ? simActiveEntry : na, "Active
 plot(showSignalLevels and simActiveDirection != 0 ? simActiveStop : na, "Active Stop", color=color.new(color.orange, 0), style=plot.style_linebr, linewidth=2)
 plot(showSignalLevels and simActiveDirection != 0 ? simActiveTakeProfit : na, "Active Take Profit", color=color.new(color.teal, 0), style=plot.style_linebr, linewidth=2)
 
-var table statusTable = table.new(position.top_right, 2, 19, border_width=1)
+var table statusTable = table.new(position.top_right, 2, 17, border_width=1)
 if barstate.islast and showStatusTable
     table.cell(statusTable, 0, 0, "Regime", text_color=color.white, bgcolor=color.black)
     table.cell(statusTable, 1, 0, regimeName, text_color=color.white, bgcolor=regimeBullish ? color.green : regimeBearish ? color.red : color.gray)
@@ -442,26 +436,22 @@ if barstate.islast and showStatusTable
     table.cell(statusTable, 1, 6, countertrendValid ? countertrendSignalType : countertrendReason, text_color=color.white, bgcolor=countertrendValid ? color.orange : color.gray)
     table.cell(statusTable, 0, 7, "Outside Trigger", text_color=color.white, bgcolor=color.black)
     table.cell(statusTable, 1, 7, outsideTriggerReason, text_color=color.white, bgcolor=closeOutsideTrigger ? color.orange : color.gray)
-    table.cell(statusTable, 0, 8, "Regime Consumed", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 8, regimeConsumed ? "yes" : "no", text_color=color.white, bgcolor=regimeConsumed ? color.orange : color.gray)
-    table.cell(statusTable, 0, 9, "mBB Retest Lock", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 9, mbbRetestLockedThisBar ? "locked" : "ready", text_color=color.white, bgcolor=mbbRetestLockedThisBar ? color.orange : color.green)
-    table.cell(statusTable, 0, 10, "Pending State", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 10, pendingTradeState, text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 11, "Active State", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 11, activeTradeState, text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 12, "Cycle Action", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 12, cycleAction, text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 13, "BB Upper / Middle / Lower", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 13, str.format("{0} / {1} / {2}", str.tostring(bbUpper, format.mintick), str.tostring(bbMiddle, format.mintick), str.tostring(bbLower, format.mintick)), text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 14, "Pending Entry / SL / TP", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 14, simPendingDirection != 0 ? str.format("{0} / {1} / {2}", str.tostring(simPendingEntry, format.mintick), str.tostring(simPendingStop, format.mintick), str.tostring(simPendingTakeProfit, format.mintick)) : "n/a", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 15, "Active Entry / SL / TP", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 15, simActiveDirection != 0 ? str.format("{0} / {1} / {2}", str.tostring(simActiveEntry, format.mintick), str.tostring(simActiveStop, format.mintick), str.tostring(simActiveTakeProfit, format.mintick)) : "n/a", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 0, 16, "Trend Exit Trigger", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 16, activeTrendTrade and closeOutsideTrigger ? "yes" : "no", text_color=color.white, bgcolor=activeTrendTrade and closeOutsideTrigger ? color.orange : color.gray)
-    table.cell(statusTable, 0, 17, "Counter Exit Trigger", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 8, "Pending State", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 8, pendingTradeState, text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 9, "Active State", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 9, activeTradeState, text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 10, "Cycle Action", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 10, cycleAction, text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 11, "BB Upper / Middle / Lower", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 11, str.format("{0} / {1} / {2}", str.tostring(bbUpper, format.mintick), str.tostring(bbMiddle, format.mintick), str.tostring(bbLower, format.mintick)), text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 12, "Pending Entry / SL / TP", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 12, simPendingDirection != 0 ? str.format("{0} / {1} / {2}", str.tostring(simPendingEntry, format.mintick), str.tostring(simPendingStop, format.mintick), str.tostring(simPendingTakeProfit, format.mintick)) : "n/a", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 13, "Active Entry / SL / TP", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 13, simActiveDirection != 0 ? str.format("{0} / {1} / {2}", str.tostring(simActiveEntry, format.mintick), str.tostring(simActiveStop, format.mintick), str.tostring(simActiveTakeProfit, format.mintick)) : "n/a", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 0, 14, "Trend Exit Trigger", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 14, activeTrendTrade and closeOutsideTrigger ? "yes" : "no", text_color=color.white, bgcolor=activeTrendTrade and closeOutsideTrigger ? color.orange : color.gray)
+    table.cell(statusTable, 0, 15, "Counter Exit Trigger", text_color=color.white, bgcolor=color.black)
     counterExitNow = activeCountertrendTrade and (simActiveDirection == 1 ? high >= bbMiddle : low <= bbMiddle)
-    table.cell(statusTable, 1, 17, counterExitNow ? "yes" : "no", text_color=color.white, bgcolor=counterExitNow ? color.orange : color.gray)
-    table.cell(statusTable, 0, 18, "Buy Spread", text_color=color.white, bgcolor=color.black)
-    table.cell(statusTable, 1, 18, str.tostring(buySpread, format.mintick), text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 15, counterExitNow ? "yes" : "no", text_color=color.white, bgcolor=counterExitNow ? color.orange : color.gray)
+    table.cell(statusTable, 0, 16, "Buy Spread", text_color=color.white, bgcolor=color.black)
+    table.cell(statusTable, 1, 16, str.tostring(buySpread, format.mintick), text_color=color.white, bgcolor=color.black)

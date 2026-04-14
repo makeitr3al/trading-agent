@@ -23,6 +23,7 @@ from strategy_scenarios import (
     sweet_spot_should_manage_active_trend_without_countertrend_signal_scenario,
     valid_trend_long_scenario,
 )
+from time_helpers import after_last_closed_bar
 
 
 def test_valid_trend_long_scenario_prepares_trend_order() -> None:
@@ -33,6 +34,7 @@ def test_valid_trend_long_scenario_prepares_trend_order() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None
@@ -49,6 +51,7 @@ def test_invalid_trend_regime_too_old_scenario_produces_no_action() -> None:
         candles=scenario.candles,
         config=scenario.config,
         account_balance=scenario.account_balance,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None
@@ -66,6 +69,7 @@ def test_invalid_trend_candle_not_in_direction_scenario_produces_no_action() -> 
         candles=scenario.candles,
         config=scenario.config,
         account_balance=scenario.account_balance,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None
@@ -83,6 +87,7 @@ def test_valid_countertrend_short_on_first_bullish_regime_bar() -> None:
         candles=scenario.candles,
         config=scenario.config,
         account_balance=scenario.account_balance,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -100,6 +105,7 @@ def test_sweet_spot_manages_active_trend_without_countertrend_signal() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -119,6 +125,7 @@ def test_valid_countertrend_long_on_first_bearish_regime_bar() -> None:
         candles=scenario.candles,
         config=scenario.config,
         account_balance=scenario.account_balance,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -135,6 +142,7 @@ def test_no_countertrend_when_not_first_regime_bar() -> None:
         candles=scenario.candles,
         config=scenario.config,
         account_balance=scenario.account_balance,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -153,6 +161,7 @@ def test_trend_order_should_be_prepared() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         state=scenario.agent_state,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None
@@ -171,6 +180,7 @@ def test_countertrend_can_lock_active_trend_stop_to_last_close() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -191,6 +201,7 @@ def test_countertrend_adjusts_short_trend_stop_to_signal_bar_close() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.countertrend_signal is not None
@@ -211,6 +222,7 @@ def test_break_even_activates_for_active_trend_trade() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.updated_trade is not None
@@ -226,6 +238,7 @@ def test_countertrend_tp_updates_while_sl_stays_fixed() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         active_trade=scenario.active_trade,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.updated_trade is not None
@@ -242,6 +255,7 @@ def test_trend_signal_consumed_in_regime_blocks_duplicate_trend_order() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         state=scenario.agent_state,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None
@@ -260,6 +274,7 @@ def test_regime_change_resets_consumed_trend_signal_flag() -> None:
         config=scenario.config,
         account_balance=scenario.account_balance,
         state=scenario.agent_state,
+        now=after_last_closed_bar(scenario.candles),
     )
 
     assert result.trend_signal is not None

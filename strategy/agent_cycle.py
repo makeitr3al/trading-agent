@@ -1,5 +1,6 @@
 import pandas as pd
 
+from datetime import datetime
 from config.strategy_config import StrategyConfig
 from indicators.bollinger import compute_bollinger_bands
 from indicators.macd import compute_macd
@@ -217,6 +218,7 @@ def run_agent_cycle(
     config: StrategyConfig,
     account_balance: float,
     state: AgentState,
+    now: datetime | None = None,
 ) -> tuple[StrategyRunResult, AgentState]:
     old_pending_order = state.pending_order
     latest_candle = candles[-1]
@@ -233,6 +235,7 @@ def run_agent_cycle(
         config=config,
         account_balance=account_balance,
         active_trade=working_active_trade,
+        now=now,
     )
     result = _apply_middle_band_retest_lock(result=result, state=state)
 
