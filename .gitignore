@@ -22,6 +22,7 @@ artifacts/runtime_overrides.json
 artifacts/operator_config.json
 artifacts/test_suite_status.json
 artifacts/test_suite_last.log
+artifacts/tradingview_strategy_indicator.pine
 trading-agent-data/
 
 # VS Code / IDE

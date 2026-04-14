@@ -10,7 +10,7 @@ panel_custom:
     sidebar_title: Trading Agent Admin
     sidebar_icon: mdi:robot-industrial
     url_path: trading-agent-admin
-    module_url: /local/trading-agent/admin-panel.js?v=0.6.0
+    module_url: /local/trading-agent/admin-panel.js?v=0.6.1
     require_admin: true
     config:
       title: Trading Agent Admin
