@@ -80,8 +80,9 @@ jobs:
           file: ha_addons/trading_agent/Dockerfile
           push: true
           platforms: ${{ matrix.platform }}
-          cache-from: type=gha,scope=ha-addon-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=ha-addon-${{ matrix.arch }}
+          provenance: false
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/trading-agent-addon-buildcache:${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/trading-agent-addon-buildcache:${{ matrix.arch }},mode=max
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.21
             BUILD_ARCH=${{ matrix.arch }}

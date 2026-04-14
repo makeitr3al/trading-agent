@@ -89,3 +89,40 @@ def test_build_run_summary_for_scharf_aggregates_current_run_entries(tmp_path: P
     assert summary["latest_symbol"] == "ETH/USDC"
     assert summary["latest_outcome"] == "filled"
     assert any("Order-Status: prepared=1" in line for line in summary["summary_lines"])
+
+
+def test_build_run_summary_prefers_executed_at_over_entry_timestamp(tmp_path: Path) -> None:
+    journal_path = tmp_path / "trading_journal_beta.jsonl"
+    entries = [
+        {
+            "entry_type": "cycle",
+            # Candle/cycle timestamp (often midnight for daily bars) outside the run window.
+            "entry_timestamp": "2026-04-14T00:00:00+00:00",
+            # Actual scan/run time inside the window.
+            "executed_at": "2026-04-14T16:18:35.670085+00:00",
+            "symbol": "BTC",
+            "environment": "beta",
+            "decision_action": "PREPARE_TREND_ORDER",
+            "received_signals": [
+                {"signal_type": "TREND_LONG", "is_valid": True, "reason": "trend signal detected"},
+                {"signal_type": "COUNTERTREND_SHORT", "is_valid": False, "reason": "not first regime bar"},
+            ],
+        }
+    ]
+    journal_path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+
+    summary = build_run_summary(
+        mode="scharf",
+        environment="beta",
+        started_at="2026-04-14T16:18:00+00:00",
+        finished_at="2026-04-14T16:19:00+00:00",
+        exit_code=0,
+        journal_path=journal_path,
+    )
+
+    assert summary["entry_count"] == 1
+    assert summary["cycle_count"] == 1
+    assert summary["symbols"] == ["BTC"]
+    assert summary["valid_signals_detected"] == 1
+    assert "Maerkte: 1." in summary["notification_message"]
+    assert "Valide Signale: 1." in summary["notification_message"]

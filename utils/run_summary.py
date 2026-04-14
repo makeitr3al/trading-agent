@@ -68,7 +68,13 @@ def _entries_for_window(path: str | Path | None, started_at: str, finished_at: s
 
     matching: list[dict[str, Any]] = []
     for entry in _iter_journal_entries(path):
-        entry_dt = _parse_iso8601(str(entry.get("entry_timestamp") or ""))
+        # Prefer executed_at (actual run time) for run-window aggregation.
+        # Fall back to entry_timestamp (often candle/cycle timestamp) for legacy entries.
+        executed_at = entry.get("executed_at")
+        entry_timestamp = entry.get("entry_timestamp")
+        entry_dt = _parse_iso8601(str(executed_at or ""))
+        if entry_dt is None:
+            entry_dt = _parse_iso8601(str(entry_timestamp or ""))
         if entry_dt is None:
             continue
         if started_dt <= entry_dt <= finished_dt:

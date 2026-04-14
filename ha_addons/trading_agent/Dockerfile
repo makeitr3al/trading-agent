@@ -14,12 +14,12 @@ ENV APP_PATH=/opt/trading-agent
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY requirements/runtime.txt /tmp/requirements.txt
-RUN python3 -m venv "${VIRTUAL_ENV}" \
-    && "${VIRTUAL_ENV}/bin/pip" install --upgrade pip
+RUN python3 -m venv "${VIRTUAL_ENV}"
 
-RUN --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     "${VIRTUAL_ENV}/bin/pip" install -r /tmp/requirements.txt
 
 COPY . ${APP_PATH}
