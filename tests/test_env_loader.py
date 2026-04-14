@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from utils.env_loader import (
+    coerce_propr_challenge_env_value,
     load_live_app_cycle_settings_from_env,
     load_manual_test_settings_from_env,
     load_multi_market_scan_settings_from_env,
@@ -314,6 +315,27 @@ def test_runtime_override_can_replace_scan_markets(monkeypatch: pytest.MonkeyPat
     settings = load_multi_market_scan_settings_from_env()
 
     assert settings.assets == ["BTC", "ETH"]
+
+
+def test_coerce_propr_challenge_env_value_strips_wrapping_quotes() -> None:
+    assert coerce_propr_challenge_env_value('  "urn:attempt:abc"  ') == "urn:attempt:abc"
+    assert coerce_propr_challenge_env_value("'ch-1'") == "ch-1"
+    assert coerce_propr_challenge_env_value("") is None
+    assert coerce_propr_challenge_env_value(None) is None
+
+
+def test_load_runner_settings_strips_wrapped_challenge_attempt_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROPR_ENV", "beta")
+    monkeypatch.setenv("PROPR_BETA_API_KEY", "k")
+    monkeypatch.setenv("RUNNER_CONFIRM", "NO")
+    monkeypatch.setenv("RUNNER_ALLOW_SUBMIT", "NO")
+    monkeypatch.setenv("RUNNER_MODE", "manual")
+    monkeypatch.setenv("PROPR_CHALLENGE_ATTEMPT_ID", '"attempt-wrap-1"')
+    monkeypatch.delenv("PROPR_CHALLENGE_ID", raising=False)
+
+    settings = load_runner_settings_from_env()
+
+    assert settings.challenge_attempt_id == "attempt-wrap-1"
 
 
 def test_live_app_cycle_settings_legacy_generic_journal_path_maps_to_environment_file(monkeypatch: pytest.MonkeyPatch) -> None:

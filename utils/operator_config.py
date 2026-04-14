@@ -96,7 +96,9 @@ def _normalize_scheduling_enabled(value: Any) -> bool:
 
 
 def _normalize_challenge_id(value: Any) -> str:
-    return str(value or "").strip()
+    from utils.env_loader import coerce_propr_challenge_env_value
+
+    return coerce_propr_challenge_env_value(str(value or "")) or ""
 
 
 def _normalize_push_enabled(value: Any) -> bool:

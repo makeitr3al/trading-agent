@@ -8,6 +8,19 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_normalize_operator_config_strips_wrapping_quotes_on_challenge_ids() -> None:
+    from utils.operator_config import normalize_operator_config
+
+    cfg = normalize_operator_config(
+        {
+            "challenge_attempt_id": '  "urn:prp:attempt:x"  ',
+            "challenge_id": "'urn:prp:challenge:y'",
+        }
+    )
+    assert cfg["challenge_attempt_id"] == "urn:prp:attempt:x"
+    assert cfg["challenge_id"] == "urn:prp:challenge:y"
+
+
 def test_operator_config_set_and_show_roundtrip(tmp_path: Path) -> None:
     data_path = tmp_path / 'trading-agent-data'
     config_path = data_path / 'operator_config.json'

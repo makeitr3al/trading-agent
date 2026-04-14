@@ -38,6 +38,9 @@ if [[ ! -x "$VIRTUAL_ENV/bin/python" ]]; then
 fi
 
 mkdir -p "$DATA_PATH"
+if [[ -f "$APP_PATH/ha_addons/trading_agent/ha_save_operator_config.py" ]]; then
+    cp "$APP_PATH/ha_addons/trading_agent/ha_save_operator_config.py" "$DATA_PATH/ha_save_operator_config.py"
+fi
 cd "$APP_PATH"
 
 export PATH="$VIRTUAL_ENV/bin:$PATH"
@@ -81,6 +84,22 @@ export SCAN_CONFIRM="YES"
 export TRADING_JOURNAL_PATH="$OPERATOR_JOURNAL_PATH"
 export RUNNER_STATUS_PATH="$OPERATOR_RUNTIME_STATUS_PATH"
 export TRADING_AGENT_LIVE_STATUS_PATH="$OPERATOR_LIVE_STATUS_PATH"
+
+_log_challenge_env_summary() {
+    local a="${PROPR_CHALLENGE_ATTEMPT_ID:-}"
+    local c="${PROPR_CHALLENGE_ID:-}"
+    if [[ -z "$a" ]]; then
+        bashio::log.info "PROPR_CHALLENGE_ATTEMPT_ID: (empty)"
+    else
+        bashio::log.info "PROPR_CHALLENGE_ATTEMPT_ID: len=${#a} tail=${a: -4}"
+    fi
+    if [[ -z "$c" ]]; then
+        bashio::log.info "PROPR_CHALLENGE_ID: (empty)"
+    else
+        bashio::log.info "PROPR_CHALLENGE_ID: len=${#c} tail=${c: -4}"
+    fi
+}
+_log_challenge_env_summary
 
 PANEL_DIR="/config/www/trading-agent"
 PANEL_ASSET_SOURCE="$APP_PATH/ha_addons/trading_agent/panel/admin-panel.js"
@@ -184,43 +203,55 @@ if [[ -f "$HA_CONFIG" ]] && grep -q "admin-panel\.js" "$HA_CONFIG" 2>/dev/null; 
     fi
 fi
 
-# Write challenges.json for admin panel challenge selector
+# Write challenges.json for admin panel challenge selector (path via env avoids shell quoting bugs).
 fetch_challenges_for_env() {
-    local env="$1"
+    local env_name="$1"
     local out_path="$2"
-    python -c "
+    export TA_CHALLENGES_FETCH_ENV="$env_name"
+    export TA_CHALLENGES_OUT="$out_path"
+    mkdir -p "$(dirname "$out_path")"
+    python <<'PY' 2>&1 || bashio::log.warning "Challenges fetch failed (non-critical)"
 import json
+import os
+
 from broker.propr_client import ProprClient
 from config.propr_config import ProprConfig
-import os
+
+out_path = os.environ["TA_CHALLENGES_OUT"]
+env_name = os.environ["TA_CHALLENGES_FETCH_ENV"]
 try:
-    env = '${env}'
-    key = os.environ.get('PROPR_BETA_API_KEY') if env == 'beta' else os.environ.get('PROPR_PROD_API_KEY')
-    url = os.environ.get('PROPR_BETA_API_URL', 'https://api.beta.propr.xyz/v1') if env == 'beta' else os.environ.get('PROPR_PROD_API_URL', 'https://api.propr.xyz/v1')
-    config = ProprConfig(environment=env, api_key=key, base_url=url)
+    key = os.environ.get("PROPR_BETA_API_KEY") if env_name == "beta" else os.environ.get("PROPR_PROD_API_KEY")
+    url = (
+        os.environ.get("PROPR_BETA_API_URL", "https://api.beta.propr.xyz/v1")
+        if env_name == "beta"
+        else os.environ.get("PROPR_PROD_API_URL", "https://api.propr.xyz/v1")
+    )
+    config = ProprConfig(environment=env_name, api_key=key, base_url=url)
     client = ProprClient(config)
     attempts_raw = client.get_challenge_attempts()
-    items = attempts_raw.get('data', []) if isinstance(attempts_raw, dict) else attempts_raw
-    active = [a for a in items if a.get('status') == 'active']
+    items = attempts_raw.get("data", []) if isinstance(attempts_raw, dict) else attempts_raw
+    active = [a for a in items if a.get("status") == "active"]
     result = []
     for a in active:
-        attempt_id = a.get('attemptId') or a.get('attempt_id') or a.get('id', '')
+        attempt_id = a.get("attemptId") or a.get("attempt_id") or a.get("id", "")
         detail = client.get_challenge_attempt(attempt_id) if attempt_id else {}
-        challenge = detail.get('challenge', {}) or {}
-        result.append({
-            'challenge_id': a.get('challengeId') or a.get('challenge_id', ''),
-            'attempt_id': attempt_id,
-            'account_id': a.get('accountId') or a.get('account_id', ''),
-            'name': challenge.get('name') or challenge.get('title', ''),
-            'initial_balance': challenge.get('initialBalance', ''),
-        })
-    with open('${out_path}', 'w') as f:
+        challenge = detail.get("challenge", {}) or {}
+        result.append(
+            {
+                "challenge_id": a.get("challengeId") or a.get("challenge_id", ""),
+                "attempt_id": attempt_id,
+                "account_id": a.get("accountId") or a.get("account_id", ""),
+                "name": challenge.get("name") or challenge.get("title", ""),
+                "initial_balance": challenge.get("initialBalance", ""),
+            }
+        )
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=True)
 except Exception as e:
-    print(f'Challenges fetch failed (non-critical): {e}')
-    with open('${out_path}', 'w') as f:
-        f.write('[]')
-" 2>&1 || bashio::log.warning "Challenges fetch failed (non-critical)"
+    print(f"Challenges fetch failed (non-critical): {e}")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("[]")
+PY
 }
 
 # Write env-scoped challenges for viewer switching in panel.

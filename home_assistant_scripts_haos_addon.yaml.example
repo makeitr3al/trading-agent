@@ -8,93 +8,186 @@ trading_agent_load_current_config_haos:
     - wait_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
       timeout: "00:02:00"
       continue_on_timeout: true
-    - if:
-        - condition: template
-          value_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
-      then:
-        - variables:
-            operator_mode: "{{ states('sensor.trading_agent_operator_config') }}"
-            operator_environment: "{{ state_attr('sensor.trading_agent_operator_config', 'environment') or 'beta' }}"
-            operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
-            ui_mode: >-
-              {% if operator_mode == 'preflight' %}
-                Preflight-Test
-              {% elif operator_mode == 'beta_write' %}
-                Beta-Write-Test
-              {% else %}
-                Scharf
-              {% endif %}
-        - action: input_select.select_option
-          target:
-            entity_id: input_select.trading_agent_mode
-          data:
-            option: "{{ ui_mode | trim }}"
-        - action: input_select.select_option
-          target:
-            entity_id: input_select.trading_agent_environment
-          data:
-            option: "{{ operator_environment }}"
-        - if:
+    # Prefer command_line sensor; if it stays unknown (slow scan_interval), fall back to reading
+    # /share/trading-agent-data/operator_config.json directly so helpers are not stuck on YAML initial: values.
+    # Requires Home Assistant 2024.8+ (shell_command response_variable).
+    - choose:
+        - conditions:
             - condition: template
-              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') is not none }}"
-          then:
-            - action: input_number.set_value
+              value_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
+          sequence:
+            - variables:
+                operator_mode: "{{ states('sensor.trading_agent_operator_config') }}"
+                operator_environment: "{{ state_attr('sensor.trading_agent_operator_config', 'environment') or 'beta' }}"
+                operator_schedule_time: "{{ state_attr('sensor.trading_agent_operator_config', 'schedule_time') or '07:00' }}"
+                ui_mode: >-
+                  {% if operator_mode == 'preflight' %}
+                    Preflight-Test
+                  {% elif operator_mode == 'beta_write' %}
+                    Beta-Write-Test
+                  {% else %}
+                    Scharf
+                  {% endif %}
+            - action: input_select.select_option
               target:
-                entity_id: input_number.trading_agent_leverage
+                entity_id: input_select.trading_agent_mode
               data:
-                value: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') | int }}"
-        - if:
-            - condition: template
-              value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') is not none }}"
-          then:
+                option: "{{ ui_mode | trim }}"
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.trading_agent_environment
+              data:
+                option: "{{ operator_environment }}"
+            - if:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') is not none }}"
+              then:
+                - action: input_number.set_value
+                  target:
+                    entity_id: input_number.trading_agent_leverage
+                  data:
+                    value: "{{ state_attr('sensor.trading_agent_operator_config', 'leverage') | int }}"
+            - if:
+                - condition: template
+                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') is not none }}"
+              then:
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.trading_agent_markets
+                  data:
+                    value: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') }}"
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_scheduling_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_scheduling_aktiv
+            - action: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.trading_agent_schedule_time
+              data:
+                time: "{{ operator_schedule_time[:5] }}"
             - action: input_text.set_value
               target:
-                entity_id: input_text.trading_agent_markets
+                entity_id: input_text.trading_agent_challenge_id
               data:
-                value: "{{ state_attr('sensor.trading_agent_operator_config', 'markets') }}"
-        - choose:
-            - conditions:
+                value: >-
+                  {{ (state_attr('sensor.trading_agent_operator_config', 'challenge_attempt_id')
+                      or state_attr('sensor.trading_agent_operator_config', 'challenge_id')
+                      or '') | default('', true) }}
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_push_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_push_aktiv
+        - conditions:
+            - condition: template
+              value_template: "true"
+          sequence:
+            - action: shell_command.trading_agent_cat_operator_config_haos
+              response_variable: operator_config_file
+            - variables:
+                op: "{{ operator_config_file.stdout | default('{}', true) | trim | from_json }}"
+                operator_mode_raw: "{{ op.mode | default('scharf', true) }}"
+                operator_environment: "{{ op.environment | default('beta', true) }}"
+                operator_schedule_time: "{{ op.schedule_time | default('07:00', true) }}"
+                ui_mode: >-
+                  {% if operator_mode_raw == 'preflight' %}
+                    Preflight-Test
+                  {% elif operator_mode_raw == 'beta_write' %}
+                    Beta-Write-Test
+                  {% else %}
+                    Scharf
+                  {% endif %}
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.trading_agent_mode
+              data:
+                option: "{{ ui_mode | trim }}"
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.trading_agent_environment
+              data:
+                option: "{{ operator_environment }}"
+            - if:
                 - condition: template
-                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [true, 'true', 'True', 'on', '1'] }}"
-              sequence:
-                - action: input_boolean.turn_on
+                  value_template: "{{ 'leverage' in op and op.leverage is not none }}"
+              then:
+                - action: input_number.set_value
                   target:
-                    entity_id: input_boolean.trading_agent_scheduling_aktiv
-            - conditions:
+                    entity_id: input_number.trading_agent_leverage
+                  data:
+                    value: "{{ op.leverage | int }}"
+            - if:
                 - condition: template
-                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'scheduling_enabled') in [false, 'false', 'False', 'off', '0'] }}"
-              sequence:
-                - action: input_boolean.turn_off
+                  value_template: "{{ 'markets' in op and op.markets is not none }}"
+              then:
+                - action: input_text.set_value
                   target:
-                    entity_id: input_boolean.trading_agent_scheduling_aktiv
-        - action: input_datetime.set_datetime
-          target:
-            entity_id: input_datetime.trading_agent_schedule_time
-          data:
-            time: "{{ operator_schedule_time[:5] }}"
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.trading_agent_challenge_id
-          data:
-            value: >-
-              {{ (state_attr('sensor.trading_agent_operator_config', 'challenge_attempt_id')
-                  or state_attr('sensor.trading_agent_operator_config', 'challenge_id')
-                  or '') | default('', true) }}
-        - choose:
-            - conditions:
-                - condition: template
-                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [true, 'true', 'True', 'on', '1'] }}"
-              sequence:
-                - action: input_boolean.turn_on
-                  target:
-                    entity_id: input_boolean.trading_agent_push_aktiv
-            - conditions:
-                - condition: template
-                  value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'push_enabled') in [false, 'false', 'False', 'off', '0'] }}"
-              sequence:
-                - action: input_boolean.turn_off
-                  target:
-                    entity_id: input_boolean.trading_agent_push_aktiv
+                    entity_id: input_text.trading_agent_markets
+                  data:
+                    value: "{{ op.markets }}"
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.scheduling_enabled in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_scheduling_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.scheduling_enabled in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_scheduling_aktiv
+            - action: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.trading_agent_schedule_time
+              data:
+                time: "{{ operator_schedule_time[:5] }}"
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.trading_agent_challenge_id
+              data:
+                value: >-
+                  {{ (op.challenge_attempt_id | default('', true))
+                      or (op.challenge_id | default('', true)) }}
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.push_enabled in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_push_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.push_enabled in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_push_aktiv
 
 
 trading_agent_save_current_config_haos:

@@ -21,6 +21,17 @@ Das Add-on liest und schreibt unter:
 - `/share/trading-agent-data/journal_snapshot.json`
 - `/share/trading-agent-data/test_suite_status.json`
 - `/share/trading-agent-data/test_suite_last.log`
+- `/share/trading-agent-data/ha_save_operator_config.py` (wird beim Add-on-Start aus dem Image nach `/share` kopiert; wird von `shell_command.trading_agent_save_operator_config_haos` genutzt)
+
+## Add-on-Upgrade / HA-Paket (Checkliste)
+
+Nach einem **neuen Add-on-Image** oder wenn Helper (z. B. Maerkte) ploetzlich wieder **YAML-`initial:`**-Werte zeigen:
+
+1. Pruefen, ob `/share/trading-agent-data/operator_config.json` noch existiert und sinnvolle Werte hat (Maerkte, `challenge_attempt_id`, Modus).
+2. **Home-Assistant-Paket/Scripts** aus dem Repo mit deiner `/config`-Installation abgleichen (insbesondere `home_assistant_package_haos_addon.yaml.example` und `home_assistant_scripts_haos_addon.yaml.example`): neue `shell_command`-Eintraege oder Script-Sequenzen werden sonst nicht uebernommen.
+3. Einmal **„Trading Agent Konfiguration laden“** (`script.trading_agent_load_current_config_haos`) ausfuehren oder HA neu starten, damit die Helper aus der Datei bzw. dem Sensor wieder befuellt werden.
+4. `challenge_attempt_id` gehoert in `operator_config.json` (und im Helper **Trading Agent Challenge Attempt ID**). Ueberfluessige Anfuehrungszeichen aus Copy-Paste werden beim Laden normalisiert; trotzdem moeglichst den **Attempt**-Wert setzen, nicht nur die Challenge-URN, wenn mehrere aktive Attempts existieren.
+5. Home Assistant **2024.8+** empfohlen: das Load-Script nutzt bei weiterhin `unknown`/`unavailable` vom `sensor.trading_agent_operator_config` einen **Fallback** (`shell_command.trading_agent_cat_operator_config_haos`), damit die Helper nicht auf den Default-Maerkten haengen bleiben.
 
 ## Operator-Konfiguration
 

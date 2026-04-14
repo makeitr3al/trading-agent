@@ -7,6 +7,27 @@ from models.propr_challenge import AccountBalance, ActiveChallengeContext, Propr
 logger = logging.getLogger(__name__)
 
 
+def _normalize_id_for_match(value: str | None) -> str:
+    """Strip whitespace and one layer of JSON-style quotes (common from HA copy-paste)."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+        s = s[1:-1].strip()
+    return s
+
+
+def _configured_id_shape_hint(value: str) -> str:
+    v = (value or "").strip().lower()
+    if not v:
+        return "empty"
+    if "attempt" in v or ":attempt:" in v:
+        return "looks_like_attempt_id"
+    if "challenge" in v or ":challenge:" in v:
+        return "looks_like_challenge_id"
+    return "opaque_id"
+
+
 def _get_items(payload: dict | list[dict]) -> list[dict]:
     if isinstance(payload, list):
         return payload
@@ -45,10 +66,17 @@ def normalize_attempt_payload(item: dict[str, Any]) -> ProprChallengeAttempt:
 
     challenge_id_value = get_first_present(item, ["challenge_id", "challengeId"])
 
+    raw_attempt = str(get_first_present(item, ["attempt_id", "attemptId", "id"]) or "")
+    raw_challenge = str(challenge_id_value) if challenge_id_value else ""
+    # Normalization is authoritative: do not fall back to raw `.strip()` because it can
+    # reintroduce quotes that `_normalize_id_for_match()` intentionally removed.
+    attempt_norm = _normalize_id_for_match(raw_attempt)
+    challenge_norm = _normalize_id_for_match(raw_challenge) if raw_challenge else ""
+
     return ProprChallengeAttempt(
-        attempt_id=str(get_first_present(item, ["attempt_id", "attemptId", "id"]) or ""),
+        attempt_id=attempt_norm,
         account_id=str(account_value or ""),
-        challenge_id=str(challenge_id_value) if challenge_id_value else None,
+        challenge_id=challenge_norm if challenge_norm else None,
         status=str(get_first_present(item, ["status"]) or ""),
         current_phase=get_first_present(item, ["current_phase", "currentPhase"]),
         total_profit_loss=get_first_present(item, ["total_profit_loss", "totalProfitLoss"]),
@@ -155,24 +183,52 @@ def get_active_challenge_context(
     if not active_contexts:
         return None
 
-    if attempt_id:
-        filtered = [ctx for ctx in active_contexts if ctx.attempt.attempt_id == attempt_id]
+    want_attempt = _normalize_id_for_match(attempt_id) if attempt_id else ""
+    want_challenge = _normalize_id_for_match(challenge_id) if challenge_id else ""
+
+    if want_attempt:
+        filtered = [
+            ctx for ctx in active_contexts if _normalize_id_for_match(ctx.attempt.attempt_id) == want_attempt
+        ]
         if not filtered:
+            attempt_keys = sorted(
+                {_normalize_id_for_match(ctx.attempt.attempt_id) for ctx in active_contexts},
+            )
+            sample = ", ".join(attempt_keys[:5])
             logger.warning(
-                "No active attempt matches PROPR_CHALLENGE_ATTEMPT_ID=%s (have %d active attempts)",
-                attempt_id,
+                "No active attempt matches PROPR_CHALLENGE_ATTEMPT_ID after normalization "
+                "(configured hint=%s, len=%d, have %d active attempts; attempt_id samples: %s)",
+                _configured_id_shape_hint(attempt_id or ""),
+                len(want_attempt),
                 len(active_contexts),
+                sample or "n/a",
             )
             return None
         return filtered[0]
 
-    if challenge_id:
-        filtered = [ctx for ctx in active_contexts if ctx.challenge_id == challenge_id]
+    if want_challenge:
+        filtered = [
+            ctx
+            for ctx in active_contexts
+            if ctx.challenge_id and _normalize_id_for_match(ctx.challenge_id) == want_challenge
+        ]
         if not filtered:
+            ch_keys = sorted(
+                {
+                    _normalize_id_for_match(str(c.challenge_id))
+                    for c in active_contexts
+                    if c.challenge_id
+                },
+            )
+            sample = ", ".join(ch_keys[:5])
             logger.warning(
-                "No active attempt matches PROPR_CHALLENGE_ID=%s (have %d active attempts)",
-                challenge_id,
+                "No active attempt matches PROPR_CHALLENGE_ID after normalization "
+                "(configured hint=%s, len=%d, have %d active attempts; challenge_id samples: %s). "
+                "If you copied an attempt id, set PROPR_CHALLENGE_ATTEMPT_ID instead.",
+                _configured_id_shape_hint(challenge_id or ""),
+                len(want_challenge),
                 len(active_contexts),
+                sample or "n/a",
             )
             return None
         return filtered[0]

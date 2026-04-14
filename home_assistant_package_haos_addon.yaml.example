@@ -179,8 +179,9 @@ command_line:
       scan_interval: 30
 
 shell_command:
+  trading_agent_cat_operator_config_haos: "cat /share/trading-agent-data/operator_config.json 2>/dev/null || echo '{}'"
   trading_agent_save_operator_config_haos: >-
-    python3 -c "import json, sys; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); attempt_id = sys.argv[7]; payload = {'mode': sys.argv[1], 'environment': sys.argv[2], 'leverage': int(sys.argv[3]), 'markets': sys.argv[4], 'scheduling_enabled': sys.argv[5].lower() == 'true', 'schedule_time': sys.argv[6], 'challenge_id': '', 'challenge_attempt_id': attempt_id, 'push_enabled': sys.argv[8].lower() == 'true'}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')" "{{ mode }}" "{{ environment }}" "{{ leverage }}" "{{ markets }}" "{{ scheduling_enabled }}" "{{ schedule_time }}" "{{ challenge_attempt_id }}" "{{ push_enabled }}"
+    python3 /share/trading-agent-data/ha_save_operator_config.py "{{ mode }}" "{{ environment }}" "{{ leverage }}" "{{ markets }}" "{{ scheduling_enabled }}" "{{ schedule_time }}" "{{ challenge_attempt_id }}" "{{ push_enabled }}"
   trading_agent_reset_operator_config_haos: >-
     python3 -c "import json; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); payload = {'mode': 'scharf', 'environment': 'beta', 'leverage': 1, 'markets': 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP', 'scheduling_enabled': False, 'schedule_time': '07:00', 'challenge_id': '', 'challenge_attempt_id': '', 'push_enabled': False}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')"
   trading_agent_sync_panel_assets_haos: >-

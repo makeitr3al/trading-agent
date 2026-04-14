@@ -56,6 +56,24 @@ def test_parse_challenge_attempts_with_one_valid_attempt() -> None:
     assert attempts[0].account_id == "account-1"
 
 
+def test_parse_challenge_attempts_strips_wrapping_quotes_on_ids() -> None:
+    attempts = parse_challenge_attempts(
+        {
+            "data": [
+                {
+                    "attemptId": '"attempt-1"',
+                    "accountId": "account-1",
+                    "challengeId": "'challenge-A'",
+                    "status": "active",
+                }
+            ]
+        }
+    )
+
+    assert attempts[0].attempt_id == "attempt-1"
+    assert attempts[0].challenge_id == "challenge-A"
+
+
 def test_normalizes_camel_case_fields_to_internal_snake_case_model() -> None:
     attempts = parse_challenge_attempts(
         {
@@ -263,6 +281,31 @@ def test_get_active_challenge_context_filters_by_challenge_id() -> None:
     assert context.attempt.attempt_id == "attempt-2"
     assert context.account_id == "account-2"
     assert context.challenge_id == "challenge-B"
+
+
+def test_get_active_challenge_context_matches_attempt_id_with_wrapping_quotes() -> None:
+    client = FakeProprClient(
+        {
+            "data": [
+                {
+                    "attemptId": "attempt-2",
+                    "accountId": "account-2",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+                {
+                    "attemptId": "attempt-1",
+                    "accountId": "account-1",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+
+    context = get_active_challenge_context(client, attempt_id='"attempt-2"')
+    assert context is not None
+    assert context.attempt.attempt_id == "attempt-2"
 
 
 def test_get_active_challenge_context_filters_by_attempt_id() -> None:

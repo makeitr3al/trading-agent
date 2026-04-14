@@ -96,6 +96,15 @@ def _get_env(name: str) -> str:
     return get_effective_runtime_value(name)
 
 
+def coerce_propr_challenge_env_value(raw: str | None) -> str | None:
+    """Strip whitespace and accidental JSON-style wrapping quotes from Propr challenge env vars."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+        s = s[1:-1].strip()
+    return s or None
+
 
 def _parse_yes_no(value: str, field_name: str) -> bool:
     normalized = value.strip().upper()
@@ -301,8 +310,8 @@ def load_runner_settings_from_env() -> RunnerSettings:
     )
     leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
-    challenge_id = (_get_env("PROPR_CHALLENGE_ID") or "").strip() or None
-    challenge_attempt_id = (_get_env("PROPR_CHALLENGE_ATTEMPT_ID") or "").strip() or None
+    challenge_id = coerce_propr_challenge_env_value(_get_env("PROPR_CHALLENGE_ID"))
+    challenge_attempt_id = coerce_propr_challenge_env_value(_get_env("PROPR_CHALLENGE_ATTEMPT_ID"))
 
     return RunnerSettings(
         environment=environment,
@@ -346,8 +355,8 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
     )
     leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
-    challenge_id = (_get_env("PROPR_CHALLENGE_ID") or "").strip() or None
-    challenge_attempt_id = (_get_env("PROPR_CHALLENGE_ATTEMPT_ID") or "").strip() or None
+    challenge_id = coerce_propr_challenge_env_value(_get_env("PROPR_CHALLENGE_ID"))
+    challenge_attempt_id = coerce_propr_challenge_env_value(_get_env("PROPR_CHALLENGE_ATTEMPT_ID"))
 
     return MultiMarketScanSettings(
         confirm=confirm,
