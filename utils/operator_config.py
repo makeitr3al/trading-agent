@@ -17,6 +17,7 @@ DEFAULT_OPERATOR_CONFIG = {
     "scheduling_enabled": False,
     "schedule_time": "07:00",
     "challenge_id": "",
+    "challenge_attempt_id": "",
     "push_enabled": False,
 }
 SUPPORTED_MODES = ("scharf", "preflight", "beta_write")
@@ -125,6 +126,7 @@ def normalize_operator_config(payload: dict[str, Any]) -> dict[str, Any]:
         "scheduling_enabled": _normalize_scheduling_enabled(merged.get("scheduling_enabled")),
         "schedule_time": _normalize_schedule_time(merged.get("schedule_time")),
         "challenge_id": _normalize_challenge_id(merged.get("challenge_id")),
+        "challenge_attempt_id": _normalize_challenge_id(merged.get("challenge_attempt_id")),
         "push_enabled": _normalize_push_enabled(merged.get("push_enabled")),
     }
 
@@ -221,6 +223,7 @@ def export_operator_env_shell(path: str | Path | None = None) -> str:
         "OPERATOR_SCHEDULING_ENABLED": "YES" if config["scheduling_enabled"] else "NO",
         "OPERATOR_SCHEDULE_TIME": config["schedule_time"],
         "OPERATOR_CHALLENGE_ID": config.get("challenge_id", ""),
+        "OPERATOR_CHALLENGE_ATTEMPT_ID": config.get("challenge_attempt_id", ""),
         "OPERATOR_PUSH_ENABLED": "YES" if config.get("push_enabled", False) else "NO",
         "OPERATOR_PRIMARY_SYMBOL": derived["primary_symbol"],
         "OPERATOR_PRIMARY_COIN": derived["primary_coin"],

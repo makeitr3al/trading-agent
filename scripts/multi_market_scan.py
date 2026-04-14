@@ -231,11 +231,16 @@ def _persist_live_status(
     *,
     last_error: str | None = None,
     challenge_id: str | None = None,
+    challenge_attempt_id: str | None = None,
 ) -> None:
     from utils.live_status import build_live_status_payload, write_live_status
 
     try:
-        challenge_context = get_active_challenge_context(client, challenge_id=challenge_id)
+        challenge_context = get_active_challenge_context(
+            client,
+            attempt_id=challenge_attempt_id,
+            challenge_id=challenge_id,
+        )
         if challenge_context is None:
             write_live_status_from_state(
                 environment=environment,
@@ -361,6 +366,7 @@ def main() -> None:
                     journal_path=scan_settings.journal_path,
                     executed_at=scan_executed_at,
                     challenge_id=scan_settings.challenge_id,
+                    challenge_attempt_id=scan_settings.challenge_attempt_id,
                     journal_emit_pending_order=False,
                     scan_effective_submit_allowed=effective_allow_submit,
                     scan_cycle_phase="dry_run",
@@ -411,7 +417,13 @@ def main() -> None:
 
         if not effective_allow_submit:
             if client is not None:
-                _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
+                _persist_live_status(
+                    client,
+                    environment,
+                    primary_symbol,
+                    challenge_id=scan_settings.challenge_id,
+                    challenge_attempt_id=scan_settings.challenge_attempt_id,
+                )
             return
 
         reference_result = next((row["result"] for row in scan_results if row.get("result")), None)
@@ -425,13 +437,25 @@ def main() -> None:
         print(f"Execution slots available: {available_slots}")
         if available_slots <= 0:
             print("No execution slots available. Skipping submits.")
-            _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
+            _persist_live_status(
+                client,
+                environment,
+                primary_symbol,
+                challenge_id=scan_settings.challenge_id,
+                challenge_attempt_id=scan_settings.challenge_attempt_id,
+            )
             return
 
         selected_candidates = _select_execution_candidates(scan_results, available_slots)
         if not selected_candidates:
             print("No executable signal candidates found.")
-            _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
+            _persist_live_status(
+                client,
+                environment,
+                primary_symbol,
+                challenge_id=scan_settings.challenge_id,
+                challenge_attempt_id=scan_settings.challenge_attempt_id,
+            )
             return
 
         print("Executing markets:")
@@ -462,6 +486,7 @@ def main() -> None:
                 journal_path=scan_settings.journal_path,
                 executed_at=scan_executed_at,
                 challenge_id=scan_settings.challenge_id,
+                challenge_attempt_id=scan_settings.challenge_attempt_id,
                 scan_effective_submit_allowed=effective_allow_submit,
                 scan_cycle_phase="execute",
             )
@@ -470,12 +495,25 @@ def main() -> None:
                 f"skipped_reason={execution_result.skipped_reason}"
             )
 
-        _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id)
+        _persist_live_status(
+            client,
+            environment,
+            primary_symbol,
+            challenge_id=scan_settings.challenge_id,
+            challenge_attempt_id=scan_settings.challenge_attempt_id,
+        )
     except Exception as exc:
         print(f"Multi-market scan failed: {exc}")
         if client is not None:
             try:
-                _persist_live_status(client, environment, primary_symbol, challenge_id=scan_settings.challenge_id, last_error=str(exc))
+                _persist_live_status(
+                    client,
+                    environment,
+                    primary_symbol,
+                    challenge_id=scan_settings.challenge_id,
+                    challenge_attempt_id=scan_settings.challenge_attempt_id,
+                    last_error=str(exc),
+                )
             except Exception:
                 pass
 

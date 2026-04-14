@@ -20,6 +20,11 @@
   triggers:
     - trigger: homeassistant
       event: start
+    - trigger: state
+      entity_id: sensor.trading_agent_operator_config
+      from:
+        - unknown
+        - unavailable
   actions:
     - delay:
         seconds: 5

@@ -182,6 +182,7 @@ class _CycleContext:
     environment: str | None
     symbol_spec_loaded: bool
     challenge_id: str | None = None
+    challenge_attempt_id: str | None = None
     journal_emit_pending_order: bool = True
     scan_effective_submit_allowed: bool | None = None
     scan_cycle_phase: str | None = None
@@ -245,7 +246,18 @@ def _phase_health_guard(ctx: _CycleContext) -> AppCycleResult | None:
 
 
 def _phase_challenge_validation(ctx: _CycleContext) -> AppCycleResult | None:
-    ctx.challenge_context = get_active_challenge_context(ctx.client, challenge_id=ctx.challenge_id)
+    try:
+        ctx.challenge_context = get_active_challenge_context(
+            ctx.client,
+            attempt_id=ctx.challenge_attempt_id,
+            challenge_id=ctx.challenge_id,
+        )
+    except TypeError as exc:
+        # Backwards compatibility for tests or older callables monkeypatched in place
+        # that only accept (client, challenge_id=...).
+        if "unexpected keyword argument 'attempt_id'" not in str(exc):
+            raise
+        ctx.challenge_context = get_active_challenge_context(ctx.client, challenge_id=ctx.challenge_id)
     if ctx.challenge_context is None:
         ctx.risk_guard_result = evaluate_execution_guards(
             None, max_allowed_drawdown=ctx.max_allowed_drawdown,
@@ -519,6 +531,7 @@ def run_app_cycle(
     journal_path: str | Path | None = None,
     executed_at: str | None = None,
     challenge_id: str | None = None,
+    challenge_attempt_id: str | None = None,
     journal_emit_pending_order: bool = True,
     scan_effective_submit_allowed: bool | None = None,
     scan_cycle_phase: str | None = None,
@@ -545,6 +558,7 @@ def run_app_cycle(
         symbol_spec_loaded=symbol_spec is not None,
         executed_at=executed_at,
         challenge_id=challenge_id,
+        challenge_attempt_id=challenge_attempt_id,
         journal_emit_pending_order=journal_emit_pending_order,
         scan_effective_submit_allowed=scan_effective_submit_allowed,
         scan_cycle_phase=scan_cycle_phase,

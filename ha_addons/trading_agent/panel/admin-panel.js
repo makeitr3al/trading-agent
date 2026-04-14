@@ -119,6 +119,14 @@ function formatValue(value) {
   return escapeHtml(value);
 }
 
+function firstPresent(obj, keys) {
+  for (const key of keys) {
+    const v = obj?.[key];
+    if (v !== null && v !== undefined && v !== "") return v;
+  }
+  return null;
+}
+
 function formatCurrency(value) {
   if (value === null || value === undefined || value === "") return "-";
   const numeric = Number(value);
@@ -751,17 +759,34 @@ class TradingAgentAdminPanel extends HTMLElement {
 
   challengeSelector() {
     const challenges = this.challengesList;
-    const currentId = this.entity(ENTITIES.challengeId)?.state || "";
+    const currentRaw = this.entity(ENTITIES.challengeId)?.state || "";
+    const currentId = String(currentRaw || "").trim();
     if (!challenges || !challenges.length) {
-      return this.field(ENTITIES.challengeId, "text", { label: "Challenge ID" });
+      return this.field(ENTITIES.challengeId, "text", { label: "Challenge Attempt ID" });
     }
+
+    // Backwards compatibility: older versions stored challenge_id in the helper. We now store attempt_id.
+    // If the helper contains a challenge_id, upgrade it to the first matching attempt_id deterministically.
+    const attemptIds = new Set(challenges.map((c) => String(c.attempt_id || "").trim()).filter(Boolean));
+    const hasAttemptMatch = currentId && attemptIds.has(currentId);
+    if (currentId && !hasAttemptMatch) {
+      const upgrade = challenges.find((c) => String(c.challenge_id || "").trim() === currentId && String(c.attempt_id || "").trim());
+      if (upgrade) {
+        const upgradedAttemptId = String(upgrade.attempt_id).trim();
+        // Fire-and-forget: keep UI consistent and persist operator config.
+        this.setEntityValue(ENTITIES.challengeId, upgradedAttemptId).then(() => this._schedulePersistOperatorConfig());
+      }
+    }
+
+    const effectiveId = hasAttemptMatch ? currentId : "";
     const options = [
-      `<option value="" ${!currentId ? "selected" : ""}>-- Automatisch (erste aktive) --</option>`,
+      `<option value="" ${!effectiveId ? "selected" : ""}>-- Automatisch (erste aktive) --</option>`,
       ...challenges.map((c) => {
         const bal = c.initial_balance ? ` ($${Number(c.initial_balance).toLocaleString("en-US")})` : "";
         const label = `${escapeHtml(c.name || c.challenge_id)}${bal}`;
-        const selected = c.challenge_id === currentId ? "selected" : "";
-        return `<option value="${escapeHtml(c.challenge_id)}" ${selected}>${label}</option>`;
+        const attemptId = String(c.attempt_id || "").trim();
+        const selected = attemptId && attemptId === effectiveId ? "selected" : "";
+        return `<option value="${escapeHtml(attemptId)}" ${selected}>${label}</option>`;
       }),
     ].join("");
     return `<label class="field"><span>Challenge</span><select data-entity="${ENTITIES.challengeId}">${options}</select></label>`;
@@ -960,16 +985,22 @@ class TradingAgentAdminPanel extends HTMLElement {
     const wsPositions = Array.isArray(ld?.open_positions_summary) ? ld.open_positions_summary : [];
     const openPositions = Number(ld?.account_open_positions_count ?? 0);
     const wsDetailRows = (!openTrade && wsPositions.length)
-      ? wsPositions.map((p, idx) => `<div class="${idx ? "ws-pos-block" : ""}">
+      ? wsPositions.map((p, idx) => {
+        const stopLoss = firstPresent(p, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"]);
+        const takeProfit = firstPresent(p, ["take_profit", "takeProfit", "tp", "internal_take_profit"]);
+        const entryPrice = firstPresent(p, ["entry_price", "entryPrice", "entry"]);
+        const positionSize = firstPresent(p, ["position_size", "positionSize", "size"]);
+        return `<div class="${idx ? "ws-pos-block" : ""}">
             ${p.challenge_name ? `<div class="status-row"><span class="label">Challenge</span><span class="value">${escapeHtml(p.challenge_name)}</span></div>` : ""}
             <div class="status-row"><span class="label">Markt</span><span class="value">${escapeHtml(p.symbol ?? "-")}</span></div>
             <div class="status-row"><span class="label">Richtung</span><span class="value"><span class="pill ${badgeClass(p.direction)}">${escapeHtml(p.direction ?? "-")}</span></span></div>
-            <div class="status-row"><span class="label">Groesse</span><span class="value">${escapeHtml(String(p.position_size ?? "-"))}</span></div>
-            <div class="status-row"><span class="label">Entry</span><span class="value">${p.entry_price != null ? escapeHtml(String(p.entry_price)) : "-"}</span></div>
-            <div class="status-row"><span class="label">Stop Loss</span><span class="value">${p.stop_loss != null ? escapeHtml(String(p.stop_loss)) : "-"}</span></div>
-            <div class="status-row"><span class="label">Take Profit</span><span class="value">${p.take_profit != null ? escapeHtml(String(p.take_profit)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Groesse</span><span class="value">${positionSize != null ? escapeHtml(String(positionSize)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Entry</span><span class="value">${entryPrice != null ? escapeHtml(String(entryPrice)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Stop Loss</span><span class="value">${stopLoss != null ? escapeHtml(String(stopLoss)) : "-"}</span></div>
+            <div class="status-row"><span class="label">Take Profit</span><span class="value">${takeProfit != null ? escapeHtml(String(takeProfit)) : "-"}</span></div>
             ${p.unrealized_pnl != null ? `<div class="status-row"><span class="label">Position PnL</span><span class="value">${formatPnl(p.unrealized_pnl)}</span></div>` : ""}
-            </div>`).join("")
+            </div>`;
+      }).join("")
       : "";
     const cov = Array.isArray(ld?.challenges_overview) ? ld.challenges_overview : [];
     const multiChallengeRows = cov.length > 1
@@ -992,7 +1023,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       : "";
 
     const activePositionCard = (openPositions > 0 || openTrade)
-      ? `<section class="card card-highlight">
+      ? `<section class="card card-highlight card-narrow">
           <h3>Offene Positionen ${openPositions > 1 || cov.length > 1 ? `(${openPositions})` : ""}</h3>
           <div class="status-list">
             <div class="status-row"><span class="label">Unrealisiertes PnL</span><span class="value pnl-live">${formatPnl(ld?.account_unrealized_pnl)}</span></div>
@@ -1602,6 +1633,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       .grid.two { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
       .grid.cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
       .card { background: rgba(255, 255, 255, 0.95); border: 1px solid #dce4ef; border-radius: 20px; padding: 18px; box-shadow: 0 16px 32px rgba(22, 33, 51, 0.06); }
+      .card-narrow { max-width: 560px; width: 100%; margin-inline: auto; }
       .card h3 { margin: 0 0 14px; font-size: 18px; }
       .field, .toggle { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #5d6b81; }
       .toggle { flex-direction: row; align-items: center; gap: 10px; color: #162133; }

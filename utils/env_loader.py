@@ -72,6 +72,7 @@ class RunnerSettings(BaseModel):
     journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
     status_path: str = DEFAULT_RUNNER_STATUS_PATH
     challenge_id: str | None = None
+    challenge_attempt_id: str | None = None
 
 
 class DataSourceSettings(BaseModel):
@@ -87,6 +88,7 @@ class MultiMarketScanSettings(BaseModel):
     leverage: int = DEFAULT_LEVERAGE
     journal_path: str = DEFAULT_TRADING_JOURNAL_PATH
     challenge_id: str | None = None
+    challenge_attempt_id: str | None = None
 
 
 
@@ -300,6 +302,7 @@ def load_runner_settings_from_env() -> RunnerSettings:
     leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
     challenge_id = (_get_env("PROPR_CHALLENGE_ID") or "").strip() or None
+    challenge_attempt_id = (_get_env("PROPR_CHALLENGE_ATTEMPT_ID") or "").strip() or None
 
     return RunnerSettings(
         environment=environment,
@@ -316,6 +319,7 @@ def load_runner_settings_from_env() -> RunnerSettings:
         journal_path=_resolve_journal_path(),
         status_path=_resolve_runner_status_path(),
         challenge_id=challenge_id,
+        challenge_attempt_id=challenge_attempt_id,
     )
 
 
@@ -343,6 +347,7 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
     leverage = _parse_leverage_or_default(_get_env("PROPR_LEVERAGE") or "1")
 
     challenge_id = (_get_env("PROPR_CHALLENGE_ID") or "").strip() or None
+    challenge_attempt_id = (_get_env("PROPR_CHALLENGE_ATTEMPT_ID") or "").strip() or None
 
     return MultiMarketScanSettings(
         confirm=confirm,
@@ -352,6 +357,7 @@ def load_multi_market_scan_settings_from_env() -> MultiMarketScanSettings:
         leverage=leverage,
         journal_path=_resolve_journal_path(),
         challenge_id=challenge_id,
+        challenge_attempt_id=challenge_attempt_id,
     )
 
 

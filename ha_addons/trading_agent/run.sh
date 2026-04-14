@@ -65,6 +65,7 @@ eval "$operator_env_output"
 
 export PROPR_ENV="$OPERATOR_ENVIRONMENT"
 export PROPR_CHALLENGE_ID="$OPERATOR_CHALLENGE_ID"
+export PROPR_CHALLENGE_ATTEMPT_ID="${OPERATOR_CHALLENGE_ATTEMPT_ID:-}"
 export PROPR_BETA_API_KEY="$(bashio::config 'propr_beta_api_key')"
 export PROPR_PROD_API_KEY="$(bashio::config 'propr_prod_api_key')"
 export PROPR_PROD_CONFIRM="$(bool_to_yes_no 'propr_prod_confirm')"
@@ -185,8 +186,8 @@ fi
 
 # Write challenges.json for admin panel challenge selector
 fetch_challenges_for_env() {
-    local env=\"$1\"
-    local out_path=\"$2\"
+    local env="$1"
+    local out_path="$2"
     python -c "
 import json
 from broker.propr_client import ProprClient

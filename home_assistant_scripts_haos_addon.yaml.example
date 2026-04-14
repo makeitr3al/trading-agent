@@ -5,6 +5,9 @@ trading_agent_load_current_config_haos:
   alias: Trading Agent Konfiguration laden
   mode: single
   sequence:
+    - wait_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
+      timeout: "00:02:00"
+      continue_on_timeout: true
     - if:
         - condition: template
           value_template: "{{ states('sensor.trading_agent_operator_config') not in ['unknown', 'unavailable'] }}"
@@ -73,7 +76,10 @@ trading_agent_load_current_config_haos:
           target:
             entity_id: input_text.trading_agent_challenge_id
           data:
-            value: "{{ state_attr('sensor.trading_agent_operator_config', 'challenge_id') | default('', true) }}"
+            value: >-
+              {{ (state_attr('sensor.trading_agent_operator_config', 'challenge_attempt_id')
+                  or state_attr('sensor.trading_agent_operator_config', 'challenge_id')
+                  or '') | default('', true) }}
         - choose:
             - conditions:
                 - condition: template
@@ -112,7 +118,7 @@ trading_agent_save_current_config_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
-        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
 
 trading_agent_jetzt_ausfuehren_haos:
@@ -136,7 +142,7 @@ trading_agent_preflight_test_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
-        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
@@ -154,7 +160,7 @@ trading_agent_beta_write_test_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
-        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
@@ -172,7 +178,7 @@ trading_agent_scharf_lauf_haos:
         markets: "{{ states('input_text.trading_agent_markets') }}"
         scheduling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_scheduling_aktiv', 'on') else 'false' }}"
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
-        challenge_id: "{{ states('input_text.trading_agent_challenge_id') }}"
+        challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:

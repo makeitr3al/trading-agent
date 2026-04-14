@@ -265,6 +265,32 @@ def test_get_active_challenge_context_filters_by_challenge_id() -> None:
     assert context.challenge_id == "challenge-B"
 
 
+def test_get_active_challenge_context_filters_by_attempt_id() -> None:
+    client = FakeProprClient(
+        {
+            "data": [
+                {
+                    "attemptId": "attempt-1",
+                    "accountId": "account-1",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+                {
+                    "attemptId": "attempt-2",
+                    "accountId": "account-2",
+                    "challengeId": "challenge-A",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+
+    context = get_active_challenge_context(client, attempt_id="attempt-2")
+    assert context is not None
+    assert context.attempt.attempt_id == "attempt-2"
+    assert context.account_id == "account-2"
+
+
 def test_get_active_challenge_context_parses_balance() -> None:
     detail = {
         "account": {

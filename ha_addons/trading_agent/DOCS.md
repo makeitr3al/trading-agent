@@ -34,7 +34,8 @@ Die Werte darin sind:
 - `markets`
 - `scheduling_enabled`
 - `schedule_time`
-- `challenge_id` (optional, leer fuer automatische Challenge)
+- `challenge_attempt_id` (optional, leer fuer automatische Challenge; **empfohlen** fuer eindeutige Auswahl bei mehreren aktiven Attempts)
+- `challenge_id` (legacy/optional; bleibt fuer Rueckwaertskompatibilitaet bestehen)
 - `push_enabled` (optional, HA-Benachrichtigungen; wird vom Add-on nicht fuer Trading ausgewertet)
 
 Das Admin-Panel (Lovelace) schreibt Aenderungen an den Operator-Helpers mit kurzer Verzoegerung (Debouncing) automatisch ueber das Script `trading_agent_save_current_config_haos` in dieselbe Datei, damit ein HA-Neustart und die Konfiguration-Sync-Automation dieselben Werte wiederherstellen.
@@ -75,6 +76,15 @@ Das Add-on schedult nichts selbst.
 Home Assistant startet das Add-on zur gewuenschten Zeit per Automation. Laut offizieller HA-Doku kann ein Time-Trigger direkt mit einem `input_datetime`-Helper arbeiten.
 Quelle: https://www.home-assistant.io/docs/automation/trigger/
 
+## HA Helper Sync (Scripts + Automation)
+
+Wichtig bei YAML-definierten Helpers: Beim HA-Start koennen `input_*` Entities kurzzeitig auf ihren `initial:` Default-Werten stehen, bevor die Operator-Konfiguration geladen ist.
+
+Die Referenzdateien stellen deshalb sicher, dass die Helpers **deterministisch** aus `sensor.trading_agent_operator_config` (Quelle: `/share/trading-agent-data/operator_config.json`) wiederhergestellt werden:
+
+- `script.trading_agent_load_current_config_haos` wartet beim Laden bis zu **2 Minuten** darauf, dass `sensor.trading_agent_operator_config` nicht mehr `unknown`/`unavailable` ist. Erst dann werden Helper-Werte gesetzt.
+- Die Automation **Trading Agent Helper Sync** triggert bei Home-Assistant-Start und zusaetzlich, wenn `sensor.trading_agent_operator_config` von `unknown`/`unavailable` auf einen gueltigen Zustand wechselt (mit kurzem Delay), damit der Restore auch bei langsamem Start nicht ausfaellt.
+
 ## HAOS Admin Panel (Sidebar)
 
 Das Add-on liefert ein zentrales Admin-Panel fuer die komplette Bedienung aus:
@@ -84,6 +94,12 @@ Das Add-on liefert ein zentrales Admin-Panel fuer die komplette Bedienung aus:
   - `/local/trading-agent/live_status.json`  
   - `/local/trading-agent/asset_registry.json`  
   - `/local/trading-agent/challenges.json`
+
+Hinweis zur **Offene Positionen** Karte (Fallback auf Live-Status): Wenn keine Journal-Position vorhanden ist, nutzt das Panel die Position-Zusammenfassung aus `live_status.json` und akzeptiert mehrere Feldvarianten zur Kompatibilitaet:
+- TP: `take_profit`, `takeProfit`, `tp`, `internal_take_profit`
+- SL: `stop_loss`, `stopLoss`, `sl`, `internal_stop_loss`
+- Entry: `entry_price`, `entryPrice`, `entry`
+- Size: `position_size`, `positionSize`, `size`
 
 ### Viewer-Umgebung vs. Operator-Umgebung
 

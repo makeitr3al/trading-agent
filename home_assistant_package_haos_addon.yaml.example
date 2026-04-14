@@ -46,7 +46,7 @@ input_text:
     max: 100
     icon: mdi:puzzle
   trading_agent_challenge_id:
-    name: Trading Agent Challenge ID
+    name: Trading Agent Challenge Attempt ID
     initial: ""
     max: 255
     icon: mdi:trophy-outline
@@ -77,7 +77,7 @@ command_line:
       name: Trading Agent Operator Config
       unique_id: trading_agent_operator_config
       command: >-
-        cat /share/trading-agent-data/operator_config.json 2>/dev/null || echo '{"mode":"unknown","environment":null,"leverage":null,"markets":null,"scheduling_enabled":null,"schedule_time":null,"challenge_id":"","push_enabled":null}'
+        cat /share/trading-agent-data/operator_config.json 2>/dev/null || echo '{"mode":"unknown","environment":null,"leverage":null,"markets":null,"scheduling_enabled":null,"schedule_time":null,"challenge_id":"","challenge_attempt_id":"","push_enabled":null}'
       value_template: "{{ value_json.mode | default('unknown') }}"
       json_attributes:
         - environment
@@ -86,6 +86,7 @@ command_line:
         - scheduling_enabled
         - schedule_time
         - challenge_id
+        - challenge_attempt_id
         - push_enabled
       scan_interval: 30
   - sensor:
@@ -179,9 +180,9 @@ command_line:
 
 shell_command:
   trading_agent_save_operator_config_haos: >-
-    python3 -c "import json, sys; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); payload = {'mode': sys.argv[1], 'environment': sys.argv[2], 'leverage': int(sys.argv[3]), 'markets': sys.argv[4], 'scheduling_enabled': sys.argv[5].lower() == 'true', 'schedule_time': sys.argv[6], 'challenge_id': sys.argv[7], 'push_enabled': sys.argv[8].lower() == 'true'}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')" "{{ mode }}" "{{ environment }}" "{{ leverage }}" "{{ markets }}" "{{ scheduling_enabled }}" "{{ schedule_time }}" "{{ challenge_id }}" "{{ push_enabled }}"
+    python3 -c "import json, sys; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); attempt_id = sys.argv[7]; payload = {'mode': sys.argv[1], 'environment': sys.argv[2], 'leverage': int(sys.argv[3]), 'markets': sys.argv[4], 'scheduling_enabled': sys.argv[5].lower() == 'true', 'schedule_time': sys.argv[6], 'challenge_id': '', 'challenge_attempt_id': attempt_id, 'push_enabled': sys.argv[8].lower() == 'true'}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')" "{{ mode }}" "{{ environment }}" "{{ leverage }}" "{{ markets }}" "{{ scheduling_enabled }}" "{{ schedule_time }}" "{{ challenge_attempt_id }}" "{{ push_enabled }}"
   trading_agent_reset_operator_config_haos: >-
-    python3 -c "import json; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); payload = {'mode': 'scharf', 'environment': 'beta', 'leverage': 1, 'markets': 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP', 'scheduling_enabled': False, 'schedule_time': '07:00', 'challenge_id': '', 'push_enabled': False}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')"
+    python3 -c "import json; from pathlib import Path; path = Path('/share/trading-agent-data/operator_config.json'); path.parent.mkdir(parents=True, exist_ok=True); payload = {'mode': 'scharf', 'environment': 'beta', 'leverage': 1, 'markets': 'BTC/USDC:BTC,ETH/USDC:ETH,SOL/USDC:SOL,XRP/USDC:XRP', 'scheduling_enabled': False, 'schedule_time': '07:00', 'challenge_id': '', 'challenge_attempt_id': '', 'push_enabled': False}; path.write_text(json.dumps(payload, ensure_ascii=True) + '\n', encoding='utf-8')"
   trading_agent_sync_panel_assets_haos: >-
     sh -c "mkdir -p /config/www/trading-agent && if [ -f /share/trading-agent-data/journal_table.json ]; then cp /share/trading-agent-data/journal_table.json /config/www/trading-agent/journal_table.json; else printf '%s' '{\"generated_at\":null,\"latest_entry_timestamp\":null,\"journal_path\":null,\"exists\":false,\"entry_count_total\":0,\"scan_rows\":[],\"trade_rows\":[],\"filter_options\":{\"symbols\":[],\"environments\":[],\"decision_actions\":[],\"scan_signals\":[],\"entry_types\":[],\"trade_statuses\":[],\"directions\":[],\"signal_sources\":[]},\"warnings\":[\"journal_table.json fehlt in /share/trading-agent-data\"]}' > /config/www/trading-agent/journal_table.json; fi && if [ -f /share/trading-agent-data/live_status.json ]; then cp /share/trading-agent-data/live_status.json /config/www/trading-agent/live_status.json; else printf '%s' '{\"updated_at\":null,\"environment\":null,\"account_unrealized_pnl\":null,\"account_open_positions_count\":0,\"websocket_connected\":false,\"source\":\"unknown\",\"last_error\":null,\"challenge_name\":null,\"challenge_id\":null,\"initial_balance\":null,\"balance\":null,\"margin_balance\":null,\"available_balance\":null,\"high_water_mark\":null,\"open_positions_summary\":null,\"challenges_overview\":null,\"active_challenges_count\":null,\"account_total_margin_balance\":null}' > /config/www/trading-agent/live_status.json; fi && if [ -f /share/trading-agent-data/asset_registry.json ]; then cp /share/trading-agent-data/asset_registry.json /config/www/trading-agent/asset_registry.json; fi && if [ -f /share/trading-agent-data/challenges.json ]; then cp /share/trading-agent-data/challenges.json /config/www/trading-agent/challenges.json; fi && if [ -d /share/trading-agent-data/panel ]; then cp /share/trading-agent-data/panel/* /config/www/trading-agent/ 2>/dev/null; fi"
   trading_agent_delete_journal_entries_haos: >-

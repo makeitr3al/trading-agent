@@ -149,10 +149,22 @@ def list_active_challenge_contexts(client: ProprClient) -> list[ActiveChallengeC
 def get_active_challenge_context(
     client: ProprClient,
     challenge_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> ActiveChallengeContext | None:
     active_contexts = list_active_challenge_contexts(client)
     if not active_contexts:
         return None
+
+    if attempt_id:
+        filtered = [ctx for ctx in active_contexts if ctx.attempt.attempt_id == attempt_id]
+        if not filtered:
+            logger.warning(
+                "No active attempt matches PROPR_CHALLENGE_ATTEMPT_ID=%s (have %d active attempts)",
+                attempt_id,
+                len(active_contexts),
+            )
+            return None
+        return filtered[0]
 
     if challenge_id:
         filtered = [ctx for ctx in active_contexts if ctx.challenge_id == challenge_id]
@@ -170,7 +182,7 @@ def get_active_challenge_context(
 
     logger.warning(
         "Multiple active challenge attempts found (%d). "
-        "Set PROPR_CHALLENGE_ID to select one. Using first.",
+        "Set PROPR_CHALLENGE_ATTEMPT_ID (preferred) or PROPR_CHALLENGE_ID to select one. Using first.",
         len(active_contexts),
     )
     return active_contexts[0]
