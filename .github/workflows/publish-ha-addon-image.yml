@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Resolve add-on version
         id: version
@@ -59,6 +61,7 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        if: matrix.arch == 'aarch64'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -77,6 +80,8 @@ jobs:
           file: ha_addons/trading_agent/Dockerfile
           push: true
           platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=ha-addon-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ha-addon-${{ matrix.arch }}
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.21
             BUILD_ARCH=${{ matrix.arch }}

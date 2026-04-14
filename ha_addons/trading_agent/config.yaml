@@ -1,5 +1,5 @@
 name: Trading Agent
-version: "0.6.1"
+version: "0.6.2"
 slug: trading_agent
 description: One-shot Trading Agent with integrated Journal
 url: https://github.com/makeitr3al/trading-agent

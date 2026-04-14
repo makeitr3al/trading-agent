@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+# Ensure the version discipline is still met at push time:
+# - last commit subject is in the right format
+# - version in subject matches ha_addons/trading_agent/config.yaml in the working tree
+SUBJECT="$(git log -1 --pretty=%s)"
+python scripts/ha_addon_release_guard.py "$SUBJECT"
+

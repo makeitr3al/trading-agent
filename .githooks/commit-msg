@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+MSG_FILE="${1:-}"
+if [ -z "$MSG_FILE" ] || [ ! -f "$MSG_FILE" ]; then
+  echo "ERROR: commit-msg hook did not receive a valid commit message file." >&2
+  exit 2
+fi
+
+# Read first line only (subject).
+SUBJECT="$(sed -n '1p' "$MSG_FILE")"
+
+# Enforce: [X.Y.Z] - Short summary and version matches ha_addons config.
+python scripts/ha_addon_release_guard.py "$SUBJECT"
+

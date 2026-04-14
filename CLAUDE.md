@@ -158,3 +158,15 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
 - `.env` (Credentials)
 - `artifacts/` (Journal, Status, Logs)
 - `__pycache__/`
+
+---
+
+## Home Assistant Add-on: Version + Commit-Format
+
+Wenn ein Commit das Home Assistant Add-on betrifft (z. B. `ha_addons/**` oder das Add-on Image/Deployment), dann:
+
+- **Version bump ist Pflicht**: `ha_addons/trading_agent/config.yaml` → `version: "X.Y.Z"` erhöhen (mindestens vor `git push`, besser vor jedem Commit).
+- **Commit Subject Format** (für GitHub Actions Tabelle): `[X.Y.Z] - Short summary`
+  - `X.Y.Z` muss zur Add-on-Version in derselben Änderung passen.
+
+Optional kann lokal ein Hook-Set aktiviert werden (siehe `.githooks/`), um das automatisch zu erzwingen.
