@@ -170,3 +170,13 @@ Wenn ein Commit das Home Assistant Add-on betrifft (z. B. `ha_addons/**` oder da
   - `X.Y.Z` muss zur Add-on-Version in derselben Änderung passen.
 
 Optional kann lokal ein Hook-Set aktiviert werden (siehe `.githooks/`), um das automatisch zu erzwingen.
+
+### Release Command (Windows / PowerShell)
+
+Fuer einen wiederholbaren Ablauf gibt es ein Helper-Script:
+`scripts/ha_addon_release.ps1`
+
+Beispiel (Patch-Bump, Tests, Commit, Push):
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ha_addon_release.ps1 -Summary "..." -Bump patch -Push`
+
+Wenn Tests fehlschlagen, wird nur der Version-Bump in `ha_addons/trading_agent/config.yaml` automatisch zurueckgesetzt, damit du fixen und neu starten kannst.

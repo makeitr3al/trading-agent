@@ -125,6 +125,30 @@ Damit die Viewer-Umschaltung ohne Datenmix funktioniert, schreibt das Add-on zus
 
 Wenn eine env-spezifische Datei fehlt, faellt das Panel automatisch auf die Legacy-Datei ohne Suffix zurueck.
 
+## Run Summary + Push Notifications (HAOS)
+
+Home Assistant Push-Benachrichtigungen verwenden `sensor.trading_agent_run_summary` (Attribute `notification_title` / `notification_message`).
+
+Wichtig bei Multi-Market-Scans und Daily-Candles:
+- Journal-Eintraege enthalten **zwei** Zeitstempel:
+  - `executed_at`: Zeitpunkt, wann der Scan wirklich ausgefuehrt wurde (Run-Time)
+  - `entry_timestamp`: Candle-/Cycle-Timestamp (kann bei `1d` oft `00:00Z` sein)
+- Der Run Summary Builder nutzt fuer die Zuordnung zu einem Add-on-Lauf den Run-Time-Stempel (`executed_at`) und faellt fuer Legacy-Eintraege auf `entry_timestamp` zurueck. Dadurch stimmen Push-Nachrichten mit dem Admin-Panel ueberein.
+
+## Release Helper (lokal)
+
+Fuer wiederholbare Releases gibt es ein lokales PowerShell-Helper-Script:
+`scripts/ha_addon_release.ps1`
+
+Es erledigt (robust, mit Rollback des Version-Bumps bei Fehlern):
+- Add-on-Version bump in `ha_addons/trading_agent/config.yaml`
+- Tests ausfuehren
+- Commit mit required Subject-Format `[X.Y.Z] - ...`
+- optional Push (`-Push`)
+
+Beispiel:
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ha_addon_release.ps1 -Summary "Fix HA push summary window" -Bump patch -Push`
+
 ### Versionierung, Cache-Busting und HA Restart
 
 Home Assistant cached `panel_custom` Module sehr aggressiv. Deshalb:
