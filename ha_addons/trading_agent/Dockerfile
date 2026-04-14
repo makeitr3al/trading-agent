@@ -15,10 +15,10 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt /tmp/requirements.txt
+COPY requirements/runtime.txt /tmp/requirements.txt
 RUN python3 -m venv "${VIRTUAL_ENV}" \
-    && "${VIRTUAL_ENV}/bin/pip" install --no-cache-dir --upgrade pip \
-    && "${VIRTUAL_ENV}/bin/pip" install --no-cache-dir -r /tmp/requirements.txt
+    && "${VIRTUAL_ENV}/bin/pip" install --upgrade pip \
+    && --mount=type=cache,target=/root/.cache/pip "${VIRTUAL_ENV}/bin/pip" install -r /tmp/requirements.txt
 
 COPY . ${APP_PATH}
 COPY ha_addons/trading_agent/run.sh /run.sh

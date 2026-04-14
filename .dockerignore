@@ -7,6 +7,10 @@ __pycache__
 artifacts
 logs
 trading-agent-data
+tests
+.cursor
+agent-transcripts
+.githooks
 ha_addons/trading_agent/README.md
 ha_addons/trading_agent/DOCS.md
 home_assistant_package.yaml.example

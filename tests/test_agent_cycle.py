@@ -193,7 +193,10 @@ def test_run_agent_cycle_returns_result_and_new_state(
     decision = _make_decision(DecisionAction.NO_ACTION)
     result_stub = _make_result(decision=decision)
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     result, new_state = run_agent_cycle(
         candles=candles,
@@ -219,7 +222,10 @@ def test_run_agent_cycle_carries_forward_active_trade_when_updated_trade_exists(
         updated_trade=updated_trade,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -244,7 +250,10 @@ def test_run_agent_cycle_stamps_created_at_on_new_pending_order(
         order=order,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -271,7 +280,10 @@ def test_run_agent_cycle_preserves_created_at_on_unchanged_pending_order(
         decision=_make_decision(DecisionAction.NO_ACTION),
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -305,7 +317,10 @@ def test_run_agent_cycle_refreshes_created_at_when_trend_pending_order_is_rebuil
         trend_signal=refreshed_signal,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -333,7 +348,10 @@ def test_run_agent_cycle_stores_pending_order_when_strategy_runner_returns_an_or
         order=order,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -357,7 +375,10 @@ def test_run_agent_cycle_stores_selected_signal_type_when_decision_selected_sign
         order=_make_order(),
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -381,7 +402,10 @@ def test_run_agent_cycle_marks_trend_signal_consumed_when_prepare_trend_order_ha
         order=_make_order(),
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -402,7 +426,10 @@ def test_run_agent_cycle_preserves_trend_signal_consumed_flag_when_no_new_trend_
         decision=_make_decision(DecisionAction.NO_ACTION),
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -421,7 +448,10 @@ def test_run_agent_cycle_deletes_old_countertrend_pending_order_when_no_new_orde
     state = AgentState(pending_order=_make_countertrend_order())
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -462,7 +492,7 @@ def test_run_agent_cycle_deletes_unfilled_countertrend_pending_order_when_signal
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(
@@ -503,7 +533,7 @@ def test_run_agent_cycle_blocks_duplicate_countertrend_short_signal_in_same_regi
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     result, new_state = run_agent_cycle(
@@ -554,7 +584,7 @@ def test_run_agent_cycle_allows_current_outside_close_countertrend_signal_and_se
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     result, new_state = run_agent_cycle(
@@ -603,7 +633,7 @@ def test_run_agent_cycle_blocks_follow_up_countertrend_signal_until_middle_band_
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     result, new_state = run_agent_cycle(
@@ -654,7 +684,7 @@ def test_run_agent_cycle_middle_band_touch_unlocks_for_next_bar_but_current_bar_
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     result, new_state = run_agent_cycle(
@@ -690,7 +720,7 @@ def test_run_agent_cycle_middle_band_touch_on_last_closed_bar_unlocks_lock(monke
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(
@@ -728,7 +758,7 @@ def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outsi
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(
@@ -766,7 +796,7 @@ def test_run_agent_cycle_does_not_set_middle_band_retest_lock_for_sweet_spot_clo
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(
@@ -792,7 +822,7 @@ def test_run_agent_cycle_resets_countertrend_consumed_flags_on_regime_change(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(
@@ -825,7 +855,10 @@ def test_run_agent_cycle_replaces_old_trend_pending_order_with_refreshed_trend_o
         trend_signal=refreshed_signal,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -857,7 +890,10 @@ def test_run_agent_cycle_replaces_old_pending_order_when_a_new_order_is_generate
         order=new_order,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -894,7 +930,10 @@ def test_run_agent_cycle_deletes_old_trend_pending_order_when_current_trend_sign
         trend_signal=invalid_trend_signal,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -924,7 +963,10 @@ def test_run_agent_cycle_does_not_refresh_trend_pending_order_with_mismatching_s
         trend_signal=mismatching_trend_signal,
     )
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -946,7 +988,10 @@ def test_run_agent_cycle_resets_trend_signal_consumed_in_regime_on_regime_change
     )
     result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
 
-    monkeypatch.setattr("strategy.agent_cycle.run_strategy_cycle", lambda candles, config, account_balance, active_trade: result_stub)
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
+    )
 
     _, new_state = run_agent_cycle(
         candles=candles,
@@ -969,7 +1014,7 @@ def test_run_agent_cycle_fills_buy_stop_pending_order_into_active_long_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -997,7 +1042,7 @@ def test_run_agent_cycle_fills_sell_stop_pending_order_into_active_short_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1017,7 +1062,7 @@ def test_run_agent_cycle_fills_buy_limit_pending_order_into_active_long_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1043,7 +1088,7 @@ def test_run_agent_cycle_fills_sell_limit_pending_order_into_active_short_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1073,7 +1118,7 @@ def test_run_agent_cycle_does_not_fill_pending_order_if_candle_does_not_reach_en
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1092,7 +1137,7 @@ def test_run_agent_cycle_filled_trend_order_becomes_trend_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1118,7 +1163,7 @@ def test_run_agent_cycle_filled_countertrend_order_becomes_countertrend_trade(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1149,7 +1194,7 @@ def test_run_agent_cycle_filled_order_can_still_be_updated_by_later_trade_manage
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1172,7 +1217,7 @@ def test_run_agent_cycle_clears_active_trade_when_strategy_requests_close(
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
@@ -1203,7 +1248,7 @@ def test_run_agent_cycle_keeps_tightened_trend_stop_when_strategy_requests_last_
 
     monkeypatch.setattr(
         "strategy.agent_cycle.run_strategy_cycle",
-        lambda candles, config, account_balance, active_trade: result_stub,
+        lambda candles, config, account_balance, active_trade, now=None: result_stub,
     )
 
     _, new_state = run_agent_cycle(candles, StrategyConfig(), 10000.0, state)
