@@ -157,7 +157,8 @@ def test_run_app_cycle_persists_cycle_and_order_journal_entries(monkeypatch: pyt
     assert order_entry.environment == "beta"
     assert order_entry.direction == "LONG"
     assert order_entry.position_size == 10.0
-    assert order_entry.status == "prepared"
+    assert cycle_entry.skipped_reason == "execution disabled"
+    assert order_entry.status == "not_executed"
 
     persisted = [json.loads(line) for line in journal_path.read_text(encoding="utf-8").splitlines()]
     assert len(persisted) == 2

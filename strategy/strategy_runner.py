@@ -1,5 +1,8 @@
 import math
 
+from datetime import datetime, timedelta, timezone
+from statistics import median
+
 import pandas as pd
 
 from config.strategy_config import StrategyConfig, min_strategy_candle_count
@@ -94,11 +97,58 @@ def _countertrend_management_bb_middle(bollinger_df: pd.DataFrame) -> float:
     return float(bollinger_df.iloc[-1]["bb_middle"])
 
 
+def _infer_candle_interval(candles: list[Candle], *, lookback: int = 20) -> timedelta | None:
+    if len(candles) < 2:
+        return None
+    deltas_s: list[float] = []
+    start = max(1, len(candles) - lookback)
+    for i in range(start, len(candles)):
+        dt = candles[i].timestamp - candles[i - 1].timestamp
+        if dt.total_seconds() > 0:
+            deltas_s.append(dt.total_seconds())
+    if not deltas_s:
+        return None
+    return timedelta(seconds=float(median(deltas_s)))
+
+
+def _now_like_candles(candles: list[Candle], now: datetime) -> datetime:
+    """Return ``now`` normalized to match candle tz-awareness.
+
+    Live providers emit UTC-aware timestamps. Some unit tests use naive datetimes; we
+    normalize comparisons to avoid offset-naive/aware TypeErrors.
+    """
+    if not candles:
+        return now
+    candle_ts = candles[-1].timestamp
+    if candle_ts.tzinfo is None:
+        # Compare naive with naive.
+        return now.replace(tzinfo=None)
+    # Compare aware with aware (default to UTC when caller passed naive).
+    return now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+
+
+def _is_last_candle_closed(candles: list[Candle], *, now: datetime) -> bool:
+    interval = _infer_candle_interval(candles)
+    if interval is None:
+        return True
+    normalized_now = _now_like_candles(candles, now)
+    return normalized_now >= (candles[-1].timestamp + interval)
+
+
+def _signal_candles_only(candles: list[Candle], *, now: datetime) -> list[Candle]:
+    if len(candles) < 2:
+        return candles
+    if _is_last_candle_closed(candles, now=now):
+        return candles
+    return candles[:-1]
+
+
 def run_strategy_cycle(
     candles: list[Candle],
     config: StrategyConfig,
     account_balance: float,
     active_trade: Trade | None = None,
+    now: datetime | None = None,
 ) -> StrategyRunResult:
     min_required_candles = min_strategy_candle_count(config)
     if len(candles) < min_required_candles:
@@ -106,34 +156,55 @@ def run_strategy_cycle(
             f"At least {min_required_candles} candles are required to run the strategy cycle."
         )
 
-    closes = pd.Series([candle.close for candle in candles], dtype=float)
-    bollinger_df = compute_bollinger_bands(
-        closes=closes,
+    effective_now = now or datetime.now(timezone.utc)
+    signal_candles = _signal_candles_only(candles, now=effective_now)
+    if len(signal_candles) < min_required_candles:
+        signal_candles = candles
+
+    closes_all = pd.Series([candle.close for candle in candles], dtype=float)
+    bollinger_all = compute_bollinger_bands(
+        closes=closes_all,
         period=config.bollinger_period,
         std_dev=config.bollinger_std_dev,
     )
-    macd_df = compute_macd(
-        closes=closes,
+    macd_all = compute_macd(
+        closes=closes_all,
         fast_period=config.macd_fast_period,
         slow_period=config.macd_slow_period,
         signal_period=config.macd_signal_period,
     )
-    regime_states = build_regime_states(macd_df)
+
+    closes_sig = pd.Series([candle.close for candle in signal_candles], dtype=float)
+    bollinger_sig = compute_bollinger_bands(
+        closes=closes_sig,
+        period=config.bollinger_period,
+        std_dev=config.bollinger_std_dev,
+    )
+    macd_sig = compute_macd(
+        closes=closes_sig,
+        fast_period=config.macd_fast_period,
+        slow_period=config.macd_slow_period,
+        signal_period=config.macd_signal_period,
+    )
+    regime_sig = build_regime_states(macd_sig)
+
     trend_signal = detect_trend_signal(
-        candles=candles,
-        bollinger_df=bollinger_df,
-        regime_states=regime_states,
+        candles=signal_candles,
+        bollinger_df=bollinger_sig,
+        regime_states=regime_sig,
         config=config,
     )
     countertrend_signal = detect_countertrend_signal(
-        candles=candles,
-        bollinger_df=bollinger_df,
-        regime_states=regime_states,
+        candles=signal_candles,
+        bollinger_df=bollinger_sig,
+        regime_states=regime_sig,
         config=config,
     )
-    current_price = float(closes.iloc[-1])
+
+    current_price = float(closes_all.iloc[-1])
+    decision_price = float(closes_sig.iloc[-1])
     latest_candle = candles[-1]
-    latest_bollinger = bollinger_df.iloc[-1]
+    latest_bollinger = bollinger_all.iloc[-1]
     trend_exit_triggered = _should_trigger_active_trend_exit(
         active_trade=active_trade,
         latest_close=current_price,
@@ -152,7 +223,7 @@ def run_strategy_cycle(
         trend_signal=trend_signal,
         countertrend_signal=countertrend_signal,
         active_trade=active_trade,
-        current_price=current_price,
+        current_price=decision_price,
         trend_exit_triggered=trend_exit_triggered,
         countertrend_close_triggered=countertrend_close_triggered,
     )
@@ -160,7 +231,7 @@ def run_strategy_cycle(
         decision=decision,
         trend_signal=trend_signal,
         countertrend_signal=countertrend_signal,
-        current_price=current_price,
+        current_price=decision_price,
         account_balance=account_balance,
         risk_per_trade_pct=config.risk_per_trade_pct,
         buy_spread=config.buy_spread,
@@ -184,9 +255,9 @@ def run_strategy_cycle(
             close_active_trade = True
         else:
             management_bb_middle = (
-                _countertrend_management_bb_middle(bollinger_df)
+                _countertrend_management_bb_middle(bollinger_all)
                 if active_trade.trade_type == TradeType.COUNTERTREND
-                else float(bollinger_df.iloc[-1]["bb_middle"])
+                else float(bollinger_all.iloc[-1]["bb_middle"])
             )
             updated_trade = update_active_trade(
                 active_trade=active_trade,

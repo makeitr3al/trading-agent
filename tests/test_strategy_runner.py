@@ -200,6 +200,35 @@ def test_run_strategy_cycle_can_return_an_order_when_a_valid_signal_exists(monke
     assert result.order.position_size == pytest.approx(10.0)
 
 
+def test_run_strategy_cycle_ignores_forming_last_bar_for_signal_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = StrategyConfig()
+    candles = _make_default_candles()
+
+    captured: dict[str, object] = {}
+
+    def _capture_trend(candles, bollinger_df, regime_states, config):
+        captured["signal_len"] = len(candles)
+        captured["signal_last_ts"] = candles[-1].timestamp
+        return None
+
+    monkeypatch.setattr("strategy.strategy_runner.detect_trend_signal", _capture_trend)
+    monkeypatch.setattr("strategy.strategy_runner.detect_countertrend_signal", lambda *args, **kwargs: None)
+
+    # Treat the last candle as still forming by running half an interval after it opened.
+    inferred_interval = candles[-1].timestamp - candles[-2].timestamp
+    now = candles[-1].timestamp + (inferred_interval / 2)
+
+    run_strategy_cycle(
+        candles=candles,
+        config=config,
+        account_balance=10000.0,
+        active_trade=None,
+        now=now,
+    )
+
+    assert captured["signal_len"] == len(candles) - 1
+    assert captured["signal_last_ts"] == candles[-2].timestamp
+
 def test_run_strategy_cycle_can_exit_active_trend_on_sweet_spot_without_valid_countertrend_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

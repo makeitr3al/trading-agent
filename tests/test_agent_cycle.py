@@ -671,6 +671,38 @@ def test_run_agent_cycle_middle_band_touch_unlocks_for_next_bar_but_current_bar_
     assert new_state.middle_band_retest_required is False
 
 
+def test_run_agent_cycle_middle_band_touch_on_last_closed_bar_unlocks_lock(monkeypatch) -> None:
+    candles = _make_candles()
+    # Current forming bar does NOT touch mBB, last closed bar DOES.
+    candles[-2] = candles[-2].model_copy(update={"high": 102.5, "low": 99.5, "close": 101.0})
+    candles[-1] = candles[-1].model_copy(update={"high": 102.0, "low": 101.2, "close": 101.5})
+
+    _stub_cycle_context(
+        monkeypatch,
+        candles=candles,
+        bb_upper=105.0,
+        bb_middle=100.0,
+        bb_lower=95.0,
+        regime=RegimeType.BULLISH,
+        bars_since_regime_start=1,
+    )
+
+    result_stub = _make_result(decision=_make_decision(DecisionAction.NO_ACTION))
+    monkeypatch.setattr(
+        "strategy.agent_cycle.run_strategy_cycle",
+        lambda candles, config, account_balance, active_trade: result_stub,
+    )
+
+    _, new_state = run_agent_cycle(
+        candles=candles,
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        state=AgentState(middle_band_retest_required=True),
+    )
+
+    assert new_state.middle_band_retest_required is False
+
+
 def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outside_bands_without_countertrend_signal(
     monkeypatch,
 ) -> None:

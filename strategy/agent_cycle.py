@@ -161,12 +161,19 @@ def _resolve_middle_band_retest_required(
     if close_outside_bands:
         return True
 
-    if touches_middle_band(
-        high=latest_candle.high,
-        low=latest_candle.low,
-        bb_middle=float(bb_middle),
-    ):
-        return False
+    # Unlock on wick-touch in either the last closed bar or the current forming bar.
+    # Depending on when cycles run, the most recent wick-touch can be on -2 or -1.
+    candidates = [len(candles) - 1]
+    if len(candles) >= 2:
+        candidates.append(len(candles) - 2)
+    for idx in candidates:
+        row = bollinger_df.iloc[idx]
+        mid = row["bb_middle"]
+        if pd.isna(mid):
+            continue
+        c = candles[idx]
+        if touches_middle_band(high=c.high, low=c.low, bb_middle=float(mid)):
+            return False
 
     return previous_required
 

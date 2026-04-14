@@ -304,6 +304,31 @@ def _phase_guard_checks(ctx: _CycleContext) -> AppCycleResult | None:
         ctx.skipped_reason = ctx.risk_guard_result.reason
         return ctx.build_result()
     if not ctx.allow_execution:
+        # Surface intent clearly when an execution *would* be needed.
+        # If the broker already has a resting order/position, we keep journaling "resting"
+        # and avoid misleading "execution disabled" skips.
+        needs_entry_submit = (
+            ctx.post_cycle_state is not None
+            and ctx.post_cycle_state.pending_order is not None
+            and ctx.synced_state is not None
+            and ctx.synced_state.pending_order is None
+            and not (ctx.synced_state.pending_order_id and str(ctx.synced_state.pending_order_id).strip())
+        )
+        needs_close_submit = (
+            ctx.strategy_result is not None
+            and bool(ctx.strategy_result.close_active_trade)
+            and ctx.synced_state is not None
+            and ctx.synced_state.active_trade is not None
+        )
+        needs_exit_update_submit = (
+            ctx.strategy_result is not None
+            and ctx.strategy_result.updated_trade is not None
+            and ctx.synced_state is not None
+            and ctx.synced_state.active_trade is not None
+            and not bool(ctx.strategy_result.close_active_trade)
+        )
+        if needs_entry_submit or needs_close_submit or needs_exit_update_submit:
+            ctx.skipped_reason = "execution disabled"
         return ctx.build_result()
     return None
 

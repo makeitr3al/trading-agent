@@ -274,7 +274,7 @@ def test_live_dry_run_is_not_blocked_when_symbol_spec_is_missing(monkeypatch: py
         data_source="live",
     )
 
-    assert result.skipped_reason is None
+    assert result.skipped_reason == "execution disabled"
     assert result.post_cycle_state is not None
     assert result.post_cycle_state.pending_order is not None
     assert result.symbol_spec_loaded is False
