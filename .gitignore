@@ -34,6 +34,8 @@ trading-agent.code-workspace
 
 # Cursor (local rules, agent prompts — not part of the shipped app)
 .cursor/
+!.cursor/commands/
+!.cursor/commands/**
 AGENTS.md
 
 # pytest / cache
