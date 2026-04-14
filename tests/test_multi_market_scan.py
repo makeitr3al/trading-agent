@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.multi_market_scan import _best_signal_strength, _select_execution_candidates
+from scripts.multi_market_scan import (
+    _best_signal_strength,
+    _maybe_upgrade_to_hip3_market,
+    _select_execution_candidates,
+)
 
 
 def _make_signal(is_valid: bool, strength: float | None):
@@ -46,3 +50,19 @@ def test_select_execution_candidates_uses_strength_only_when_slots_are_limited()
     selected = _select_execution_candidates(candidates, available_slots=2)
 
     assert [item["symbol"] for item in selected] == ["ETH/USDC", "SOL/USDC"]
+
+
+def test_maybe_upgrade_to_hip3_market_upgrades_bare_ticker_when_registry_has_hip3() -> None:
+    class FakeRegistry:
+        def is_available(self, name: str) -> bool:
+            return name.upper() == "XYZ:EUR"
+
+    assert _maybe_upgrade_to_hip3_market("EUR", FakeRegistry()) == "xyz:EUR"
+
+
+def test_maybe_upgrade_to_hip3_market_keeps_bare_ticker_when_not_hip3() -> None:
+    class FakeRegistry:
+        def is_available(self, name: str) -> bool:
+            return False
+
+    assert _maybe_upgrade_to_hip3_market("EUR", FakeRegistry()) == "EUR"

@@ -12,7 +12,9 @@ from broker.propr_order_position_map import (
 from broker.propr_payload_parse import (
     _extract_decimal,
     _get_items,
+    _map_order_status,
     _normalize_status,
+    _normalize_order_type,
     _payload_matches_symbol,
 )
 from models.agent_state import AgentState
@@ -325,11 +327,20 @@ def build_agent_state_from_propr_data(
     valid_order_entries: list[tuple[Order, str | None]] = []
     stop_loss_exit_entries: list[tuple[str, str | None]] = []
     take_profit_exit_entries: list[tuple[str, str | None]] = []
+    stop_loss_exit_meta: dict[str, dict[str, Any]] = {}
+    take_profit_exit_meta: dict[str, dict[str, Any]] = {}
     for item in _get_items(orders_payload):
         order_classification = _classify_open_order_payload(item)
         external_order_id = extract_external_order_id(item)
 
         if order_classification == "pending_entry":
+            status = _map_order_status(get_first_key(item, ["status"]))
+            if status != OrderStatus.PENDING:
+                continue
+            if _normalize_order_type(get_first_key(item, ["order_type", "type"])) is None:
+                # e.g. market orders returned by the API; not a bracketed pending entry.
+                continue
+
             mapped_order = map_propr_order_to_internal(item)
             if mapped_order is not None and mapped_order.status == OrderStatus.PENDING:
                 all_valid_order_entries.append((mapped_order, external_order_id))
@@ -349,10 +360,32 @@ def build_agent_state_from_propr_data(
 
         linked_position_id = get_first_key(item, ["positionId", "position_id"])
         if order_classification == "stop_loss_exit":
-            stop_loss_exit_entries.append((external_order_id, linked_position_id))
+            status = _map_order_status(get_first_key(item, ["status"]))
+            if status == OrderStatus.PENDING:
+                stop_loss_exit_entries.append((external_order_id, linked_position_id))
+                stop_loss_exit_meta[external_order_id] = {
+                    "order_id": external_order_id,
+                    "position_id": linked_position_id,
+                    "status": get_first_key(item, ["status"]),
+                    "type": get_first_key(item, ["type", "order_type"]),
+                    "reduceOnly": get_first_key(item, ["reduceOnly", "reduce_only"]),
+                    "updatedAt": get_first_key(item, ["updatedAt", "updated_at"]),
+                    "createdAt": get_first_key(item, ["createdAt", "created_at"]),
+                }
             continue
         if order_classification == "take_profit_exit":
-            take_profit_exit_entries.append((external_order_id, linked_position_id))
+            status = _map_order_status(get_first_key(item, ["status"]))
+            if status == OrderStatus.PENDING:
+                take_profit_exit_entries.append((external_order_id, linked_position_id))
+                take_profit_exit_meta[external_order_id] = {
+                    "order_id": external_order_id,
+                    "position_id": linked_position_id,
+                    "status": get_first_key(item, ["status"]),
+                    "type": get_first_key(item, ["type", "order_type"]),
+                    "reduceOnly": get_first_key(item, ["reduceOnly", "reduce_only"]),
+                    "updatedAt": get_first_key(item, ["updatedAt", "updated_at"]),
+                    "createdAt": get_first_key(item, ["createdAt", "created_at"]),
+                }
             continue
 
     if len(valid_order_entries) > 1:
@@ -377,6 +410,12 @@ def build_agent_state_from_propr_data(
         take_profit_order_ids = _resolve_exit_order_ids_for_active_position("take_profit", take_profit_exit_entries, active_position_id)
     except ValueError as exc:
         print(f"Warning: {exc}")
+        if stop_loss_exit_meta or take_profit_exit_meta:
+            print("Exit order diagnostics (pending only):")
+            if stop_loss_exit_meta:
+                print(f"  stop_loss: {list(stop_loss_exit_meta.values())}")
+            if take_profit_exit_meta:
+                print(f"  take_profit: {list(take_profit_exit_meta.values())}")
         stop_loss_order_ids = []
         take_profit_order_ids = []
 

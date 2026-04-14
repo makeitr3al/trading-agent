@@ -55,6 +55,13 @@ def _join_distinct(values: list[str | None]) -> str | None:
         return None
     return ", ".join(distinct)
 
+def _display_reason(notes: str | None, skipped_reason: str | None) -> str | None:
+    decision_reason = str(notes).strip() if notes not in {None, ""} else None
+    skip = str(skipped_reason).strip() if skipped_reason not in {None, ""} else None
+    if decision_reason and skip:
+        return f"{decision_reason} \u2022 not executed: {skip}"
+    return decision_reason or skip
+
 
 def _format_signal_list(values: list[Any]) -> str | None:
     if not values:
@@ -194,6 +201,7 @@ def _build_scan_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "trade_pnl_summary": _join_distinct([str(pnl) for pnl in trade_pnls]),
                 "skip_reason": entry.get("skipped_reason"),
                 "notes": entry.get("notes"),
+                "display_reason": _display_reason(entry.get("notes"), entry.get("skipped_reason")),
                 "related_order_count": len(related_orders),
                 "related_trade_count": len(related_trades),
                 # Additive fields (Step 12):
@@ -238,6 +246,7 @@ def _lifecycle_steps(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
         et = entry.get("entry_type")
         ts = entry.get("executed_at") or entry.get("entry_timestamp")
         if et == "cycle":
+            skipped_reason = entry.get("skipped_reason")
             steps.append(
                 {
                     "step": "signal",
@@ -245,6 +254,8 @@ def _lifecycle_steps(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "decision_action": entry.get("decision_action"),
                     "received_signals": _format_signal_list(entry.get("received_signals") or []),
                     "notes": entry.get("notes"),
+                    "skipped_reason": skipped_reason,
+                    "display_reason": _display_reason(entry.get("notes"), skipped_reason),
                 }
             )
         elif et == "order":
@@ -312,6 +323,10 @@ def _build_lifecycle_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]
     for sid, group in groups.items():
         group_sorted = sorted(group, key=_entry_sort_key, reverse=True)
         group_chrono = list(reversed(group_sorted))
+        phase = _lifecycle_phase_from_entries(group_chrono)
+        if phase == "signal_only":
+            # Keep Journal Orders & Trades focused on orders/trades only.
+            continue
         steps = _lifecycle_steps(group_chrono)
         first_cycle = next((e for e in group_chrono if e.get("entry_type") == "cycle"), None)
         source_signal = next(
@@ -334,7 +349,7 @@ def _build_lifecycle_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "symbol": group_chrono[0].get("symbol") if group_chrono else None,
                 "environment": group_chrono[0].get("environment") if group_chrono else None,
                 "source_signal_type": source_signal,
-                "phase": _lifecycle_phase_from_entries(group_chrono),
+                "phase": phase,
                 "signal_summary": _format_signal_list(first_cycle.get("received_signals") or []) if first_cycle else None,
                 "decision_action": first_cycle.get("decision_action") if first_cycle else None,
                 "order_status": last_order.get("status") if last_order else None,

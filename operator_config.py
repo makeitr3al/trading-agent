@@ -32,6 +32,7 @@ def main() -> int:
     set_parser.add_argument("--scheduling-enabled", choices=["true", "false"])
     set_parser.add_argument("--schedule-time")
     set_parser.add_argument("--challenge-id", default=None)
+    set_parser.add_argument("--challenge-attempt-id", default=None)
     set_parser.add_argument("--push-enabled", choices=["true", "false"])
 
     reset_parser = subparsers.add_parser("reset", help="Reset the operator configuration back to defaults.")
@@ -63,6 +64,8 @@ def main() -> int:
                 updates["schedule_time"] = args.schedule_time
             if args.challenge_id is not None:
                 updates["challenge_id"] = args.challenge_id
+            if args.challenge_attempt_id is not None:
+                updates["challenge_attempt_id"] = args.challenge_attempt_id
             if args.push_enabled is not None:
                 updates["push_enabled"] = args.push_enabled == "true"
             if not updates:

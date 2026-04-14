@@ -36,6 +36,29 @@ from utils.live_status import write_live_status_from_state
 # TODO: Later add account-aware per-market cooldown rules.
 
 
+def _maybe_upgrade_to_hip3_market(asset_ticker: str, registry: AssetRegistry) -> str:
+    """
+    If a bare ticker (e.g. EUR) is actually a HIP-3 market (xyz:EUR), upgrade it.
+
+    This avoids treating non-crypto-perp tickers as Hyperliquid perp coins during scan validation.
+    """
+    from utils.asset_normalizer import normalize_asset
+
+    info = normalize_asset(asset_ticker)
+    if info.is_hip3:
+        return info.asset
+
+    # Only upgrade simple tickers (not pairs).
+    raw = (asset_ticker or "").strip()
+    if not raw or "/" in raw or raw.lower().startswith("xyz:"):
+        return info.asset
+
+    candidate = f"xyz:{info.base}"
+    if registry.is_available(candidate):
+        return candidate
+    return info.asset
+
+
 def _guard_to_dict(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -332,13 +355,15 @@ def main() -> None:
         scan_executed_at = datetime.now(timezone.utc).isoformat()
         scan_results: list[dict[str, Any]] = []
         market_contexts: list[dict[str, Any]] = []
+        registry = AssetRegistry()
         for asset_ticker in scan_settings.assets:
-            asset_info = normalize_asset(asset_ticker)
+            effective_ticker = _maybe_upgrade_to_hip3_market(asset_ticker, registry)
+            asset_info = normalize_asset(effective_ticker)
             symbol = asset_info.asset
             coin = hyperliquid_candle_coin(asset_info)
             print(f"Scanning asset={asset_ticker} coin={coin}")
             if data_source_settings.data_source == "live":
-                AssetRegistry().validate_scan_asset_for_hyperliquid_fetch(asset_info)
+                registry.validate_scan_asset_for_hyperliquid_fetch(asset_info)
             try:
                 data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
                     data_source=data_source_settings.data_source,

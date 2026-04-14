@@ -566,6 +566,26 @@ def test_build_agent_state_from_propr_data_warns_when_bound_exit_orders_exist_wi
     assert "exit orders found without active position" in capsys.readouterr().out
 
 
+def test_build_agent_state_from_propr_data_ignores_market_orders() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "orderId": "mkt-1",
+                    "symbol": "BTC/USDC",
+                    "type": "market",
+                    "side": "buy",
+                    "status": "open",
+                    "quantity": "1.0",
+                }
+            ]
+        },
+        positions_payload={"data": []},
+        symbol="BTC/USDC",
+    )
+    assert state.pending_order is None
+
+
 def test_build_agent_state_omits_partial_fill_pending_when_open_position_exists_for_symbol() -> None:
     state = build_agent_state_from_propr_data(
         orders_payload={

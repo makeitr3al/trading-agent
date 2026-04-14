@@ -382,6 +382,9 @@ function snapshotFallback(journalState) {
       trade_pnl_summary: entry.pnl ?? null,
       skip_reason: entry.skipped_reason || null,
       notes: entry.notes || null,
+      display_reason: (entry.notes && entry.skipped_reason)
+        ? `${entry.notes} • not executed: ${entry.skipped_reason}`
+        : (entry.notes || entry.skipped_reason || null),
       related_order_count: 0,
       related_trade_count: 0,
       entry_price: null,
@@ -1175,7 +1178,7 @@ class TradingAgentAdminPanel extends HTMLElement {
         symbol: row.symbol,
         signal_type: sigType,
         decision_action: row.decision_action,
-        reason: row.notes || row.skip_reason,
+        reason: row.display_reason || row.reason || row.notes || row.skip_reason,
       });
     }
     for (const run of runMap.values()) {

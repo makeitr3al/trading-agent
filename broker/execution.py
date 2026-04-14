@@ -11,6 +11,7 @@ from broker.order_service import (
     extract_order_id_from_submit_response,
 )
 from broker.state_sync import map_propr_order_to_internal
+from broker.propr_payload_parse import _map_order_status, _normalize_order_type
 
 # Reconciliation: ``find_equivalent_external_pending_order_id`` + ``get_orders`` before submit;
 # ``SubmitAgentOrderResult.existing_external_order_id`` aligns agent state when an equivalent broker order exists.
@@ -119,6 +120,11 @@ def _is_pending_entry_order_payload(order_payload: dict[str, Any]) -> bool:
     if _truthy_flag(_extract_first(order_payload, ["reduceOnly", "reduce_only"])):
         return False
     if _extract_first(order_payload, ["positionId", "position_id"]) is not None:
+        return False
+
+    if _map_order_status(_extract_first(order_payload, ["status"])) != OrderStatus.PENDING:
+        return False
+    if _normalize_order_type(_extract_first(order_payload, ["order_type", "type"])) is None:
         return False
 
     mapped_order = map_propr_order_to_internal(order_payload)
