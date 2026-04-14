@@ -55,10 +55,15 @@ Das Admin-Panel (Lovelace) schreibt Aenderungen an den Operator-Helpers mit kurz
 
 ## Verifikation (nach Script-/Paket-Update)
 
-1. **Developer Tools → Dienste:** `shell_command.trading_agent_save_operator_config_haos` ist aufrufbar (Service existiert).
+1. **Developer Tools → Dienste:** `shell_command.trading_agent_save_operator_config_haos` erscheint in der Liste — **nicht** mit `data: {}` testen: ohne die acht Template-Felder sind alle Argumente leer; das Referenz-Skript **schreibt dann nicht** (ab Add-on **0.6.11**). Zum manuellen Speichern **`script.trading_agent_save_current_config_haos`** ausfuehren.
 2. **Konfiguration speichern** ausfuehren; danach in `/share/trading-agent-data/operator_config.json` pruefen: `markets`, `leverage`, `challenge_attempt_id`, `push_enabled` entsprechen den HA-Helpern.
 3. Add-on-Log (`run.sh`): bei gesetztem Attempt erscheint `PROPR_CHALLENGE_ATTEMPT_ID: len=...` (nicht dauernd `(empty)`).
 4. Multi-Market-Lauf: ein ungueltiger HL-Markt fuehrt zu einer **pro-Market**-Fehlzeile / Journal-Hinweis; der Scan laeuft **weiter** fuer die restlichen Maerkte (kein vorzeitiges `Multi-market scan failed:` fuer einen einzelnen Coin).
+
+### Hauefiger Fehler: `ValueError` bei `int(sys.argv[3])` oder leerer Service-Body
+
+- **Developer Tools mit `data: {}`:** Die `shell_command`-Zeile enthaelt `"{{ mode }}"`, `"{{ leverage }}"`, … Ohne `data` sind das leere Strings — frueher fuehrte das zu `int('')`. Ab **0.6.11** werden leere **`mode`/`environment`** abgelehnt (kein Ueberschreiben der Datei). Trotzdem immer **`script.trading_agent_save_current_config_haos`** nutzen, nicht den Roh-Shell-Dienst mit leerem Body.
+- **Falscher Inline-`python -c`:** Wenn der Traceback **`python -c "import json, sys; ..."`** zeigt und Felder wie **`challenge_id': sys.argv[7]`** — das ist **nicht** die Referenz-`shell_command`. Dann wurde `trading_agent_save_operator_config_haos` durch eine **falsche Inline-Variante** ersetzt. Abgleich mit `home_assistant_package_haos_addon.yaml.example`: Aufruf muss **`ha_save_operator_config.py`** aus `/share/trading-agent-data/` nutzen. Leeres **Leverage**-Template: Fallback **1**; leere **Maerkte**: vorheriger Wert aus der Datei oder Default-Liste.
 
 ## Laufmodi
 

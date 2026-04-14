@@ -180,6 +180,8 @@ command_line:
 
 shell_command:
   trading_agent_cat_operator_config_haos: "cat /share/trading-agent-data/operator_config.json 2>/dev/null || echo '{}'"
+  # Do not replace this with an inline `python -c ...` saver: argument order must match
+  # `ha_save_operator_config.py` (attempt id is argv[7], not legacy challenge_id alone).
   trading_agent_save_operator_config_haos: >-
     python3 /share/trading-agent-data/ha_save_operator_config.py "{{ mode }}" "{{ environment }}" "{{ leverage }}" "{{ markets }}" "{{ scheduling_enabled }}" "{{ schedule_time }}" "{{ challenge_attempt_id }}" "{{ push_enabled }}"
   trading_agent_reset_operator_config_haos: >-
