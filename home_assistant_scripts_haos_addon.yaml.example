@@ -1,5 +1,8 @@
 # Append to /config/scripts.yaml
 # This file contains only the Trading Agent script entries.
+#
+# Contract: every call to shell_command.trading_agent_save_operator_config_haos must pass
+# challenge_attempt_id and push_enabled (see ha_save_operator_config.py / package shell_command).
 
 trading_agent_load_current_config_haos:
   alias: Trading Agent Konfiguration laden

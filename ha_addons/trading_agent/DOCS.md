@@ -21,7 +21,7 @@ Das Add-on liest und schreibt unter:
 - `/share/trading-agent-data/journal_snapshot.json`
 - `/share/trading-agent-data/test_suite_status.json`
 - `/share/trading-agent-data/test_suite_last.log`
-- `/share/trading-agent-data/ha_save_operator_config.py` (wird beim Add-on-Start aus dem Image nach `/share` kopiert; wird von `shell_command.trading_agent_save_operator_config_haos` genutzt)
+- `/share/trading-agent-data/ha_save_operator_config.py` (wird beim Add-on-Start aus dem Image nach `/share/trading-agent-data/` kopiert; wird von `shell_command.trading_agent_save_operator_config_haos` genutzt)
 
 ## Add-on-Upgrade / HA-Paket (Checkliste)
 
@@ -50,6 +50,15 @@ Die Werte darin sind:
 - `push_enabled` (optional, HA-Benachrichtigungen; wird vom Add-on nicht fuer Trading ausgewertet)
 
 Das Admin-Panel (Lovelace) schreibt Aenderungen an den Operator-Helpers mit kurzer Verzoegerung (Debouncing) automatisch ueber das Script `trading_agent_save_current_config_haos` in dieselbe Datei, damit ein HA-Neustart und die Konfiguration-Sync-Automation dieselben Werte wiederherstellen.
+
+**Save-argv-Vertrag (wichtig):** `shell_command.trading_agent_save_operator_config_haos` (siehe `home_assistant_package_haos_addon.yaml.example`) fuehrt `ha_save_operator_config.py` mit **acht** Positionsargumenten aus (`MODE`, `ENV`, `LEVERAGE`, `MARKETS`, `SCHED_BOOL`, `SCHED_TIME`, `CHALLENGE_ATTEMPT_ID`, `PUSH_BOOL`). Jeder `scripts.yaml`-Eintrag, der diesen `shell_command` aufruft — also auch **Preflight**, **Beta-Write** und **Scharf-Lauf** — muss im `data:`-Block **`challenge_attempt_id`** und **`push_enabled`** setzen. Wenn diese Keys fehlen, kann `operator_config.json` zwar teils aktualisiert werden, aber **`challenge_attempt_id`** und Add-on-Logs zu `PROPR_CHALLENGE_*` passen nicht mehr zur Referenz. **`script.trading_agent_load_current_config_haos`** muss den Helper `input_text.trading_agent_challenge_id` vorzugsweise aus **`challenge_attempt_id`** (Fallback `challenge_id`) befuellen und idealerweise `wait_template` + Datei-Fallback aus `home_assistant_scripts_haos_addon.yaml.example` nutzen.
+
+## Verifikation (nach Script-/Paket-Update)
+
+1. **Developer Tools → Dienste:** `shell_command.trading_agent_save_operator_config_haos` ist aufrufbar (Service existiert).
+2. **Konfiguration speichern** ausfuehren; danach in `/share/trading-agent-data/operator_config.json` pruefen: `markets`, `leverage`, `challenge_attempt_id`, `push_enabled` entsprechen den HA-Helpern.
+3. Add-on-Log (`run.sh`): bei gesetztem Attempt erscheint `PROPR_CHALLENGE_ATTEMPT_ID: len=...` (nicht dauernd `(empty)`).
+4. Multi-Market-Lauf: ein ungueltiger HL-Markt fuehrt zu einer **pro-Market**-Fehlzeile / Journal-Hinweis; der Scan laeuft **weiter** fuer die restlichen Maerkte (kein vorzeitiges `Multi-market scan failed:` fuer einen einzelnen Coin).
 
 ## Laufmodi
 

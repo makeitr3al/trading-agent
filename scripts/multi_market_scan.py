@@ -362,9 +362,9 @@ def main() -> None:
             symbol = asset_info.asset
             coin = hyperliquid_candle_coin(asset_info)
             print(f"Scanning asset={asset_ticker} coin={coin}")
-            if data_source_settings.data_source == "live":
-                registry.validate_scan_asset_for_hyperliquid_fetch(asset_info)
             try:
+                if data_source_settings.data_source == "live":
+                    registry.validate_scan_asset_for_hyperliquid_fetch(asset_info)
                 data_batch, strategy_config, live_buy_spread = _build_data_batch_and_config(
                     data_source=data_source_settings.data_source,
                     golden_scenario=data_source_settings.golden_scenario,
