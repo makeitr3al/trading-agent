@@ -60,6 +60,35 @@ _ORDER_TP_VALUE_KEYS = [
 ]
 
 
+def _is_open_position_row_lenient(item: Any) -> bool:
+    """
+    Lenient predicate for whether a Propr position row represents an open position.
+
+    Propr `/positions` payloads can omit stopLoss/takeProfit; for UI and account-level
+    telemetry we still want to count/summarize open positions without requiring exits.
+    """
+    if not isinstance(item, dict):
+        return False
+
+    status = get_first_key(item, ["status"])
+    if _normalize_status(status) not in {"open", "active", "live"}:
+        return False
+
+    qty = _extract_decimal(item, ["quantity", "qty", "size", "positionSize"])
+    if qty is not None and qty == Decimal("0"):
+        return False
+
+    side = get_first_key(item, ["side", "direction", "positionSide"])
+    entry = _extract_decimal(
+        item,
+        ["entry", "entry_price", "entryPrice", "avgEntryPrice", "averageEntryPrice", "price"],
+    )
+    if side is None or entry is None:
+        return False
+
+    return True
+
+
 def enrich_positions_payload_with_exit_levels_from_orders(
     orders_payload: dict | list[dict],
     positions_payload: dict | list[dict],
@@ -110,23 +139,33 @@ def summarize_open_position_rows(items: list[dict]) -> list[dict[str, Any]]:
     """Build display rows for open positions (REST or WebSocket payloads)."""
     rows: list[dict[str, Any]] = []
     for item in items:
-        if not isinstance(item, dict):
+        if not _is_open_position_row_lenient(item):
             continue
         trade = map_propr_position_to_internal(item)
-        if trade is None:
-            continue
         pnl_dec = _extract_decimal(item, _POSITION_SUMMARY_ROW_PNL_KEYS)
         symbol = get_first_key(item, ["asset", "symbol", "pair", "base", "market"])
+        qty = _extract_decimal(item, ["quantity", "qty", "size", "positionSize"])
+        entry = _extract_decimal(
+            item,
+            ["entry", "entry_price", "entryPrice", "avgEntryPrice", "averageEntryPrice", "price"],
+        )
+        side_raw = get_first_key(item, ["side", "direction", "positionSide"])
+        side = str(side_raw or "").lower()
+        direction = trade.direction.value.lower() if trade is not None else ("long" if side == "long" else "short" if side == "short" else None)
+        sl_dec = _extract_decimal(item, ["stop_loss", "stopLoss", "sl", "internal_stop_loss"])
+        tp_dec = _extract_decimal(item, ["take_profit", "takeProfit", "tp", "internal_take_profit"])
+        stop_loss = trade.stop_loss if trade is not None else (float(sl_dec) if sl_dec is not None else None)
+        take_profit = trade.take_profit if trade is not None else (float(tp_dec) if tp_dec is not None else None)
         rows.append(
             {
                 "symbol": str(symbol) if symbol is not None else None,
-                "direction": trade.direction.value.lower(),
-                "position_size": trade.quantity,
-                "entry_price": trade.entry,
-                "stop_loss": trade.stop_loss,
-                "take_profit": trade.take_profit,
+                "direction": direction,
+                "position_size": float(qty) if qty is not None else (trade.quantity if trade is not None else None),
+                "entry_price": float(entry) if entry is not None else (trade.entry if trade is not None else None),
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
                 "unrealized_pnl": float(pnl_dec) if pnl_dec is not None else None,
-                "position_id": trade.position_id,
+                "position_id": trade.position_id if trade is not None else get_first_key(item, ["positionId", "position_id", "id"]),
             }
         )
     return rows
@@ -170,7 +209,7 @@ def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[
     total = Decimal("0")
     found_component = False
     for item in _get_items(positions_payload):
-        if map_propr_position_to_internal(item) is None:
+        if not _is_open_position_row_lenient(item):
             continue
         pnl_value = _extract_decimal(item, per_position_keys)
         if pnl_value is None:
@@ -184,7 +223,7 @@ def _extract_account_unrealized_pnl_from_payload(positions_payload: dict | list[
 
 
 def _extract_account_open_positions_count_from_payload(positions_payload: dict | list[dict]) -> int:
-    return sum(1 for item in _get_items(positions_payload) if map_propr_position_to_internal(item) is not None)
+    return sum(1 for item in _get_items(positions_payload) if _is_open_position_row_lenient(item))
 
 
 def _format_conflict_ids(values: list[str | None]) -> str:

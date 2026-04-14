@@ -74,3 +74,34 @@ Die taegliche Bedienung passiert ueber Helpers, Scripts und Automationen in HA:
 Das Add-on schedult nichts selbst.
 Home Assistant startet das Add-on zur gewuenschten Zeit per Automation. Laut offizieller HA-Doku kann ein Time-Trigger direkt mit einem `input_datetime`-Helper arbeiten.
 Quelle: https://www.home-assistant.io/docs/automation/trigger/
+
+## HAOS Admin Panel (Sidebar)
+
+Das Add-on liefert ein zentrales Admin-Panel fuer die komplette Bedienung aus:
+- Panel-Asset: `/local/trading-agent/admin-panel.js`
+- Datenquellen (vom Add-on nach jedem Lauf aktualisiert):  
+  - `/local/trading-agent/journal_table.json`  
+  - `/local/trading-agent/live_status.json`  
+  - `/local/trading-agent/asset_registry.json`  
+  - `/local/trading-agent/challenges.json`
+
+### Viewer-Umgebung vs. Operator-Umgebung
+
+Wichtig: Im Admin-Panel gibt es **zwei** Umgebungs-Begriffe:
+- **Operator-Umgebung** (`environment` in `operator_config.json`): steuert, gegen welche Propr-Umgebung der *naechste* Add-on-Lauf arbeitet.
+- **Viewer-Umgebung** (Dropdown „Viewer Umgebung“ im Panel): steuert nur, welche env-spezifischen JSON-Ansichten das Panel gerade laedt.
+
+Damit die Viewer-Umschaltung ohne Datenmix funktioniert, schreibt das Add-on zusaetzlich env-spezifische Dateien nach `/config/www/trading-agent`:
+- `journal_table_beta.json` und `journal_table_prod.json`
+- `live_status_beta.json` und `live_status_prod.json`
+- `challenges_beta.json` und `challenges_prod.json`
+
+Wenn eine env-spezifische Datei fehlt, faellt das Panel automatisch auf die Legacy-Datei ohne Suffix zurueck.
+
+### Versionierung, Cache-Busting und HA Restart
+
+Home Assistant cached `panel_custom` Module sehr aggressiv. Deshalb:
+- Das Add-on injiziert seine Version in das Panel-Asset und schreibt zusaetzlich `panel_version.txt` unter `/local/trading-agent/`.
+- Das Add-on aktualisiert bei Versionswechsel automatisch den `?v=` Cache-Buster in `/config/configuration.yaml` (nur, wenn dort bereits ein `admin-panel.js` Eintrag existiert) und triggert danach einen HA Core Restart, damit das neue Panel geladen wird.
+
+Du musst den `?v=` Wert daher nicht manuell pflegen; die Referenzdatei `home_assistant_panel_haos_addon.yaml.example` zeigt nur ein typisches Startbeispiel.

@@ -234,6 +234,29 @@ def test_build_agent_state_from_propr_data_filters_to_requested_symbol_and_track
     assert state.account_open_positions_count == 1
 
 
+def test_build_agent_state_from_propr_data_counts_open_positions_without_exit_levels() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "1.25",
+                    "positionId": "btc-position",
+                    "unrealizedPnl": "10.0",
+                }
+            ],
+        },
+    )
+
+    # Trading logic stays strict (active_trade requires stopLoss), but account-level counts should reflect reality.
+    assert state.active_trade is None
+    assert state.account_open_positions_count == 1
+
+
 def test_build_agent_state_from_propr_data_prefers_account_level_unrealized_pnl() -> None:
     state = build_agent_state_from_propr_data(
         orders_payload={"data": []},
@@ -317,6 +340,31 @@ def test_extract_account_unrealized_pnl_from_payload_returns_none_when_payload_h
     )
 
     assert pnl is None
+
+
+def test_extract_account_unrealized_pnl_from_payload_aggregates_open_positions_without_exit_levels() -> None:
+    pnl = _extract_account_unrealized_pnl_from_payload(
+        {
+            "data": [
+                {
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "1.25",
+                    "unrealizedPnl": "12.25",
+                },
+                {
+                    "status": "open",
+                    "positionSide": "short",
+                    "entryPrice": "200.0",
+                    "quantity": "2",
+                    "profitLoss": "-2.75",
+                },
+            ]
+        }
+    )
+
+    assert pnl == 9.5
 
 
 def test_build_agent_state_from_propr_data_prefers_exit_orders_linked_to_active_position() -> None:

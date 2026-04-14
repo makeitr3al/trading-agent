@@ -15,6 +15,7 @@ import os
 import time
 from collections import deque
 from decimal import Decimal
+from decimal import InvalidOperation
 from typing import Any, Optional
 from ulid import ULID
 
@@ -502,7 +503,21 @@ class ProprClient:
         positions = self._get(self._account_path("/positions"), params=params).get("data", [])
 
         if exclude_zero:
-            positions = [p for p in positions if Decimal(p.get("quantity", "0")) > 0]
+            def _position_size_is_nonzero(row: Any) -> bool:
+                if not isinstance(row, dict):
+                    return False
+                for key in ("quantity", "qty", "size", "positionSize"):
+                    raw = row.get(key)
+                    if raw is None:
+                        continue
+                    try:
+                        if Decimal(str(raw)) != Decimal("0"):
+                            return True
+                    except (InvalidOperation, TypeError, ValueError):
+                        continue
+                return False
+
+            positions = [p for p in positions if _position_size_is_nonzero(p)]
 
         return positions
 

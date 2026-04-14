@@ -7,6 +7,15 @@ const PANEL_VERSION = "__PANEL_VERSION__";
 const CHALLENGES_URL = "/local/trading-agent/challenges.json";
 const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
 const TA_CHALLENGE_LS_KEY = "trading_agent_panel_challenge_id";
+const TA_VIEWER_ENV_LS_KEY = "trading_agent_panel_view_env";
+
+function envScopedUrl(base, env) {
+  const safe = String(env || "").trim().toLowerCase();
+  if (!safe) return base;
+  const m = base.match(/^(.*)\.json$/);
+  if (!m) return base;
+  return `${m[1]}_${safe}.json`;
+}
 
 const ENTITIES = {
   addonSlug: "input_text.trading_agent_addon_slug",
@@ -464,6 +473,8 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._persistOperatorTimer = null;
     this._challengeHydrateAttempted = false;
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
+    this._viewerEnv = null;
+    this._stateByEnv = {};
   }
   connectedCallback() {
     this.shadowRoot.addEventListener("click", (event) => this.onClick(event));
@@ -499,10 +510,18 @@ class TradingAgentAdminPanel extends HTMLElement {
 
   async _fetchLiveStatus() {
     try {
-      const resp = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
+      const env = this.viewerEnv();
+      const primaryUrl = envScopedUrl("/local/trading-agent/live_status.json", env);
+      const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (resp.ok) {
         this._directLiveStatus = await resp.json();
         this.render();
+      } else if (primaryUrl !== "/local/trading-agent/live_status.json") {
+        const fallback = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
+        if (fallback.ok) {
+          this._directLiveStatus = await fallback.json();
+          this.render();
+        }
       }
     } catch (_) {}
     this._checkPanelVersion();
@@ -550,6 +569,19 @@ class TradingAgentAdminPanel extends HTMLElement {
 
   set hass(value) {
     this.hassState = value;
+    // Initialize viewer environment (separate from operator env).
+    if (!this._viewerEnv) {
+      try {
+        const stored = (typeof localStorage !== "undefined" && localStorage.getItem(TA_VIEWER_ENV_LS_KEY)) || "";
+        this._viewerEnv = stored.trim() || null;
+      } catch (_) {}
+    }
+    if (!this._viewerEnv) {
+      const opEnv = value?.states?.[ENTITIES.operatorConfig]?.attributes?.environment
+        || value?.states?.[ENTITIES.environment]?.state
+        || "";
+      this._viewerEnv = String(opEnv || "").trim() || "beta";
+    }
     const runId = value?.states?.[ENTITIES.runSummary]?.state;
     if (runId && !["unknown", "unavailable"].includes(runId) && runId !== this.lastRunId) {
       this.lastRunId = runId;
@@ -567,6 +599,57 @@ class TradingAgentAdminPanel extends HTMLElement {
         /* ignore */
       }
     }
+    this.render();
+  }
+
+  viewerEnv() {
+    return String(this._viewerEnv || "").trim() || "beta";
+  }
+
+  _setViewerEnv(nextEnv) {
+    const env = String(nextEnv || "").trim().toLowerCase();
+    if (!env || env === this.viewerEnv()) return;
+    // Persist per-env UI state.
+    const cur = this.viewerEnv();
+    this._stateByEnv[cur] = {
+      tableState: this.tableState,
+      expandedTradeRows: this._expandedTradeRows,
+      expandedLifecycleRows: this._expandedLifecycleRows,
+      selectedTradeRows: this._selectedTradeRows,
+      expandedScanRuns: this._expandedScanRuns,
+      marketGroupsExpanded: this._marketGroupsExpanded,
+      marketFilter: this._marketFilter,
+    };
+    const restore = this._stateByEnv[env];
+    if (restore) {
+      this.tableState = restore.tableState;
+      this._expandedTradeRows = restore.expandedTradeRows;
+      this._expandedLifecycleRows = restore.expandedLifecycleRows;
+      this._selectedTradeRows = restore.selectedTradeRows;
+      this._expandedScanRuns = restore.expandedScanRuns;
+      this._marketGroupsExpanded = restore.marketGroupsExpanded;
+      this._marketFilter = restore.marketFilter;
+    } else {
+      this.tableState = {
+        scans: { ...BASE_TABLE_STATE },
+        trades: { ...BASE_TABLE_STATE },
+        lifecycle: { ...BASE_TABLE_STATE, sortKey: "sort_timestamp" },
+      };
+      this._expandedTradeRows = new Set();
+      this._expandedLifecycleRows = new Set();
+      this._selectedTradeRows = new Set();
+      this._expandedScanRuns = new Set();
+      this._marketGroupsExpanded = {};
+      this._marketFilter = "";
+    }
+    this._viewerEnv = env;
+    try {
+      if (typeof localStorage !== "undefined") localStorage.setItem(TA_VIEWER_ENV_LS_KEY, env);
+    } catch (_) {}
+    this._directLiveStatus = null;
+    this.refreshJournal();
+    this.fetchChallenges();
+    if (this._liveStatusInterval) this._fetchLiveStatus();
     this.render();
   }
 
@@ -610,11 +693,25 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._lastJournalRefresh = Date.now();
     this.render();
     try {
-      const response = await fetch(`${JOURNAL_URL}?ts=${Date.now()}`, { cache: "no-store" });
-      if (!response.ok) {
+      const env = this.viewerEnv();
+      const primaryUrl = envScopedUrl(JOURNAL_URL, env);
+      const response = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
+      if (response.ok) {
+        this.journalPayload = await response.json();
+      } else if (primaryUrl !== JOURNAL_URL) {
+        const fallback = await fetch(`${JOURNAL_URL}?ts=${Date.now()}`, { cache: "no-store" });
+        if (!fallback.ok) throw new Error(`HTTP ${fallback.status}`);
+        this.journalPayload = await fallback.json();
+        this.journalPayload = {
+          ...this.journalPayload,
+          warnings: [
+            ...(this.journalPayload.warnings || []),
+            `Viewer env '${env}' konnte nicht env-spezifisch geladen werden (${primaryUrl}). Fallback auf legacy ${JOURNAL_URL}.`,
+          ],
+        };
+      } else {
         throw new Error(`HTTP ${response.status}`);
       }
-      this.journalPayload = await response.json();
     } catch (error) {
       this.loadError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -636,10 +733,18 @@ class TradingAgentAdminPanel extends HTMLElement {
 
   async fetchChallenges() {
     try {
-      const resp = await fetch(`${CHALLENGES_URL}?ts=${Date.now()}`, { cache: "no-store" });
+      const env = this.viewerEnv();
+      const primaryUrl = envScopedUrl(CHALLENGES_URL, env);
+      const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (resp.ok) {
         this.challengesList = await resp.json();
         this.render();
+      } else if (primaryUrl !== CHALLENGES_URL) {
+        const fallback = await fetch(`${CHALLENGES_URL}?ts=${Date.now()}`, { cache: "no-store" });
+        if (fallback.ok) {
+          this.challengesList = await fallback.json();
+          this.render();
+        }
       }
     } catch (_) {}
   }
@@ -740,6 +845,7 @@ class TradingAgentAdminPanel extends HTMLElement {
         entries.push({
           entry_timestamp: row.timestamp,
           symbol: row.symbol,
+          environment: row.environment || this.viewerEnv(),
           entry_type: row.entry_type,
           status: row.status,
         });
@@ -810,10 +916,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       .join("")}</div></section>`;
   }
   controlsTab() {
+    const viewerEnv = this.viewerEnv();
+    const envOptions = this.entity(ENTITIES.environment)?.attributes?.options || ["beta", "prod"];
+    const viewerSelector = `<label class="field"><span>Viewer Umgebung</span><select data-viewer-env="1">${
+      envOptions.map((opt) => `<option value="${escapeHtml(opt)}" ${String(opt).toLowerCase() === viewerEnv ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")
+    }</select></label>`;
     return `<div class="stack">
       <section class="card">
         <h3>Operator</h3>
         <div class="grid two">
+          ${viewerSelector}
           ${this.field(ENTITIES.mode, "select")}
           ${this.field(ENTITIES.environment, "select")}
           ${this.field(ENTITIES.leverage, "number")}
@@ -1392,6 +1504,10 @@ class TradingAgentAdminPanel extends HTMLElement {
   async onChange(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.viewerEnv) {
+      this._setViewerEnv(target.value);
+      return;
+    }
     if (target.dataset.marketAsset) {
       const selected = this._currentMarketSelection();
       const asset = target.dataset.marketAsset;

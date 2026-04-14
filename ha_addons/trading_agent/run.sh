@@ -86,6 +86,8 @@ PANEL_ASSET_SOURCE="$APP_PATH/ha_addons/trading_agent/panel/admin-panel.js"
 PANEL_ASSET_TARGET="$PANEL_DIR/admin-panel.js"
 PANEL_JOURNAL_TABLE_PATH="$PANEL_DIR/journal_table.json"
 PANEL_LIVE_STATUS_PATH="$PANEL_DIR/live_status.json"
+PANEL_JOURNAL_TABLE_ENV_PATH="$PANEL_DIR/journal_table_${OPERATOR_ENVIRONMENT}.json"
+PANEL_LIVE_STATUS_ENV_PATH="$PANEL_DIR/live_status_${OPERATOR_ENVIRONMENT}.json"
 
 # Extract version for cache-busting
 ADDON_VERSION=$(sed -n 's/^version: "\([^"]*\)".*/\1/p' "$APP_PATH/ha_addons/trading_agent/config.yaml" | tr -d '\r')
@@ -109,7 +111,15 @@ import json, sys
 from pathlib import Path
 
 targets = json.loads(sys.argv[1])
-for env in ("beta", "prod"):
+targets_by_env = {"beta": [], "prod": []}
+for t in targets:
+    env = str(t.get("environment") or "").strip().lower()
+    if env in targets_by_env:
+        targets_by_env[env].append(t)
+
+for env, env_targets in targets_by_env.items():
+    if not env_targets:
+        continue
     p = Path(f"/share/trading-agent-data/trading_journal_{env}.jsonl")
     if not p.exists():
         continue
@@ -127,7 +137,8 @@ for env in ("beta", "prod"):
             and e.get("symbol") == t.get("symbol")
             and e.get("entry_type") == t.get("entry_type")
             and e.get("status") == t.get("status")
-            for t in targets
+            and str(e.get("environment") or "").strip().lower() == str(t.get("environment") or "").strip().lower()
+            for t in env_targets
         ):
             kept.append(line)
     p.write_text("\n".join(kept) + "\n", "utf-8")
@@ -173,13 +184,16 @@ if [[ -f "$HA_CONFIG" ]] && grep -q "admin-panel\.js" "$HA_CONFIG" 2>/dev/null; 
 fi
 
 # Write challenges.json for admin panel challenge selector
-python -c "
+fetch_challenges_for_env() {
+    local env=\"$1\"
+    local out_path=\"$2\"
+    python -c "
 import json
 from broker.propr_client import ProprClient
 from config.propr_config import ProprConfig
 import os
 try:
-    env = os.environ.get('PROPR_ENV', 'beta')
+    env = '${env}'
     key = os.environ.get('PROPR_BETA_API_KEY') if env == 'beta' else os.environ.get('PROPR_PROD_API_KEY')
     url = os.environ.get('PROPR_BETA_API_URL', 'https://api.beta.propr.xyz/v1') if env == 'beta' else os.environ.get('PROPR_PROD_API_URL', 'https://api.propr.xyz/v1')
     config = ProprConfig(environment=env, api_key=key, base_url=url)
@@ -199,13 +213,24 @@ try:
             'name': challenge.get('name') or challenge.get('title', ''),
             'initial_balance': challenge.get('initialBalance', ''),
         })
-    with open('$PANEL_DIR/challenges.json', 'w') as f:
+    with open('${out_path}', 'w') as f:
         json.dump(result, f, ensure_ascii=True)
 except Exception as e:
     print(f'Challenges fetch failed (non-critical): {e}')
-    with open('$PANEL_DIR/challenges.json', 'w') as f:
+    with open('${out_path}', 'w') as f:
         f.write('[]')
 " 2>&1 || bashio::log.warning "Challenges fetch failed (non-critical)"
+}
+
+# Write env-scoped challenges for viewer switching in panel.
+fetch_challenges_for_env "beta" "$PANEL_DIR/challenges_beta.json"
+fetch_challenges_for_env "prod" "$PANEL_DIR/challenges_prod.json"
+
+# Keep legacy challenges.json as operator-env convenience (panel may still read it in older versions).
+cp "$PANEL_DIR/challenges_${OPERATOR_ENVIRONMENT}.json" "$PANEL_DIR/challenges.json" 2>/dev/null || true
+
+cp "$PANEL_DIR/challenges_beta.json" "$PANEL_SHARE_DIR/challenges_beta.json" 2>/dev/null || true
+cp "$PANEL_DIR/challenges_prod.json" "$PANEL_SHARE_DIR/challenges_prod.json" 2>/dev/null || true
 cp "$PANEL_DIR/challenges.json" "$PANEL_SHARE_DIR/challenges.json" 2>/dev/null || true
 
 # Refresh asset registry (auto-discovers tradeable assets from Hyperliquid)
@@ -252,8 +277,10 @@ run_finished_at="$(date -Iseconds)"
 python journal_snapshot.py --path "$OPERATOR_JOURNAL_PATH" --limit 200 > "$OPERATOR_JOURNAL_SNAPSHOT_PATH" || true
 python journal_table.py --path "$OPERATOR_JOURNAL_PATH" --output-path "$OPERATOR_JOURNAL_TABLE_PATH" || true
 cp "$OPERATOR_JOURNAL_TABLE_PATH" "$PANEL_JOURNAL_TABLE_PATH" || true
+cp "$OPERATOR_JOURNAL_TABLE_PATH" "$PANEL_JOURNAL_TABLE_ENV_PATH" || true
 python scripts/sync_live_status.py --output-path "$OPERATOR_LIVE_STATUS_PATH" || true
 cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_PATH" || true
+cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_ENV_PATH" || true
 python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
 
 exit "$run_exit_code"
