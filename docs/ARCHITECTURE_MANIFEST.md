@@ -105,6 +105,115 @@ flowchart LR
 
 ---
 
+## 4.1 Propr domain data model (conceptual)
+
+This project models and consumes broker-side concepts that (in Propr terminology) roughly map to **users, purchases, challenges, attempts, accounts, positions, and orders**.
+
+The diagram below documents a **normalized relational view** of that domain. It is meant as a shared vocabulary for mapping Propr payloads → internal `models/` (and for future persistence, if ever added). It is **not** a statement that all of these entities are currently stored locally.
+
+```mermaid
+erDiagram
+  User ||--o{ Purchase : "makes"
+  User ||--o{ ChallengeAttempt : "owns"
+  User ||--o{ Account : "owns"
+
+  Challenge ||--o{ ChallengePhase : "has"
+  Purchase }o--|| Challenge : "for product"
+
+  Purchase ||--|| ChallengeAttempt : "creates one"
+  ChallengeAttempt }o--|| Challenge : "for"
+  ChallengeAttempt }o--|| Purchase : "from"
+  ChallengeAttempt ||--|| Account : "has one"
+  ChallengeAttempt }o--|| ChallengePhase : "current phase"
+  ChallengeAttempt ||--o{ ChallengeAttemptPhase : "progresses through"
+  ChallengeAttemptPhase }o--|| ChallengePhase : "instantiated as"
+
+  Account ||--o{ Trade : "fills"
+  Account ||--o{ Position : "holds"
+  Account ||--o{ Order : "places"
+  Order }o--|| Position : "targeted by"
+
+  User {
+    string userId PK
+  }
+
+  Purchase {
+    string purchaseId PK
+    string userId FK
+    string productId
+    enum status
+  }
+
+  Challenge {
+    string challengeId PK
+    string productId
+    string slug
+    int maxPurchases
+  }
+
+  ChallengePhase {
+    string phaseId PK
+    string challengeId FK
+    int order
+  }
+
+  ChallengeAttempt {
+    string attemptId PK
+    string userId FK
+    string challengeId FK
+    string purchaseId FK
+    string accountId FK
+    string currentPhaseId FK
+    enum status
+  }
+
+  ChallengeAttemptPhase {
+    string attemptPhaseId PK
+    string attemptId FK
+    string phaseId FK
+    enum status
+  }
+
+  Account {
+    string accountId PK
+    string userId FK
+    string challengeId "denormalized"
+    string challengeAttemptId FK
+    enum type
+    enum status
+  }
+
+  Trade {
+    string tradeId PK
+    string accountId FK
+    string userId FK
+  }
+
+  Position {
+    string positionId PK
+    string accountId FK
+    string userId FK
+  }
+
+  Order {
+    string orderId PK
+    string accountId FK
+    string positionId FK
+    string userId FK
+  }
+```
+
+### Normative invariants
+
+- **Attempt lineage:** Every `ChallengeAttempt` must reference exactly one `Purchase`, and that `Purchase.userId` must match `ChallengeAttempt.userId`.
+- **Attempt ↔ account:** Each `ChallengeAttempt` has exactly one `Account`. `Account.challengeAttemptId` is the stable join key; `ChallengeAttempt.accountId` is the reverse pointer.
+- **Current phase:** `ChallengeAttempt.currentPhaseId` must be a `ChallengePhase` whose `challengeId == ChallengeAttempt.challengeId`.
+- **Phase progression:** `ChallengeAttemptPhase` rows form the attempt’s timeline; there should be at most one “active/current” attempt phase per attempt (exact status enum is broker-defined).
+- **Account denormalization:** `Account.challengeId` is a denormalized convenience field; the source of truth is the linked `ChallengeAttempt.challengeId`. If both are present, they must match.
+- **Trading objects:** `Order.accountId`, `Trade.accountId`, and `Position.accountId` must point at an account owned by the same `userId`. `Order.positionId` (when present) must reference a `Position` under the same account.
+
+---
+
 ## 5. Execution and safety invariants
 
 These align with [CLAUDE.md](../CLAUDE.md); they are repeated here as **non-negotiable architecture constraints**.
