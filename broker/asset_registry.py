@@ -51,6 +51,52 @@ def _fetch_perps_meta() -> dict[str, Any]:
     return response.json()
 
 
+def _fetch_perps_meta_for_dex(dex: str) -> dict[str, Any]:
+    response = requests.post(
+        HYPERLIQUID_INFO_URL,
+        json={"type": "meta", "dex": dex},
+        headers={"Content-Type": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _fetch_perp_dexs() -> list[dict[str, Any]]:
+    response = requests.post(
+        HYPERLIQUID_INFO_URL,
+        json={"type": "perpDexs"},
+        headers={"Content-Type": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    raw = response.json()
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _fetch_all_mids(dex: str | None = None) -> dict[str, str]:
+    payload: dict[str, Any] = {"type": "allMids"}
+    if dex is not None:
+        payload["dex"] = dex
+    response = requests.post(
+        HYPERLIQUID_INFO_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    raw = response.json()
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if isinstance(k, str) and isinstance(v, str):
+            out[k] = v
+    return out
+
+
 def _fetch_spot_meta() -> dict[str, Any]:
     response = requests.post(
         HYPERLIQUID_INFO_URL,
@@ -82,15 +128,27 @@ def _parse_crypto_assets(perps_meta: dict[str, Any]) -> list[AssetEntry]:
             continue
 
         max_leverage = item.get("maxLeverage")
-        assets.append(AssetEntry(
-            name=name,
-            propr_asset=name,
-            asset_type="crypto",
-            base=name,
-            quote="USDC",
-            sz_decimals=int(sz_decimals),
-            max_leverage=int(max_leverage) if max_leverage is not None else None,
-        ))
+        if name.lower().startswith("xyz:"):
+            base = name.split(":", 1)[1].strip().upper()
+            assets.append(AssetEntry(
+                name=base or name,
+                propr_asset=name,
+                asset_type="builder_perp",
+                base=base or name,
+                quote="USDC",
+                sz_decimals=int(sz_decimals),
+                max_leverage=int(max_leverage) if max_leverage is not None else None,
+            ))
+        else:
+            assets.append(AssetEntry(
+                name=name,
+                propr_asset=name,
+                asset_type="crypto",
+                base=name,
+                quote="USDC",
+                sz_decimals=int(sz_decimals),
+                max_leverage=int(max_leverage) if max_leverage is not None else None,
+            ))
     return assets
 
 
@@ -183,14 +241,45 @@ class AssetRegistry:
 
     def refresh(self) -> None:
         logger.info("Refreshing asset registry from Hyperliquid...")
-        crypto: list[AssetEntry] = []
+        perps: list[AssetEntry] = []
         hip3: list[AssetEntry] = []
+        extras: list[AssetEntry] = []
 
         try:
+            # The default `meta` only returns the first perp dex. Use `perpDexs` to discover
+            # additional perp dexs (e.g. `xyz`) and fetch each dex's `meta` universe.
             perps_meta = _fetch_perps_meta()
-            crypto = _parse_crypto_assets(perps_meta)
+            perps = _parse_crypto_assets(perps_meta)
+
+            for dex in sorted({str(d.get("name") or "").strip() for d in _fetch_perp_dexs()} - {""}):
+                try:
+                    dex_meta = _fetch_perps_meta_for_dex(dex)
+                    perps.extend(_parse_crypto_assets(dex_meta))
+                except Exception as exc:
+                    logger.warning("Failed to fetch perps meta for dex=%s: %s", dex, exc)
         except Exception as exc:
             logger.warning("Failed to fetch perps meta: %s", exc)
+
+        # Optional: `allMids` may contain backend coins not present in meta universes.
+        # Keep them in a separate bucket; they are not guaranteed to support candles/trading.
+        try:
+            mids = _fetch_all_mids()
+            known = {a.propr_asset.upper() for a in perps}
+            for coin in sorted(set(mids.keys()) - known):
+                # Skip empty and internal keys.
+                if not coin or coin.startswith("@"):
+                    continue
+                extras.append(AssetEntry(
+                    name=coin,
+                    propr_asset=coin,
+                    asset_type="backend_coin",
+                    base=coin,
+                    quote="USDC",
+                    sz_decimals=0,
+                    max_leverage=None,
+                ))
+        except Exception as exc:
+            logger.debug("Failed to fetch allMids (optional): %s", exc)
 
         try:
             spot_meta = _fetch_spot_meta()
@@ -198,18 +287,18 @@ class AssetRegistry:
         except Exception as exc:
             logger.warning("Failed to fetch spot meta: %s", exc)
 
-        # Exclude HIP-3 names that clash with crypto perp names
-        crypto_names = {a.name.upper() for a in crypto}
-        hip3 = [a for a in hip3 if a.name.upper() not in crypto_names]
+        # Exclude HIP-3 names that clash with perp names
+        perp_names = {a.name.upper() for a in perps}
+        hip3 = [a for a in hip3 if a.name.upper() not in perp_names]
 
-        self._assets = crypto + hip3
+        self._assets = perps + hip3 + extras
         self._fetched_at = datetime.now(timezone.utc)
         self._loaded = True
 
         self._save_cache()
         logger.info(
-            "Asset registry refreshed: %d crypto, %d hip3",
-            len(crypto), len(hip3),
+            "Asset registry refreshed: %d perps, %d hip3, %d extras",
+            len(perps), len(hip3), len(extras),
         )
 
     def get(self, name: str) -> AssetEntry | None:
@@ -229,6 +318,14 @@ class AssetRegistry:
         self.ensure_fresh()
         return [a for a in self._assets if a.asset_type == "crypto"]
 
+    def list_perps(self) -> list[AssetEntry]:
+        self.ensure_fresh()
+        return [a for a in self._assets if a.asset_type in {"crypto", "builder_perp"}]
+
+    def list_builder_perps(self) -> list[AssetEntry]:
+        self.ensure_fresh()
+        return [a for a in self._assets if a.asset_type == "builder_perp"]
+
     def list_hip3(self) -> list[AssetEntry]:
         self.ensure_fresh()
         return [a for a in self._assets if a.asset_type == "hip3"]
@@ -241,16 +338,16 @@ class AssetRegistry:
         return self.get(name) is not None
 
     def validate_perp_coin_for_data_fetch(self, coin: str) -> None:
-        """Raise if ``coin`` is not a known Hyperliquid perp name (crypto universe)."""
+        """Raise if ``coin`` is not a known Hyperliquid perp coin (across dexs)."""
         self.ensure_fresh()
-        crypto_names = {a.name.upper() for a in self.list_crypto()}
-        if not crypto_names:
-            logger.warning("Skipping Hyperliquid perp coin validation: empty crypto universe (offline?)")
+        perp_names = {a.propr_asset.upper() for a in self.list_perps()}
+        if not perp_names:
+            logger.warning("Skipping Hyperliquid perp coin validation: empty perp universe (offline?)")
             return
         upper = coin.strip().upper()
-        if upper in crypto_names:
+        if upper in perp_names:
             return
-        sample = ", ".join(sorted(crypto_names)[:16])
+        sample = ", ".join(sorted(perp_names)[:16])
         raise ValueError(
             f"Unknown Hyperliquid perp {coin!r}: not in meta universe. "
             f"Use a listed perp coin (examples: {sample})."
@@ -260,16 +357,13 @@ class AssetRegistry:
         """Preflight for multi-market scan: crypto perps vs HIP-3 / builder assets."""
         self.ensure_fresh()
         if asset.is_hip3:
-            hip = self.list_hip3()
-            if not hip:
-                logger.warning("Skipping HIP-3 validation: empty hip3 universe (offline?)")
+            entry = self.get(asset.asset)
+            if entry is not None and entry.asset_type in {"hip3", "builder_perp"}:
                 return
-            if self.is_available(asset.asset) or self.is_available(asset.base):
-                return
-            raise ValueError(
-                f"Unknown HIP-3 asset {asset.asset!r}: not in asset registry. "
-                f"Use SCAN_MARKETS=xyz:TICKER for a listed builder market."
-            )
+            # Fallback: some `xyz:` coins may be fetchable even if discovery is incomplete.
+            logger.warning("Unknown `xyz:` market %r; allowing fetch (may fail at /info).", asset.asset)
+            return
+
         self.validate_perp_coin_for_data_fetch(asset.coin or asset.base)
 
     def _try_load_cache(self) -> bool:

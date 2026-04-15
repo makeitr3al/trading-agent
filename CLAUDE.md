@@ -147,8 +147,8 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
 - Legacy-Format `BTC/USDC:BTC,ETH/USDC:ETH` wird noch akzeptiert (mit Deprecation-Warnung)
 - Max. 3 offene Entry-Orders oder Positionen kontoweit
 - Priorisierung nach `signal_strength` wenn mehr Kandidaten als freie Slots
-- Asset Registry: `broker/asset_registry.py` — auto-discovers tradeable assets from Hyperliquid, caches to `artifacts/asset_registry.json` (24h TTL)
-- Live (`DATA_SOURCE=live`): Vor dem Kerzenabruf ruft `scripts/multi_market_scan.py` `AssetRegistry.validate_scan_asset_for_hyperliquid_fetch` — Krypto-Perps gegen die HL-Meta-Liste, HIP-3-Einträge gegen die Registry (`xyz:…`); leere Universe-Listen (offline) → nur Log-Warnung, keine harte Prüfung.
+- Asset Registry: `broker/asset_registry.py` — auto-discovers tradeable assets from Hyperliquid (inkl. zusätzlicher Perp-DEXes), cachet nach `artifacts/asset_registry.json` (24h TTL). Klassifikation: `crypto`, `builder_perp` (z. B. `xyz:EUR`), `hip3` (Stocks/Commodities), optional `backend_coin` (nur „gesehen“ via `allMids`, nicht garantiert candle-/tradebar).
+- Live (`DATA_SOURCE=live`): Vor dem Kerzenabruf ruft `scripts/multi_market_scan.py` `AssetRegistry.validate_scan_asset_for_hyperliquid_fetch` — Krypto-Perps gegen die HL-Meta-Universes; `xyz:`-Märkte gegen die Registry. Wenn die Registry einen `xyz:`-Markt nicht kennt, wird das aktuell **nur geloggt** und der Fetch trotzdem versucht (kann dann später am `/info` scheitern).
 - Journal (Scan): Schlägt ein Markt vor `run_app_cycle` fehl, wird eine **cycle**-Zeile angehängt (`scan_cycle_phase=scan_failed`, `skipped_reason=scan_failed`, Fehlertext in `notes`). Dry-Run und Execute eines Laufs teilen sich `executed_at`; die Scan-Aggregation in `utils/journal_table.py` dedupliziert zugehörige **cycle**-Zeilen pro Batch (bei Konflikt gewinnt `execute` vor `dry_run`).
 
 ---

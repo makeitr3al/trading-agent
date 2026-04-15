@@ -487,6 +487,67 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._viewerEnv = null;
     this._stateByEnv = {};
   }
+
+  _captureActiveInputState() {
+    try {
+      const root = this.shadowRoot;
+      if (!root) return null;
+      const el = root.activeElement;
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return null;
+      const key =
+        el.dataset.entity
+          ? `entity:${el.dataset.entity}`
+          : (el.dataset.marketFilter !== undefined)
+            ? "marketFilter"
+            : (el.dataset.table && el.dataset.search)
+              ? `tableSearch:${el.dataset.table}`
+              : (el.dataset.table && el.dataset.filter)
+                ? `tableFilter:${el.dataset.table}:${el.dataset.filter}`
+                : null;
+      if (!key) return null;
+      return {
+        key,
+        selectionStart: typeof el.selectionStart === "number" ? el.selectionStart : null,
+        selectionEnd: typeof el.selectionEnd === "number" ? el.selectionEnd : null,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _restoreActiveInputState(state) {
+    try {
+      if (!state) return;
+      const root = this.shadowRoot;
+      if (!root) return;
+      let el = null;
+      if (state.key === "marketFilter") {
+        el = root.querySelector('input[data-market-filter]');
+      } else if (state.key.startsWith("entity:")) {
+        const entityId = state.key.slice("entity:".length);
+        el = root.querySelector(`input[data-entity="${CSS.escape(entityId)}"]`);
+      } else if (state.key.startsWith("tableSearch:")) {
+        const table = state.key.slice("tableSearch:".length);
+        el = root.querySelector(`input[data-table="${CSS.escape(table)}"][data-search]`);
+      } else if (state.key.startsWith("tableFilter:")) {
+        const parts = state.key.split(":");
+        const table = parts[1];
+        const filter = parts.slice(2).join(":");
+        el = root.querySelector(`input[data-table="${CSS.escape(table)}"][data-filter="${CSS.escape(filter)}"]`);
+      }
+
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.focus({ preventScroll: true });
+        if (typeof el.setSelectionRange === "function" && state.selectionStart != null && state.selectionEnd != null) {
+          const end = Math.min(state.selectionEnd, el.value.length);
+          const start = Math.min(state.selectionStart, end);
+          el.setSelectionRange(start, end);
+        }
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
   connectedCallback() {
     this.shadowRoot.addEventListener("click", (event) => this.onClick(event));
     this.shadowRoot.addEventListener("change", (event) => this.onChange(event));
@@ -825,17 +886,32 @@ class TradingAgentAdminPanel extends HTMLElement {
     const filter = this._marketFilter.toLowerCase();
 
     const crypto = registry.filter((a) => a.asset_type === "crypto");
+    const builder = registry.filter((a) => a.asset_type === "builder_perp");
     const hip3 = registry.filter((a) => a.asset_type === "hip3");
+    const extras = registry.filter((a) => a.asset_type === "backend_coin");
+
+    const FX_CODES = new Set(["EUR", "JPY", "GBP", "CHF", "AUD", "NZD", "CAD", "CNY", "HKD", "SGD"]);
+    const builderFx = builder.filter((a) => FX_CODES.has(String(a.base || a.name || "").toUpperCase()));
+    const builderOther = builder.filter((a) => !FX_CODES.has(String(a.base || a.name || "").toUpperCase()));
 
     const filteredCrypto = filter ? crypto.filter((a) => a.name.toLowerCase().includes(filter)) : crypto;
+    const filteredFx = filter ? builderFx.filter((a) => a.propr_asset.toLowerCase().includes(filter) || a.name.toLowerCase().includes(filter)) : builderFx;
+    const filteredBuilderOther = filter ? builderOther.filter((a) => a.propr_asset.toLowerCase().includes(filter) || a.name.toLowerCase().includes(filter)) : builderOther;
     const filteredHip3 = filter ? hip3.filter((a) => a.name.toLowerCase().includes(filter) || a.propr_asset.toLowerCase().includes(filter)) : hip3;
+    const filteredExtras = filter ? extras.filter((a) => String(a.name || "").toLowerCase().includes(filter)) : extras;
 
     const cryptoExpanded = this._marketGroupsExpanded.crypto;
+    const fxExpanded = this._marketGroupsExpanded.fx;
+    const builderExpanded = this._marketGroupsExpanded.builder;
     const hip3Expanded = this._marketGroupsExpanded.hip3;
+    const extrasExpanded = this._marketGroupsExpanded.extras;
 
     const selectedCryptoCount = crypto.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
+    const selectedFxCount = builderFx.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
+    const selectedBuilderCount = builderOther.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
     const selectedHip3Count = hip3.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
-    const totalSelected = selectedCryptoCount + selectedHip3Count;
+    const selectedExtrasCount = extras.filter((a) => selected.has(a.name) || selected.has(a.propr_asset)).length;
+    const totalSelected = selectedCryptoCount + selectedFxCount + selectedBuilderCount + selectedHip3Count + selectedExtrasCount;
 
     const checkboxGrid = (assets, useProprAsset) =>
       assets.map((a) => {
@@ -855,11 +931,30 @@ class TradingAgentAdminPanel extends HTMLElement {
         ${cryptoExpanded ? `<div class="market-checkbox-grid">${filteredCrypto.length ? checkboxGrid(filteredCrypto, false) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
       </div>
       <div class="market-group">
+        <div class="market-group-header" data-action="toggle-market-group" data-group="fx">
+          <span>${fxExpanded ? "&#9660;" : "&#9654;"} FX Perps (${builderFx.length})${selectedFxCount > 0 ? ` — ${selectedFxCount} ausgewaehlt` : ""}</span>
+        </div>
+        ${fxExpanded ? `<div class="market-checkbox-grid">${filteredFx.length ? checkboxGrid(filteredFx, true) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
+      </div>
+      <div class="market-group">
+        <div class="market-group-header" data-action="toggle-market-group" data-group="builder">
+          <span>${builderExpanded ? "&#9660;" : "&#9654;"} Stocks &amp; Commodities (Perps) (${builderOther.length})${selectedBuilderCount > 0 ? ` — ${selectedBuilderCount} ausgewaehlt` : ""}</span>
+        </div>
+        ${builderExpanded ? `<div class="market-checkbox-grid">${filteredBuilderOther.length ? checkboxGrid(filteredBuilderOther, true) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
+      </div>
+      <div class="market-group">
         <div class="market-group-header" data-action="toggle-market-group" data-group="hip3">
           <span>${hip3Expanded ? "&#9660;" : "&#9654;"} Stocks &amp; Commodities (${hip3.length})${selectedHip3Count > 0 ? ` — ${selectedHip3Count} ausgewaehlt` : ""}</span>
         </div>
         ${hip3Expanded ? `<div class="market-checkbox-grid">${filteredHip3.length ? checkboxGrid(filteredHip3, true) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
       </div>
+      ${extras.length ? `
+      <div class="market-group">
+        <div class="market-group-header" data-action="toggle-market-group" data-group="extras">
+          <span>${extrasExpanded ? "&#9660;" : "&#9654;"} Extra backend coins (${extras.length})${selectedExtrasCount > 0 ? ` — ${selectedExtrasCount} ausgewaehlt` : ""}</span>
+        </div>
+        ${extrasExpanded ? `<div class="market-checkbox-grid">${filteredExtras.length ? checkboxGrid(filteredExtras, true) : '<span class="muted">Keine Treffer</span>'}</div>` : ""}
+      </div>` : ""}
     </div>`;
   }
 
@@ -1601,6 +1696,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
   }
   render() {
+    const activeInputState = this._captureActiveInputState();
     const ld = this._effectiveLiveData();
     const journal = this.effectiveJournal();
     const title = this.panelConfig?.config?.title || "Trading Agent";
@@ -1736,6 +1832,7 @@ class TradingAgentAdminPanel extends HTMLElement {
       <nav class="tabs">${TABS.map(([key, label]) => `<button class="tab ${this.currentTab === key ? "active" : ""}" data-action="tab" data-tab="${key}">${escapeHtml(label)}</button>`).join("")}</nav>
       ${body}
     </div>`;
+    this._restoreActiveInputState(activeInputState);
   }
 }
 

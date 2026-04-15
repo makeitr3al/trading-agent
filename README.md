@@ -6,7 +6,11 @@ Dies ist ein regelbasierter Trading Agent in Python mit:
 - Trend- und Gegentrend-Signalen
 - Order- und Trade-Management
 
-V1 startet ohne Broker-Anbindung.
+Der Agent ist für den Betrieb mit **Propr** (Execution) und **Hyperliquid** (Marktdaten) ausgelegt. Operative Details (Setup, Env-Keys, Tests, HAOS-Betrieb) sind bewusst in `CLAUDE.md` dokumentiert; die **normativen Architektur-Verträge** stehen in `docs/ARCHITECTURE_MANIFEST.md`.
+
+- **Operativer Leitfaden**: `CLAUDE.md`
+- **Architektur (normativ)**: `docs/ARCHITECTURE_MANIFEST.md`
+- **Home Assistant OS Add-on**: `ha_addons/trading_agent/DOCS.md` und `ha_addons/trading_agent/README.md`
 
 ## Signal Rules
 
