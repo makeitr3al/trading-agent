@@ -32,6 +32,11 @@ Gegentrend-Signale:
 - unterhalb des unteren Bands => `COUNTERTREND_LONG`
 - Pro Regime und Richtung darf es nur ein valides Gegentrend-Signal geben.
 
+Wichtig (Signals vs Orders):
+- Ein **valider** Signal-Detektor bedeutet nicht automatisch, dass im selben Cycle auch eine Order erzeugt wird.
+- Der App-/Engine-Zyklus kann aus Safety-Gruenden die **Order-Erzeugung blockieren** (z. B. Middle-Band-Retest-Gating nach einem Outside-Close) und dann bewusst `NO_ACTION` fahren, waehrend das Signal weiterhin als beobachtbar/valide im Output bleibt.
+- Das Journal enthaelt dazu auf der **cycle**-Zeile zusaetzlich einen kompakten `decision_detail` im Feld `notes`, damit klar ist, warum kein Entry gebaut wurde.
+
 Der Pine-Verifier in [artifacts/tradingview_strategy_indicator.pine](artifacts/tradingview_strategy_indicator.pine) bildet diese Regeln mit denselben kanonischen Live-Defaults fuer die visuelle Verifikation im Chart nach.
 
 ## Environment Setup

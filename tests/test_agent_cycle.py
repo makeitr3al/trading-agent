@@ -11,6 +11,7 @@ from models.decision import DecisionAction, DecisionResult
 from models.order import Order, OrderType
 from models.runner_result import StrategyRunResult
 from models.signal import SignalState, SignalType
+from models.signal_reason import SignalReason
 from models.trade import Trade, TradeDirection, TradeType
 from strategy.agent_cycle import run_agent_cycle
 from models.regime import RegimeState, RegimeType
@@ -554,7 +555,8 @@ def test_run_agent_cycle_blocks_duplicate_countertrend_short_signal_in_same_regi
 def test_run_agent_cycle_allows_current_outside_close_countertrend_signal_and_sets_middle_band_retest_lock(
     monkeypatch,
 ) -> None:
-    candles = _make_candles()
+    # Keep early bars inside the stubbed bands; only the signal bar is outside.
+    candles = _make_candles(count=10)
     candles[-1] = candles[-1].model_copy(update={"close": 106.5, "high": 107.0, "low": 105.5})
     _stub_cycle_context(
         monkeypatch,
@@ -597,13 +599,15 @@ def test_run_agent_cycle_allows_current_outside_close_countertrend_signal_and_se
     assert result.countertrend_signal is not None
     assert result.countertrend_signal.is_valid is True
     assert result.decision.action == DecisionAction.PREPARE_COUNTERTREND_ORDER
-    assert new_state.middle_band_retest_required is True
+    # Outside close on the signal bar is excluded from the anchor search, so it must not self-block
+    # and must not arm a persisted state anchor.
+    assert new_state.middle_band_retest_anchor_ts is None
 
 
 def test_run_agent_cycle_blocks_follow_up_countertrend_signal_until_middle_band_retest(
     monkeypatch,
 ) -> None:
-    candles = _make_candles()
+    candles = _make_candles(count=10)
     candles[-1] = candles[-1].model_copy(update={"close": 106.5, "high": 107.0, "low": 105.5})
     _stub_cycle_context(
         monkeypatch,
@@ -640,21 +644,22 @@ def test_run_agent_cycle_blocks_follow_up_countertrend_signal_until_middle_band_
         candles=candles,
         config=StrategyConfig(),
         account_balance=10000.0,
-        state=AgentState(middle_band_retest_required=True),
+        state=AgentState(middle_band_retest_anchor_ts=candles[-2].timestamp.isoformat()),
     )
 
     assert result.countertrend_signal is not None
-    assert result.countertrend_signal.is_valid is False
-    assert result.countertrend_signal.reason == "waiting for middle band retest"
+    # Signals stay valid; only order creation is blocked.
+    assert result.countertrend_signal.is_valid is True
     assert result.decision.action == DecisionAction.NO_ACTION
+    assert result.decision.reason == SignalReason.WAITING_FOR_MIDDLE_BAND_RETEST
     assert new_state.pending_order is None
-    assert new_state.middle_band_retest_required is True
+    assert new_state.middle_band_retest_anchor_ts == candles[-2].timestamp.isoformat()
 
 
 def test_run_agent_cycle_middle_band_touch_unlocks_for_next_bar_but_current_bar_stays_blocked(
     monkeypatch,
 ) -> None:
-    candles = _make_candles()
+    candles = _make_candles(count=10)
     candles[-1] = candles[-1].model_copy(update={"close": 102.0, "high": 102.5, "low": 99.5})
     _stub_cycle_context(
         monkeypatch,
@@ -691,14 +696,15 @@ def test_run_agent_cycle_middle_band_touch_unlocks_for_next_bar_but_current_bar_
         candles=candles,
         config=StrategyConfig(),
         account_balance=10000.0,
-        state=AgentState(middle_band_retest_required=True),
+        state=AgentState(middle_band_retest_anchor_ts=candles[-2].timestamp.isoformat()),
     )
 
     assert result.trend_signal is not None
-    assert result.trend_signal.is_valid is False
-    assert result.trend_signal.reason == "waiting for middle band retest"
-    assert result.decision.action == DecisionAction.NO_ACTION
-    assert new_state.middle_band_retest_required is False
+    assert result.trend_signal.is_valid is True
+    # Current bar wick-touch unlocks immediately; entry is allowed on this cycle.
+    assert result.decision.action == DecisionAction.PREPARE_TREND_ORDER
+    assert result.order is not None
+    assert new_state.middle_band_retest_anchor_ts is None
 
 
 def test_run_agent_cycle_middle_band_touch_on_last_closed_bar_unlocks_lock(monkeypatch) -> None:
@@ -727,10 +733,10 @@ def test_run_agent_cycle_middle_band_touch_on_last_closed_bar_unlocks_lock(monke
         candles=candles,
         config=StrategyConfig(),
         account_balance=10000.0,
-        state=AgentState(middle_band_retest_required=True),
+        state=AgentState(middle_band_retest_anchor_ts=candles[-3].timestamp.isoformat()),
     )
 
-    assert new_state.middle_band_retest_required is False
+    assert new_state.middle_band_retest_anchor_ts is None
 
 
 def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outside_bands_without_countertrend_signal(
@@ -768,7 +774,9 @@ def test_run_agent_cycle_sets_middle_band_retest_lock_for_sweet_spot_close_outsi
         state=AgentState(),
     )
 
-    assert new_state.middle_band_retest_required is True
+    # Middle-band retest state anchor is only armed by fill-window expiry (pending not filled),
+    # not by an outside close itself.
+    assert new_state.middle_band_retest_anchor_ts is None
 
 
 def test_run_agent_cycle_does_not_set_middle_band_retest_lock_for_sweet_spot_close_inside_bands(
@@ -806,7 +814,7 @@ def test_run_agent_cycle_does_not_set_middle_band_retest_lock_for_sweet_spot_clo
         state=AgentState(),
     )
 
-    assert new_state.middle_band_retest_required is False
+    assert new_state.middle_band_retest_anchor_ts is None
 
 
 def test_run_agent_cycle_resets_countertrend_consumed_flags_on_regime_change(

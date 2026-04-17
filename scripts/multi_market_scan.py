@@ -128,9 +128,11 @@ def _print_market_summary(symbol: str, coin: str, result: Any, live_buy_spread: 
     selected_signal_type = None
     trend_signal_valid = None
     countertrend_signal_valid = None
+    decision_detail = None
     if strategy_result is not None:
         decision_action = strategy_result.decision.action.value
         selected_signal_type = strategy_result.decision.selected_signal_type
+        decision_detail = getattr(strategy_result, "decision_detail", None)
         trend_signal_valid = (
             strategy_result.trend_signal.is_valid if strategy_result.trend_signal is not None else None
         )
@@ -155,6 +157,7 @@ def _print_market_summary(symbol: str, coin: str, result: Any, live_buy_spread: 
     print(f"  risk_guard: {_guard_to_dict(getattr(result, 'risk_guard_result', None))}")
     print(f"  decision_action: {decision_action}")
     print(f"  selected_signal_type: {selected_signal_type}")
+    print(f"  decision_detail: {decision_detail}")
     print(f"  trend_signal_valid: {trend_signal_valid}")
     print(f"  countertrend_signal_valid: {countertrend_signal_valid}")
     print(f"  pending_order_present: {pending_order_present}")

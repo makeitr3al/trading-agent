@@ -10,6 +10,7 @@ class StrategyRunResult(BaseModel):
     trend_signal: SignalState | None
     countertrend_signal: SignalState | None
     decision: DecisionResult
+    decision_detail: str | None = None
     order: Order | None
     updated_trade: Trade | None
     filled_trade: Trade | None = None

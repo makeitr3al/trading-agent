@@ -1,6 +1,7 @@
 import pandas as pd
 
 from datetime import datetime
+from typing import Iterable
 from config.strategy_config import StrategyConfig
 from indicators.bollinger import compute_bollinger_bands
 from indicators.macd import compute_macd
@@ -15,7 +16,7 @@ from models.trade import Trade, TradeDirection, TradeType
 from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
 from strategy.signal_rules import touches_middle_band
-from strategy.strategy_runner import run_strategy_cycle
+from strategy.strategy_runner import _signal_candles_only, run_strategy_cycle
 from ulid import ULID
 
 # TODO: Later manage pending-order validity across multiple days.
@@ -96,87 +97,109 @@ def _is_middle_band_entry_lock_target(action: DecisionAction) -> bool:
         DecisionAction.CLOSE_TREND_AND_PREPARE_COUNTERTREND,
     }
 
-
-def _invalidate_signal_for_middle_band_lock(signal: SignalState | None) -> SignalState | None:
-    if signal is None:
-        return None
-
-    return signal.model_copy(
-        update={
-            "is_valid": False,
-            "reason": "waiting for middle band retest",
-        }
-    )
-
-
-def _apply_middle_band_retest_lock(
-    result: StrategyRunResult,
-    state: AgentState,
-) -> StrategyRunResult:
-    if not state.middle_band_retest_required:
-        return result
-
-    updates: dict[str, object] = {
-        "trend_signal": _invalidate_signal_for_middle_band_lock(result.trend_signal),
-        "countertrend_signal": _invalidate_signal_for_middle_band_lock(result.countertrend_signal),
-    }
-
-    if _is_middle_band_entry_lock_target(result.decision.action):
-        updates.update(
-            {
-                "decision": DecisionResult(
-                    action=DecisionAction.NO_ACTION,
-                    reason=SignalReason.WAITING_FOR_MIDDLE_BAND_RETEST,
-                    selected_signal_type=None,
-                ),
-                "order": None,
-                "updated_trade": None,
-                "close_active_trade": False,
-            }
-        )
-
-    return result.model_copy(update=updates)
-
-
-def _resolve_middle_band_retest_required(
+def _resolve_signal_bar_idx(
     candles: list[Candle],
-    config: StrategyConfig,
-    previous_required: bool,
-) -> bool:
-    closes = pd.Series([candle.close for candle in candles], dtype=float)
-    bollinger_df = compute_bollinger_bands(
-        closes=closes,
-        period=config.bollinger_period,
-        std_dev=config.bollinger_std_dev,
-    )
-    latest_bollinger = bollinger_df.iloc[-1]
-    bb_upper = latest_bollinger["bb_upper"]
-    bb_middle = latest_bollinger["bb_middle"]
-    bb_lower = latest_bollinger["bb_lower"]
+    *,
+    now: datetime | None,
+) -> int:
+    """Return index in full candles of the bar used for signal evaluation."""
+    if not candles:
+        return 0
+    effective_now = now or datetime.utcnow()
+    signal_candles = _signal_candles_only(candles, now=effective_now)
+    if not signal_candles:
+        return len(candles) - 1
+    signal_ts = signal_candles[-1].timestamp
+    for idx in range(len(candles) - 1, -1, -1):
+        if candles[idx].timestamp == signal_ts:
+            return idx
+    return len(candles) - 1
 
-    if pd.isna(bb_upper) or pd.isna(bb_middle) or pd.isna(bb_lower):
-        return previous_required
 
-    latest_candle = candles[-1]
-    close_outside_bands = latest_candle.close > float(bb_upper) or latest_candle.close < float(bb_lower)
-    if close_outside_bands:
-        return True
+def _resolve_anchor_idx_from_ts(candles: list[Candle], anchor_ts: str | None) -> int | None:
+    if not anchor_ts:
+        return None
+    for i, c in enumerate(candles):
+        iso = c.timestamp.isoformat()
+        if iso == anchor_ts or iso[:19] == anchor_ts[:19]:
+            return i
+    return None
 
-    # Unlock on wick-touch in either the last closed bar or the current forming bar.
-    # Depending on when cycles run, the most recent wick-touch can be on -2 or -1.
-    candidates = [len(candles) - 1]
-    if len(candles) >= 2:
-        candidates.append(len(candles) - 2)
-    for idx in candidates:
-        row = bollinger_df.iloc[idx]
-        mid = row["bb_middle"]
+
+def _geometric_anchor_idx(
+    candles: list[Candle],
+    bollinger_df: pd.DataFrame,
+    *,
+    signal_bar_idx: int,
+) -> int | None:
+    """Return last index < signal_bar_idx with strict close outside bands."""
+    max_i = min(signal_bar_idx - 1, len(candles) - 1, len(bollinger_df) - 1)
+    for i in range(max_i, -1, -1):
+        row = bollinger_df.iloc[i]
+        upper = row["bb_upper"]
+        lower = row["bb_lower"]
+        if pd.isna(upper) or pd.isna(lower):
+            continue
+        close = candles[i].close
+        if close > float(upper) or close < float(lower):
+            return i
+    return None
+
+
+def _iter_middle_wick_touch_indices(
+    candles: list[Candle],
+    bollinger_df: pd.DataFrame,
+    *,
+    start_exclusive: int,
+    end_inclusive: int,
+) -> Iterable[int]:
+    """Yield indices where the candle range touches the middle band."""
+    max_i = min(end_inclusive, len(candles) - 1, len(bollinger_df) - 1)
+    for i in range(start_exclusive + 1, max_i + 1):
+        mid = bollinger_df.iloc[i]["bb_middle"]
         if pd.isna(mid):
             continue
-        c = candles[idx]
+        c = candles[i]
         if touches_middle_band(high=c.high, low=c.low, bb_middle=float(mid)):
-            return False
+            yield i
 
-    return previous_required
+
+def _middle_band_retest_ok(
+    candles: list[Candle],
+    bollinger_df: pd.DataFrame,
+    *,
+    signal_bar_idx: int,
+    state_anchor_ts: str | None,
+) -> tuple[bool, bool, str | None]:
+    """Return (ok, consumed_state_anchor, detail) for anchor-based retest gating."""
+    geom = _geometric_anchor_idx(candles, bollinger_df, signal_bar_idx=signal_bar_idx)
+    state_idx = _resolve_anchor_idx_from_ts(candles, state_anchor_ts)
+    if geom is not None and state_idx is not None:
+        effective = max(geom, state_idx)
+    else:
+        effective = geom if geom is not None else state_idx
+
+    if effective is None:
+        return True, True, None
+
+    touched = list(
+        _iter_middle_wick_touch_indices(
+            candles, bollinger_df, start_exclusive=effective, end_inclusive=signal_bar_idx
+        )
+    )
+    if not touched:
+        parts: list[str] = []
+        if geom is not None:
+            parts.append("cause=bb_outside_since_last_outside_close")
+        if state_idx is not None:
+            parts.append("cause=stale_pending_fill_window")
+        # Provide a compact operator-facing hint. Notes are rendered in HA panel and journal_table.
+        suffix = "; ".join(parts) if parts else "cause=unknown"
+        return False, False, suffix
+
+    if state_idx is None:
+        return True, True, None
+    return True, any(i >= state_idx for i in touched), None
 
 
 def _fill_window_closed_without_fill(
@@ -237,9 +260,13 @@ def run_agent_cycle(
         active_trade=working_active_trade,
         now=now,
     )
-    result = _apply_middle_band_retest_lock(result=result, state=state)
 
     closes = pd.Series([candle.close for candle in candles], dtype=float)
+    bollinger_df = compute_bollinger_bands(
+        closes=closes,
+        period=config.bollinger_period,
+        std_dev=config.bollinger_std_dev,
+    )
     macd_df = compute_macd(
         closes=closes,
         fast_period=config.macd_fast_period,
@@ -306,6 +333,28 @@ def run_agent_cycle(
             }
         )
 
+    signal_bar_idx = _resolve_signal_bar_idx(candles, now=now)
+    ok, consumed_state_anchor, retest_detail = _middle_band_retest_ok(
+        candles,
+        bollinger_df,
+        signal_bar_idx=signal_bar_idx,
+        state_anchor_ts=state.middle_band_retest_anchor_ts,
+    )
+    if not ok and _is_middle_band_entry_lock_target(result.decision.action):
+        result = result.model_copy(
+            update={
+                "decision": DecisionResult(
+                    action=DecisionAction.NO_ACTION,
+                    reason=SignalReason.WAITING_FOR_MIDDLE_BAND_RETEST,
+                    selected_signal_type=None,
+                ),
+                "decision_detail": retest_detail,
+                "order": None,
+                "updated_trade": None,
+                "close_active_trade": False,
+            }
+        )
+
     pending_order_created_at = latest_candle.timestamp.isoformat()
 
     if result.order is not None:
@@ -357,13 +406,13 @@ def run_agent_cycle(
     elif next_pending_sig_ts is None and pending_order is not None:
         next_pending_sig_ts = pending_order.created_at or latest_candle.timestamp.isoformat()
 
-    middle_band_retest_required = _resolve_middle_band_retest_required(
-        candles=candles,
-        config=config,
-        previous_required=state.middle_band_retest_required,
+    middle_band_retest_anchor_ts = (
+        None if consumed_state_anchor else state.middle_band_retest_anchor_ts
     )
     if _fill_window_closed_without_fill(candles, pending_order, state.pending_entry_signal_bar_ts):
-        middle_band_retest_required = True
+        middle_band_retest_anchor_ts = (
+            state.pending_entry_signal_bar_ts or candles[-1].timestamp.isoformat()
+        )
 
     consumed_signals: set[str] = set() if regime_changed else set(state.consumed_signals)
     if result.decision.action in {
@@ -404,7 +453,7 @@ def run_agent_cycle(
             if result.decision.selected_signal_type is not None
             else None,
             "last_regime": last_regime,
-            "middle_band_retest_required": middle_band_retest_required,
+            "middle_band_retest_anchor_ts": middle_band_retest_anchor_ts,
             "pending_entry_signal_bar_ts": next_pending_sig_ts,
             "consumed_signals": consumed_signals,
             "last_cycle_timestamp": candles[-1].timestamp.isoformat(),

@@ -13,7 +13,7 @@ class AgentState(BaseModel):
     last_decision_action: str | None = None
     last_signal_type: str | None = None
     last_regime: str | None = None
-    middle_band_retest_required: bool = False
+    middle_band_retest_anchor_ts: str | None = None
     pending_entry_signal_bar_ts: str | None = None
     consumed_signals: set[str] = Field(default_factory=set)
     last_cycle_timestamp: str | None = None
@@ -27,6 +27,13 @@ class AgentState(BaseModel):
     def _migrate_consumed_booleans(cls, data: object) -> object:
         if not isinstance(data, dict):
             return data
+        # Backwards-compat: older persisted states used a sticky boolean for middle-band retest.
+        # We approximate the missing anchor timestamp with the best available timestamp fields.
+        legacy_retest_required = bool(data.pop("middle_band_retest_required", False))
+        if legacy_retest_required and not data.get("middle_band_retest_anchor_ts"):
+            data["middle_band_retest_anchor_ts"] = (
+                data.get("pending_entry_signal_bar_ts") or data.get("last_cycle_timestamp")
+            )
         signals: set[str] = set(data.get("consumed_signals") or set())
         if data.pop("trend_signal_consumed_in_regime", False):
             signals.add("trend")

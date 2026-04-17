@@ -177,6 +177,11 @@ def build_journal_entries(
     cycle_lifecycle_id = f"{symbol}_{timestamp}"
     synced_active_trade = synced_state.active_trade if synced_state is not None else None
     pending_order = post_cycle_state.pending_order if post_cycle_state is not None else None
+    decision_notes = (
+        strategy_result.decision.reason if strategy_result is not None else skipped_reason
+    )
+    if strategy_result is not None and strategy_result.decision_detail:
+        decision_notes = f"{decision_notes} • {strategy_result.decision_detail}"
 
     entries = [
         JournalEntry(
@@ -191,7 +196,7 @@ def build_journal_entries(
             received_signals=_received_signals(strategy_result),
             used_signals=_used_signals(strategy_result),
             unused_signals=_unused_signals(strategy_result),
-            notes=strategy_result.decision.reason if strategy_result is not None else skipped_reason,
+            notes=decision_notes,
             lifecycle_id=cycle_lifecycle_id,
             signal_lifecycle_id=signal_lifecycle_id,
             scan_effective_submit_allowed=scan_effective_submit_allowed,

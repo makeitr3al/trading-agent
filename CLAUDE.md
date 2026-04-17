@@ -125,6 +125,7 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
   - In `bullish`/`bearish`: nur auf dem ersten Bar des Regimes (First-Bar-Regel)
   - In `neutral`: Richtung aus Outside-Fall (oberhalb oberes Band → SHORT, unterhalb unteres Band → LONG)
   - Pro Regime und Richtung maximal ein valides Gegentrend-Signal
+- **Entry-Gating (Signals vs Orders)**: Signale koennen valide sein, waehrend die per-cycle Orchestrierung die **Order-Erzeugung** aus Safety-Gruenden blockiert (z. B. Middle-Band-Retest-Gating) und dann `NO_ACTION` entscheidet; Details dazu stehen im Journal auf der cycle-Zeile als kompakter `decision_detail` in `notes`.
 - PineScript-Verifier: `artifacts/tradingview_strategy_indicator.pine`
 
 ---

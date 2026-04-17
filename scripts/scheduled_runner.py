@@ -70,6 +70,7 @@ def _print_result_summary(result: Any) -> None:
         strategy_result = result.strategy_result
         decision_action = strategy_result.decision.action.value
         selected_signal_type = strategy_result.decision.selected_signal_type
+        decision_detail = getattr(strategy_result, "decision_detail", None)
         trend_signal_valid = (
             strategy_result.trend_signal.is_valid if strategy_result.trend_signal is not None else None
         )
@@ -90,6 +91,7 @@ def _print_result_summary(result: Any) -> None:
     print(f"  risk_guard_result: {risk_guard_result.model_dump() if risk_guard_result else None}")
     print(f"  decision_action: {decision_action}")
     print(f"  selected_signal_type: {selected_signal_type}")
+    print(f"  decision_detail: {decision_detail}")
     print(f"  trend_signal_valid: {trend_signal_valid}")
     print(f"  countertrend_signal_valid: {countertrend_signal_valid}")
     print(f"  pending_order_present: {pending_order_present}")

@@ -411,9 +411,10 @@ def trend_order_should_be_prepared_scenario() -> StrategyGoldenScenario:
         agent_state=AgentState(),
         expected_trend_signal_valid=True,
         expected_trend_signal_type="TREND_LONG",
-        expected_decision_action="PREPARE_TREND_ORDER",
-        expected_order_present=True,
-        expected_consumed_flag=True,
+        # Middle-band retest gate can block order creation even when the trend signal is valid.
+        expected_decision_action="NO_ACTION",
+        expected_order_present=False,
+        expected_consumed_flag=False,
     )
 
 
