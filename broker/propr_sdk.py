@@ -393,7 +393,7 @@ class ProprClient:
             self._account_path("/orders"), json={"orders": [order]}
         ).get("data", [])
 
-    def create_orders(self, orders: list[dict]) -> list[dict]:
+    def create_orders(self, orders: list[dict], *, order_group_id: str | None = None) -> list[dict]:
         """
         Place multiple orders in a batch.
 
@@ -402,6 +402,7 @@ class ProprClient:
 
         Args:
             orders: List of order dicts.
+            order_group_id: Required by the API when ``len(orders) > 1`` (bracket / OCO batches).
 
         Returns:
             List of created order dicts.
@@ -412,8 +413,12 @@ class ProprClient:
             if "accountId" not in order:
                 order["accountId"] = self.account_id
 
+        body: dict[str, Any] = {"orders": orders}
+        if order_group_id is not None and str(order_group_id).strip():
+            body["orderGroupId"] = str(order_group_id).strip()
+
         return self._post(
-            self._account_path("/orders"), json={"orders": orders}
+            self._account_path("/orders"), json=body
         ).get("data", [])
 
     def cancel_order(self, order_id: str) -> dict | None:

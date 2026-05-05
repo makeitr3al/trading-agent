@@ -72,6 +72,7 @@ def _to_sdk_order_payload(order_params: dict[str, Any], account_id: str) -> dict
         "reduce_only": "reduceOnly",
         "close_position": "closePosition",
         "position_id": "positionId",
+        "order_group_id": "orderGroupId",
     }
     for source_key, target_key in field_map.items():
         value = order_params.get(source_key)
@@ -160,10 +161,23 @@ class ProprClient:
         response = self._wrap_list_response(self.sdk_client.create_orders([raw_payload]))
         return _accept_success_response(response) or response
 
+    def create_orders_batch_raw(
+        self,
+        account_id: str,
+        sdk_orders: list[dict[str, Any]],
+        *,
+        order_group_id: str,
+    ) -> dict[str, Any]:
+        """POST ``/orders`` with multiple already-SDK-shaped order dicts and top-level ``orderGroupId``."""
+        self._set_account(account_id)
+        data = self.sdk_client.create_orders(sdk_orders, order_group_id=order_group_id)
+        response = self._wrap_list_response(data)
+        return _accept_success_response(response) or response
+
     def cancel_order(self, account_id: str, order_id: str) -> dict[str, Any] | None:
         self._set_account(account_id)
         response = self.sdk_client.cancel_order(order_id)
         return _accept_success_response(response)
 
 
-__all__ = ["ProprClient", "SDKProprClient"]
+__all__ = ["ProprClient", "SDKProprClient", "_to_sdk_order_payload"]

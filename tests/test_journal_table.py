@@ -206,7 +206,7 @@ def test_build_journal_table_dedupes_multi_scan_dry_run_and_execute_same_bar(tmp
             "used_signals": ["TREND_LONG"],
             "received_signals": [{"signal_type": "TREND_LONG", "is_valid": True, "reason": "valid trend signal"}],
             "notes": "valid trend signal",
-            "skipped_reason": "beta does not support standalone stop entries",
+            "skipped_reason": "submit blocked: Propr API has no stop entries (limit only)",
             "scan_cycle_phase": "execute",
         },
         {
@@ -241,7 +241,7 @@ def test_build_journal_table_dedupes_multi_scan_dry_run_and_execute_same_bar(tmp
     btc_rows = [r for r in payload["scan_rows"] if r["symbol"] == "BTC"]
     assert len(btc_rows) == 1
     assert btc_rows[0]["scan_cycle_phase"] == "execute"
-    assert btc_rows[0]["skip_reason"] == "beta does not support standalone stop entries"
+    assert btc_rows[0]["skip_reason"] == "submit blocked: Propr API has no stop entries (limit only)"
     assert btc_rows[0]["order_created"] is True
     eth_rows = [r for r in payload["scan_rows"] if r["symbol"] == "ETH"]
     assert len(eth_rows) == 1

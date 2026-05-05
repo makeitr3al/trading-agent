@@ -1,0 +1,20 @@
+---
+description: Propr API constraint: no stop-entry orders
+alwaysApply: true
+---
+
+# Propr API: **no stop-entry orders**
+
+The Propr API batching rules define an **entry order** as **only** `market` or `limit`. Conditional orders like `stop_market`, `stop_limit`, `take_profit_market`, `take_profit_limit` must either:
+
+- include a `positionId`, **or**
+- be in the same `orderGroupId` as an **entry** order (`market`/`limit`).
+
+If a request batch contains no `market`/`limit` entry, Propr rejects it with **13056**.
+
+## Repo invariants to preserve
+
+- **Do not submit stop entries** (`BUY_STOP` / `SELL_STOP`) to Propr. The bot must **pre-skip** these (see `broker/execution.py`) with a clear `skip_reason`, instead of letting the API error surface.
+- **Bracket entries** are only valid when the entry is a Propr **entry order** (`market`/`limit`), and the exits are conditional orders under the same `orderGroupId`.
+- When changing order submit flows, cross-check against propr-docs: `docs/api.md#batching-and-conditional-order-rules`.
+

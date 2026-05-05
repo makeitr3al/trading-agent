@@ -167,6 +167,18 @@ Startbefehl:
 
 Das Skript prueft zuerst den Core-Health-Status, laedt die aktive Challenge, synchronisiert den externen State, rechnet den internen Agent-Zyklus und gibt das Ergebnis strukturiert aus. Vor echter Execution wird zusaetzlich geprueft, ob das Basis-Asset bei Propr ueber die Margin-Config tradebar ist und ob die konfigurierte `PROPR_LEVERAGE` das effektive Propr-Limit nicht ueberschreitet. Im Golden-Modus wird statt des Live-Marktdatenpfads genau ein bestehendes Golden-Szenario geladen und fachlich lesbar ausgegeben. Echter Submit ist dort hart blockiert. In Beta werden standalone Trend-Stop-Entries (`BUY_STOP` / `SELL_STOP`) aktuell nicht submitted, sondern sauber als bekannte Plattform-Limitation erkannt und nur gejournalt.
 
+## Verify: Size + Bracket Submit (Beta)
+
+Dieses Skript ist fuer eine **gezielte Verifikation** gedacht, dass Sizing und Exit-Orders mit dem Broker konsistent sind.
+
+Startbefehl:
+`.\.venv\Scripts\python.exe scripts/verify_size_and_adjust.py open --trade-type <trend|countertrend> --direction <long|short>`
+
+Modi:
+- `open`: erzeugt eine **Bracket-Batch** via `orderGroupId` (Entry `market` + SL `stop_market` + TP `take_profit_limit`). Echte Submits nur mit `MANUAL_ALLOW_SUBMIT=YES`.
+- `manage`: laedt Live-State, rechnet `update_active_trade` und ersetzt Exit-Orders falls noetig (Writes; `MANUAL_ALLOW_SUBMIT=YES`).
+- `observe`: dry-run (keine Writes) fuer Level-Diffs.
+
 ## Scheduled Runner
 
 Der generische Scheduled Runner startet manuell und verwendet eine konfigurierbare Datenquelle.

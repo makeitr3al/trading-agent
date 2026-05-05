@@ -8,6 +8,8 @@ import pytest
 
 from broker.order_service import (
     ProprOrderService,
+    build_bracket_submission_previews,
+    build_market_entry_bracket_previews,
     build_manual_order_submission_preview,
     build_market_close_submission_preview,
     build_stop_loss_submission_preview,
@@ -464,4 +466,35 @@ def test_manual_preview_raises_value_error_for_non_positive_quantity(monkeypatch
         )
 
 
+
+def test_build_bracket_submission_previews_three_orders_shared_group_reduce_only_exits() -> None:
+    group_id, previews = build_bracket_submission_previews(_make_order(OrderType.BUY_STOP), "BTC/USDC")
+    assert len(previews) == 3
+    entry, sl, tp = previews
+    assert entry["order_group_id"] == group_id
+    assert sl["order_group_id"] == group_id
+    assert tp["order_group_id"] == group_id
+    assert entry["order_type"] == "stop_limit"
+    assert sl["order_type"] == "stop_market"
+    assert tp["order_type"] == "take_profit_limit"
+    assert sl["reduce_only"] is True and tp["reduce_only"] is True
+    assert sl["position_id"] is None and tp["position_id"] is None
+    sl_sdk = build_sdk_create_order_params(sl)
+    tp_sdk = build_sdk_create_order_params(tp)
+    assert "internal_stop_loss" not in sl_sdk and "internal_take_profit" not in tp_sdk
+    assert sl_sdk["order_group_id"] == group_id
+
+
+def test_build_market_entry_bracket_previews_three_orders_shared_group_market_entry_stop_market_sl() -> None:
+    group_id, previews = build_market_entry_bracket_previews(_make_order(OrderType.BUY_STOP), "BTC/USDC")
+    assert len(previews) == 3
+    entry, sl, tp = previews
+    assert entry["order_group_id"] == group_id
+    assert sl["order_group_id"] == group_id
+    assert tp["order_group_id"] == group_id
+    assert entry["order_type"] == "market"
+    assert sl["order_type"] == "stop_market"
+    assert tp["order_type"] == "take_profit_limit"
+    assert sl["reduce_only"] is True and tp["reduce_only"] is True
+    assert sl["position_id"] is None and tp["position_id"] is None
 

@@ -91,12 +91,6 @@ def _should_close_active_countertrend_trade(
     return latest_low <= latest_bb_middle
 
 
-def _countertrend_management_bb_middle(bollinger_df: pd.DataFrame) -> float:
-    if len(bollinger_df) >= 2 and not math.isnan(float(bollinger_df.iloc[-2]["bb_middle"])):
-        return float(bollinger_df.iloc[-2]["bb_middle"])
-    return float(bollinger_df.iloc[-1]["bb_middle"])
-
-
 def _infer_candle_interval(candles: list[Candle], *, lookback: int = 20) -> timedelta | None:
     if len(candles) < 2:
         return None
@@ -254,11 +248,13 @@ def run_strategy_cycle(
         ):
             close_active_trade = True
         else:
-            management_bb_middle = (
-                _countertrend_management_bb_middle(bollinger_all)
-                if active_trade.trade_type == TradeType.COUNTERTREND
-                else float(bollinger_all.iloc[-1]["bb_middle"])
-            )
+            if active_trade.trade_type == TradeType.COUNTERTREND:
+                ct_mid = float(bollinger_sig.iloc[-1]["bb_middle"])
+                if math.isnan(ct_mid):
+                    ct_mid = float(bollinger_all.iloc[-1]["bb_middle"])
+                management_bb_middle = ct_mid
+            else:
+                management_bb_middle = float(bollinger_all.iloc[-1]["bb_middle"])
             updated_trade = update_active_trade(
                 active_trade=active_trade,
                 latest_bb_middle=management_bb_middle,

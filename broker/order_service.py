@@ -5,15 +5,11 @@ import os
 from decimal import Decimal
 from typing import Any
 
-from broker.propr_client import ProprClient
+from broker.propr_client import ProprClient, _to_sdk_order_payload
 from broker.symbol_service import round_price_to_symbol_spec, round_quantity_to_symbol_spec
 from models.order import Order, OrderType
 from models.symbol_spec import SymbolSpec
 from models.trade import Trade, TradeDirection
-
-# TODO: The SDK create_order call currently has no direct stop-loss / take-profit child-order support.
-# TODO: Later map stop loss / take profit to proper bracket-order handling if the SDK adds it.
-
 
 def _require_non_empty(value: str, field_name: str) -> str:
     if not value or not value.strip():
@@ -130,6 +126,7 @@ def build_manual_order_submission_preview(
     internal_take_profit: float | int | str | Decimal | None = None,
     position_id: str | None = None,
     intent_id: str | None = None,
+    order_group_id: str | None = None,
 ) -> dict[str, Any]:
     asset, base, quote = _parse_symbol(symbol)
     normalized_side = _require_non_empty(side, "side").lower()
@@ -167,6 +164,8 @@ def build_manual_order_submission_preview(
         params["internal_stop_loss"] = _serialize_decimal(internal_stop_loss)
     if internal_take_profit is not None:
         params["internal_take_profit"] = _serialize_decimal(internal_take_profit)
+    if order_group_id is not None and str(order_group_id).strip():
+        params["order_group_id"] = str(order_group_id).strip()
 
     return params
 
@@ -179,6 +178,7 @@ def build_order_submission_preview(
     close_position: bool = False,
     symbol_spec: SymbolSpec | None = None,
     stable_intent_seed: str | None = None,
+    order_group_id: str | None = None,
 ) -> dict[str, Any]:
     prepared_order = apply_symbol_spec_to_order(order, symbol_spec)
 
@@ -240,6 +240,9 @@ def build_order_submission_preview(
         )
     else:
         raise ValueError("unsupported order type")
+
+    if order_group_id is not None and str(order_group_id).strip():
+        params["order_group_id"] = str(order_group_id).strip()
 
     return params
 
@@ -321,6 +324,182 @@ def build_take_profit_submission_preview(
         position_id=active_trade.position_id,
     )
 
+
+
+def _bracket_exit_side_from_entry_order(order: Order) -> tuple[str, str]:
+    """Return (exit_side, position_side) for reduce-only exits closing ``order``."""
+    is_long = order.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP}
+    if is_long:
+        return "sell", "long"
+    return "buy", "short"
+
+
+def build_bracket_stop_loss_preview(
+    order: Order,
+    symbol: str,
+    *,
+    buy_spread: float = 0.0,
+    symbol_spec: SymbolSpec | None = None,
+    order_group_id: str,
+    intent_id: str,
+) -> dict[str, Any]:
+    """Stop-market exit in the same ``order_group_id`` as the entry (no ``position_id`` until fill)."""
+    prepared = apply_symbol_spec_to_order(order, symbol_spec)
+    if prepared.position_size is None:
+        raise ValueError("position_size is required for bracket stop-loss")
+    if _to_decimal(prepared.position_size) <= Decimal("0"):
+        raise ValueError("position_size must be positive for bracket stop-loss")
+
+    side, position_side = _bracket_exit_side_from_entry_order(prepared)
+    trigger_price = _apply_buy_spread_to_price(side, prepared.stop_loss, buy_spread)
+    return build_manual_order_submission_preview(
+        symbol=symbol,
+        side=side,
+        position_side=position_side,
+        order_type="stop_market",
+        quantity=prepared.position_size,
+        trigger_price=trigger_price,
+        reduce_only=True,
+        close_position=False,
+        position_id=None,
+        intent_id=intent_id,
+        order_group_id=order_group_id,
+    )
+
+
+def build_bracket_take_profit_preview(
+    order: Order,
+    symbol: str,
+    *,
+    buy_spread: float = 0.0,
+    symbol_spec: SymbolSpec | None = None,
+    order_group_id: str,
+    intent_id: str,
+) -> dict[str, Any]:
+    """Take-profit limit exit in the same ``order_group_id`` as the entry."""
+    prepared = apply_symbol_spec_to_order(order, symbol_spec)
+    if prepared.position_size is None:
+        raise ValueError("position_size is required for bracket take-profit")
+    if _to_decimal(prepared.position_size) <= Decimal("0"):
+        raise ValueError("position_size must be positive for bracket take-profit")
+
+    side, position_side = _bracket_exit_side_from_entry_order(prepared)
+    tp_price = _apply_buy_spread_to_price(side, prepared.take_profit, buy_spread)
+    return build_manual_order_submission_preview(
+        symbol=symbol,
+        side=side,
+        position_side=position_side,
+        order_type="take_profit_limit",
+        quantity=prepared.position_size,
+        price=tp_price,
+        trigger_price=tp_price,
+        reduce_only=True,
+        close_position=False,
+        position_id=None,
+        intent_id=intent_id,
+        order_group_id=order_group_id,
+    )
+
+
+def build_bracket_submission_previews(
+    order: Order,
+    symbol: str,
+    *,
+    symbol_spec: SymbolSpec | None = None,
+    stable_intent_seed: str | None = None,
+    buy_spread: float = 0.0,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return ``(order_group_id, [entry_preview, stop_loss_preview, take_profit_preview])`` for one API batch."""
+    from ulid import ULID
+
+    group_id = str(ULID())
+    entry_preview = build_order_submission_preview(
+        order,
+        symbol,
+        symbol_spec=symbol_spec,
+        stable_intent_seed=stable_intent_seed,
+        order_group_id=group_id,
+    )
+    sl_preview = build_bracket_stop_loss_preview(
+        order,
+        symbol,
+        buy_spread=buy_spread,
+        symbol_spec=symbol_spec,
+        order_group_id=group_id,
+        intent_id=str(ULID()),
+    )
+    tp_preview = build_bracket_take_profit_preview(
+        order,
+        symbol,
+        buy_spread=buy_spread,
+        symbol_spec=symbol_spec,
+        order_group_id=group_id,
+        intent_id=str(ULID()),
+    )
+    return group_id, [entry_preview, sl_preview, tp_preview]
+
+
+def build_market_entry_bracket_previews(
+    order: Order,
+    symbol: str,
+    *,
+    symbol_spec: SymbolSpec | None = None,
+    stable_intent_seed: str | None = None,
+    buy_spread: float = 0.0,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return ``(order_group_id, [market_entry_preview, stop_loss_preview, take_profit_preview])``.
+
+    This is intended for manual/verification flows where the entry must be a true Propr
+    *entry order* (`market`/`limit`) to satisfy batching rules (see propr-docs). The bot
+    uses ``build_bracket_submission_previews`` for LIMIT entries; stop entries are blocked
+    pre-submit in ``broker.execution``.
+    """
+    from ulid import ULID
+
+    prepared = apply_symbol_spec_to_order(order, symbol_spec)
+    if prepared.position_size is None:
+        raise ValueError("position_size is required for market entry bracket")
+    if _to_decimal(prepared.position_size) <= Decimal("0"):
+        raise ValueError("position_size must be positive for market entry bracket")
+
+    group_id = str(ULID())
+
+    resolved_intent: str | None = None
+    if stable_intent_seed is not None and _stable_intent_id_env_enabled():
+        resolved_intent = derive_stable_intent_id(stable_intent_seed)
+
+    entry_side = "buy" if prepared.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP} else "sell"
+    entry_position_side = "long" if prepared.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP} else "short"
+    entry_preview = build_manual_order_submission_preview(
+        symbol=symbol,
+        side=entry_side,
+        position_side=entry_position_side,
+        order_type="market",
+        quantity=prepared.position_size,
+        reduce_only=False,
+        close_position=False,
+        position_id=None,
+        intent_id=resolved_intent,
+        order_group_id=group_id,
+    )
+
+    sl_preview = build_bracket_stop_loss_preview(
+        prepared,
+        symbol,
+        buy_spread=buy_spread,
+        symbol_spec=symbol_spec,
+        order_group_id=group_id,
+        intent_id=str(ULID()),
+    )
+    tp_preview = build_bracket_take_profit_preview(
+        prepared,
+        symbol,
+        buy_spread=buy_spread,
+        symbol_spec=symbol_spec,
+        order_group_id=group_id,
+        intent_id=str(ULID()),
+    )
+    return group_id, [entry_preview, sl_preview, tp_preview]
 
 
 def build_sdk_create_order_params(submission_preview: dict[str, Any]) -> dict[str, Any]:
@@ -427,6 +606,39 @@ class ProprOrderService:
         )
         return self.submit_order_preview(normalized_account_id, preview)
 
+    def submit_bracket_entry_with_exits(
+        self,
+        account_id: str,
+        order: Order,
+        symbol: str,
+        *,
+        symbol_spec: SymbolSpec | None = None,
+        stable_intent_seed: str | None = None,
+        buy_spread: float = 0.0,
+    ) -> dict[str, Any]:
+        """Submit entry + stop-loss + take-profit in one batch (Propr ``orderGroupId``)."""
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        group_id, previews = build_bracket_submission_previews(
+            order,
+            symbol,
+            symbol_spec=symbol_spec,
+            stable_intent_seed=stable_intent_seed,
+            buy_spread=buy_spread,
+        )
+        sdk_orders = [
+            _to_sdk_order_payload(build_sdk_create_order_params(p), account_id=normalized_account_id)
+            for p in previews
+        ]
+        response = self.client.create_orders_batch_raw(
+            normalized_account_id,
+            sdk_orders,
+            order_group_id=group_id,
+        )
+        ensured = _ensure_success_response(response, "create")
+        if ensured is None:
+            raise ValueError("Bracket create returned no response")
+        return ensured
+
     def submit_market_close(
         self,
         account_id: str,
@@ -476,6 +688,9 @@ __all__ = [
     "apply_symbol_spec_to_order",
     "build_manual_order_submission_preview",
     "build_order_submission_preview",
+    "build_bracket_submission_previews",
+    "build_bracket_stop_loss_preview",
+    "build_bracket_take_profit_preview",
     "build_market_close_submission_preview",
     "build_stop_loss_submission_preview",
     "build_take_profit_submission_preview",

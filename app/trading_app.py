@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.app_cycle_helpers import (
     _apply_symbol_specific_position_size,
-    _beta_blocks_standalone_entry_order,
     _count_open_order_trade_slots,
     _validate_pending_order_execution_size,
 )
@@ -437,10 +436,6 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
         )
         return ctx.build_result()
 
-    if _beta_blocks_standalone_entry_order(ctx.post_cycle_state.pending_order, ctx.environment):
-        ctx.skipped_reason = "beta does not support standalone stop entries"
-        return ctx.build_result()
-
     ctx.asset_guard_result = evaluate_asset_execution_guard(
         client=ctx.client,
         account_id=account_id,
@@ -478,6 +473,8 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
             state=ctx.synced_state,
             new_order=ctx.post_cycle_state.pending_order,
             stable_intent_seed=stable_seed,
+            symbol_spec=ctx.symbol_spec,
+            buy_spread=float(ctx.config.buy_spread),
         )
         ctx.replaced_order = True
         if isinstance(ctx.execution_response, dict):
@@ -495,6 +492,8 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
             state=ctx.synced_state,
             order=ctx.post_cycle_state.pending_order,
             stable_intent_seed=stable_seed,
+            symbol_spec=ctx.symbol_spec,
+            buy_spread=float(ctx.config.buy_spread),
         )
         ctx.execution_response = submit_outcome.response
         if submit_outcome.response is not None:

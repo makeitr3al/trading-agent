@@ -1,18 +1,9 @@
 from broker.order_service import apply_symbol_spec_to_order
 from config.strategy_config import StrategyConfig
-from models.order import Order, OrderType
+from models.order import Order
 from models.symbol_spec import SymbolSpec
 from strategy.position_sizer import calculate_position_size, evaluate_position_size_execution
 from strategy.state import AgentState
-
-
-def _beta_blocks_standalone_entry_order(order: Order | None, environment: str | None) -> bool:
-    """Skip API submit for standalone stop-limit entries on Beta: Propr returns 13056 conditional_order_requires_position_or_group."""
-    if (environment or "").strip().lower() != "beta" or order is None:
-        return False
-    return order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
-
-
 def _count_open_order_trade_slots(state: AgentState | None) -> int:
     if state is None:
         return 0

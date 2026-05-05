@@ -17,6 +17,7 @@ from broker.state_sync import (
     enrich_positions_payload_with_exit_levels_from_orders,
 )
 from models.agent_state import AgentState
+from models.order import Order, OrderType
 
 
 def test_build_agent_state_from_propr_data_returns_state_with_pending_order_only() -> None:
@@ -666,3 +667,60 @@ def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
     assert state.active_trade is not None
     assert state.active_trade.stop_loss == pytest.approx(88.5)
     assert state.active_trade.take_profit == pytest.approx(115.25)
+
+
+def test_build_agent_state_synthesizes_active_trade_when_position_missing_sl_tp_but_previous_pending_matches() -> None:
+    """Recovery: broker row lacks stopLoss/takeProfit; use last-cycle pending_order levels."""
+    prev = AgentState(
+        pending_order=Order(
+            order_type=OrderType.BUY_STOP,
+            entry=110.0,
+            stop_loss=100.0,
+            take_profit=130.0,
+            position_size=1.0,
+            signal_source="trend_long",
+        ),
+    )
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "1.25",
+                    "positionId": "position-orphan",
+                }
+            ]
+        },
+        previous_state=prev,
+        symbol="BTC/USDC",
+    )
+    assert state.active_trade is not None
+    assert state.active_trade.position_id == "position-orphan"
+    assert state.active_trade.stop_loss == 100.0
+    assert state.active_trade.take_profit == 130.0
+    assert state.active_trade.entry == pytest.approx(100.5)
+
+
+def test_build_agent_state_returns_no_active_trade_when_position_missing_exits_and_no_previous_levels() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "1.25",
+                    "positionId": "position-orphan",
+                }
+            ]
+        },
+        previous_state=None,
+        symbol="BTC/USDC",
+    )
+    assert state.active_trade is None

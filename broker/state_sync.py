@@ -18,8 +18,8 @@ from broker.propr_payload_parse import (
     _payload_matches_symbol,
 )
 from models.agent_state import AgentState
-from models.order import Order, OrderStatus
-from models.trade import Trade
+from models.order import Order, OrderStatus, OrderType
+from models.trade import Trade, TradeDirection, TradeType
 from utils.propr_response import extract_external_order_id, get_first_key
 
 # TODO: Later add trade history handling.
@@ -89,6 +89,127 @@ def _is_open_position_row_lenient(item: Any) -> bool:
         return False
 
     return True
+
+
+def _position_row_is_long(row: dict[str, Any]) -> bool | None:
+    s = str(get_first_key(row, ["positionSide", "side", "direction"]) or "").lower()
+    if "long" in s or s == "buy":
+        return True
+    if "short" in s or s == "sell":
+        return False
+    return None
+
+
+def _trade_type_from_previous_state(previous_state: AgentState) -> TradeType:
+    po = previous_state.pending_order
+    if po is not None and "countertrend" in (po.signal_source or ""):
+        return TradeType.COUNTERTREND
+    at = previous_state.active_trade
+    if at is not None and at.trade_type == TradeType.COUNTERTREND:
+        return TradeType.COUNTERTREND
+    return TradeType.TREND
+
+
+def _synthetic_trade_from_raw_position_row(
+    row: dict[str, Any],
+    *,
+    stop_loss: float,
+    take_profit: float | None,
+    trade_type: TradeType,
+    normalized_symbol: str,
+) -> Trade | None:
+    if not _is_open_position_row_lenient(row) or not _payload_matches_symbol(row, normalized_symbol):
+        return None
+    plong = _position_row_is_long(row)
+    if plong is None:
+        return None
+    direction = TradeDirection.LONG if plong else TradeDirection.SHORT
+    entry_raw = get_first_key(row, ["entryPrice", "entry_price", "entry", "avgEntryPrice", "averageEntryPrice", "price"])
+    if entry_raw is None:
+        return None
+    try:
+        entry = float(entry_raw)
+    except (TypeError, ValueError):
+        return None
+    pos_id = get_first_key(row, ["positionId", "position_id", "id"])
+    qty_raw = get_first_key(row, ["quantity", "qty", "size", "positionSize"])
+    try:
+        qty = float(qty_raw) if qty_raw is not None else None
+    except (TypeError, ValueError):
+        qty = None
+    opened = get_first_key(row, ["openedAt", "opened_at", "createdAt", "updatedAt", "timestamp"])
+    return Trade(
+        trade_type=trade_type,
+        direction=direction,
+        entry=entry,
+        stop_loss=float(stop_loss),
+        take_profit=float(take_profit) if take_profit is not None else None,
+        quantity=qty,
+        position_id=str(pos_id).strip() if pos_id else None,
+        is_active=True,
+        break_even_activated=False,
+        opened_at=str(opened) if opened is not None else None,
+    )
+
+
+def _resolve_active_trade_with_previous_fallback(
+    mapped_positions: list[Trade],
+    positions_payload: dict | list[dict],
+    previous_state: AgentState | None,
+    normalized_symbol: str | None,
+) -> Trade | None:
+    """When ``map_propr_position_to_internal`` yields nothing, rebuild ``Trade`` from raw row + prior agent levels."""
+    if mapped_positions:
+        return mapped_positions[0]
+    if previous_state is None or not normalized_symbol:
+        return None
+    candidates = [
+        row
+        for row in _get_items(positions_payload)
+        if isinstance(row, dict)
+        and _is_open_position_row_lenient(row)
+        and _payload_matches_symbol(row, normalized_symbol)
+    ]
+    if len(candidates) != 1:
+        return None
+    row = candidates[0]
+    plong = _position_row_is_long(row)
+    if plong is None:
+        return None
+
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    po = previous_state.pending_order
+    if po is not None:
+        po_long = po.order_type in {OrderType.BUY_LIMIT, OrderType.BUY_STOP}
+        if po_long == plong:
+            stop_loss = float(po.stop_loss)
+            take_profit = float(po.take_profit)
+
+    if stop_loss is None:
+        at = previous_state.active_trade
+        if at is not None and (at.direction == TradeDirection.LONG) == plong:
+            stop_loss = float(at.stop_loss)
+            take_profit = float(at.take_profit) if at.take_profit is not None else None
+
+    if stop_loss is None:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Open position for symbol %s has no mappable stop_loss on broker payload and no recoverable "
+            "levels in previous_state (pending_order / active_trade). Agent will treat as no active_trade.",
+            normalized_symbol,
+        )
+        return None
+
+    tt = _trade_type_from_previous_state(previous_state)
+    return _synthetic_trade_from_raw_position_row(
+        row,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        trade_type=tt,
+        normalized_symbol=normalized_symbol,
+    )
 
 
 def enrich_positions_payload_with_exit_levels_from_orders(
@@ -399,7 +520,12 @@ def build_agent_state_from_propr_data(
             f"position_ids=[{_format_conflict_ids([position.position_id for position in mapped_positions])}]"
         )
 
-    active_trade = mapped_positions[0] if mapped_positions else None
+    active_trade = _resolve_active_trade_with_previous_fallback(
+        mapped_positions,
+        positions_payload,
+        previous_state,
+        normalized_symbol,
+    )
     active_position_id = active_trade.position_id if active_trade is not None else None
 
     account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)

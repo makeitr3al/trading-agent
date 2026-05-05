@@ -36,9 +36,18 @@ class FakeProprOrderService:
         self.calls: list[tuple[str, str, object]] = []
         self.client = FakeProprClient(orders_payload) if orders_payload is not None else None
 
-    def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict:
-        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol, **kwargs}))
-        return {"id": "external-new-order", "status": "submitted"}
+    def submit_bracket_entry_with_exits(
+        self,
+        account_id: str,
+        order: Order,
+        symbol: str,
+        **kwargs: object,
+    ) -> dict:
+        self.calls.append(("submit_bracket", account_id, {"order": order, "symbol": symbol, **kwargs}))
+        return {
+            "status": 201,
+            "data": [{"orderId": "external-new-order", "intentId": "01ENTRY"}],
+        }
 
     def submit_market_close(self, account_id: str, active_trade: Trade, symbol: str) -> dict:
         self.calls.append(("close", account_id, {"trade": active_trade, "symbol": symbol}))
@@ -60,6 +69,8 @@ class FakeProprOrderService:
 
 def _make_order() -> Order:
     return Order(
+        # Default test order mirrors the strategy (trend) intent: stop-entry.
+        # Stop entries are currently blocked pre-submit (Propr entry orders are market/limit only).
         order_type=OrderType.BUY_STOP,
         entry=110.0,
         stop_loss=100.0,
@@ -67,6 +78,11 @@ def _make_order() -> Order:
         position_size=10.0,
         signal_source="trend_long",
     )
+
+
+def _make_limit_order() -> Order:
+    """A Propr-submit-able entry order (used for submit/reuse/idempotency paths)."""
+    return _make_order().model_copy(update={"order_type": OrderType.BUY_LIMIT})
 
 
 
@@ -96,9 +112,21 @@ def _make_external_pending_entry_order(symbol: str = "EURUSD", order_id: str = "
     }
 
 
+def _make_external_pending_limit_entry_order(symbol: str = "EURUSD", order_id: str = "external-existing-order") -> dict:
+    payload = _make_external_pending_entry_order(symbol=symbol, order_id=order_id)
+    payload["type"] = "limit"
+    return payload
+
+
 
 def _make_external_changed_pending_entry_order(symbol: str = "EURUSD", order_id: str = "external-existing-order") -> dict:
     payload = _make_external_pending_entry_order(symbol=symbol, order_id=order_id)
+    payload["price"] = 111.0
+    return payload
+
+
+def _make_external_changed_pending_limit_entry_order(symbol: str = "EURUSD", order_id: str = "external-existing-order") -> dict:
+    payload = _make_external_pending_limit_entry_order(symbol=symbol, order_id=order_id)
     payload["price"] = 111.0
     return payload
 
@@ -189,20 +217,22 @@ def test_submit_agent_order_if_allowed_submits_when_allowed() -> None:
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        order=_make_order(),
+        order=_make_limit_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
-    assert service.calls[0][0] == "submit"
+    assert result.response is not None and result.response.get("status") == 201
+    assert service.calls[0][0] == "submit_bracket"
 
 
-def test_submit_agent_order_if_allowed_passes_stable_intent_seed_to_submit_pending_order() -> None:
+def test_submit_agent_order_if_allowed_passes_stable_intent_seed_to_bracket_submit() -> None:
     captured: dict[str, object] = {}
 
     class TrackingService(FakeProprOrderService):
-        def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict:
+        def submit_bracket_entry_with_exits(
+            self, account_id: str, order: Order, symbol: str, **kwargs: object
+        ) -> dict:
             captured.update(kwargs)
-            return super().submit_pending_order(account_id, order, symbol, **kwargs)
+            return super().submit_bracket_entry_with_exits(account_id, order, symbol, **kwargs)
 
     service = TrackingService()
     submit_agent_order_if_allowed(
@@ -210,21 +240,21 @@ def test_submit_agent_order_if_allowed_passes_stable_intent_seed_to_submit_pendi
         "account-1",
         "EURUSD",
         AgentState(),
-        _make_order(),
+        _make_limit_order(),
         stable_intent_seed="cycle-seed-1",
     )
     assert captured.get("stable_intent_seed") == "cycle-seed-1"
 
 
 def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pending_order_exists() -> None:
-    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order()]})
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_limit_entry_order()]})
 
     result = submit_agent_order_if_allowed(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        order=_make_order(),
+        order=_make_limit_order(),
     )
 
     assert result == SubmitAgentOrderResult(
@@ -240,7 +270,7 @@ def test_submit_agent_order_if_allowed_skips_submit_when_equivalent_external_pen
 
 def test_submit_agent_order_if_allowed_ignores_equivalent_order_on_other_symbol() -> None:
     service = FakeProprOrderService(
-        orders_payload={"data": [_make_external_pending_entry_order(symbol="BTC/USDC")]}
+        orders_payload={"data": [_make_external_pending_limit_entry_order(symbol="BTC/USDC")]}
     )
 
     result = submit_agent_order_if_allowed(
@@ -248,11 +278,11 @@ def test_submit_agent_order_if_allowed_ignores_equivalent_order_on_other_symbol(
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        order=_make_order(),
+        order=_make_limit_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
-    assert service.calls[0][0] == "submit"
+    assert result.response is not None and result.response.get("status") == 201
+    assert service.calls[0][0] == "submit_bracket"
 
 
 
@@ -268,17 +298,19 @@ def test_submit_agent_order_if_allowed_ignores_reduce_only_exit_orders_when_dedu
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        order=_make_order(),
+        order=_make_limit_order(),
     )
 
-    assert result == SubmitAgentOrderResult({"id": "external-new-order", "status": "submitted"}, None, None)
-    assert service.calls[0][0] == "submit"
+    assert result.response is not None and result.response.get("status") == 201
+    assert service.calls[0][0] == "submit_bracket"
 
 
 
 class FakeProprOrderServiceSubmitReturnsNone(FakeProprOrderService):
-    def submit_pending_order(self, account_id: str, order: Order, symbol: str, **kwargs: object) -> dict | None:
-        self.calls.append(("submit", account_id, {"order": order, "symbol": symbol, **kwargs}))
+    def submit_bracket_entry_with_exits(
+        self, account_id: str, order: Order, symbol: str, **kwargs: object
+    ) -> dict | None:
+        self.calls.append(("submit_bracket", account_id, {"order": order, "symbol": symbol, **kwargs}))
         return None
 
 
@@ -290,11 +322,26 @@ def test_submit_agent_order_if_allowed_records_skip_when_broker_returns_no_respo
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        order=_make_order(),
+        order=_make_limit_order(),
     )
 
-    assert result == SubmitAgentOrderResult(None, "pending order submit returned no confirmation", None)
-    assert service.calls[0][0] == "submit"
+    assert result == SubmitAgentOrderResult(None, "bracket submit returned no confirmation", None)
+    assert service.calls[0][0] == "submit_bracket"
+
+
+def test_submit_agent_order_if_allowed_blocks_stop_entry_with_skip_reason() -> None:
+    service = FakeProprOrderService()
+
+    result = submit_agent_order_if_allowed(
+        order_service=service,
+        account_id="account-1",
+        symbol="EURUSD",
+        state=AgentState(),
+        order=_make_order().model_copy(update={"order_type": OrderType.BUY_STOP}),
+    )
+
+    assert result == SubmitAgentOrderResult(None, "submit blocked: Propr API has no stop entries (limit only)", None)
+    assert service.calls == []
 
 
 
@@ -355,26 +402,37 @@ def test_safe_replace_pending_order_submits_directly_when_no_replacement_is_need
         account_id="account-1",
         symbol="EURUSD",
         state=AgentState(),
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
-    assert result == {"id": "external-new-order", "status": "submitted"}
+    assert result is not None and result.get("status") == 201
+    assert result["data"][0]["orderId"] == "external-new-order"
     assert service.calls == [
-        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+        (
+            "submit_bracket",
+            "account-1",
+            {
+                "order": _make_limit_order(),
+                "symbol": "EURUSD",
+                "symbol_spec": None,
+                "stable_intent_seed": None,
+                "buy_spread": 0.0,
+            },
+        ),
     ]
 
 
 
 def test_safe_replace_pending_order_reuses_existing_equivalent_order_when_pending_order_id_is_missing() -> None:
-    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order()]})
-    state = AgentState(pending_order=_make_order(), pending_order_id=None)
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_limit_entry_order()]})
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id=None)
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
     assert result == {
@@ -388,36 +446,44 @@ def test_safe_replace_pending_order_reuses_existing_equivalent_order_when_pendin
 
 def test_safe_replace_pending_order_submits_fresh_when_pending_order_id_is_missing_and_no_external_order_exists() -> None:
     service = FakeProprOrderService(orders_payload={"data": []})
-    state = AgentState(pending_order=_make_order(), pending_order_id=None)
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id=None)
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
-    assert result == {
-        "cancel": None,
-        "submit": {"id": "external-new-order", "status": "submitted"},
-    }
+    assert result is not None
+    assert result["submit"]["data"][0]["orderId"] == "external-new-order"
     assert service.calls == [
-        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+        (
+            "submit_bracket",
+            "account-1",
+            {
+                "order": _make_limit_order(),
+                "symbol": "EURUSD",
+                "symbol_spec": None,
+                "stable_intent_seed": None,
+                "buy_spread": 0.0,
+            },
+        ),
     ]
 
 
 
 def test_safe_replace_pending_order_reuses_equivalent_external_order_when_local_pending_order_id_is_stale() -> None:
-    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_entry_order(order_id="external-live-order")]})
-    state = AgentState(pending_order=_make_order(), pending_order_id="external-stale-order")
+    service = FakeProprOrderService(orders_payload={"data": [_make_external_pending_limit_entry_order(order_id="external-live-order")]})
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id="external-stale-order")
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
     assert result == {
@@ -431,61 +497,68 @@ def test_safe_replace_pending_order_reuses_equivalent_external_order_when_local_
 
 def test_safe_replace_pending_order_submits_fresh_when_local_pending_order_id_is_stale_and_no_external_order_exists() -> None:
     service = FakeProprOrderService(orders_payload={"data": []})
-    state = AgentState(pending_order=_make_order(), pending_order_id="external-stale-order")
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id="external-stale-order")
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
-    assert result == {
-        "cancel": None,
-        "submit": {"id": "external-new-order", "status": "submitted"},
-    }
+    assert result is not None
+    assert result["submit"]["data"][0]["orderId"] == "external-new-order"
     assert service.calls == [
-        ("submit", "account-1", {"order": _make_order(), "symbol": "EURUSD", "stable_intent_seed": None}),
+        (
+            "submit_bracket",
+            "account-1",
+            {
+                "order": _make_limit_order(),
+                "symbol": "EURUSD",
+                "symbol_spec": None,
+                "stable_intent_seed": None,
+                "buy_spread": 0.0,
+            },
+        ),
     ]
 
 
 
 def test_safe_replace_pending_order_uses_state_pending_order_id_when_external_order_still_exists_and_changed() -> None:
     service = FakeProprOrderService(
-        orders_payload={"data": [_make_external_changed_pending_entry_order(order_id="external-old-order")]}
+        orders_payload={"data": [_make_external_changed_pending_limit_entry_order(order_id="external-old-order")]}
     )
-    state = AgentState(pending_order=_make_order(), pending_order_id="external-old-order")
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id="external-old-order")
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
-    assert result == {
-        "cancel": {"id": "external-old-order", "status": "cancelled"},
-        "submit": {"id": "external-new-order", "status": "submitted"},
-    }
+    assert result["cancel"] == {"id": "external-old-order", "status": "cancelled"}
+    assert result["submit"]["status"] == 201
+    assert result["submit"]["data"][0]["orderId"] == "external-new-order"
     assert service.calls[0] == ("cancel", "account-1", "external-old-order")
-    assert service.calls[1][0] == "submit"
+    assert service.calls[1][0] == "submit_bracket"
 
 
 
 def test_safe_replace_pending_order_reuses_state_pending_order_id_when_external_order_still_exists_and_is_unchanged() -> None:
     service = FakeProprOrderService(
-        orders_payload={"data": [_make_external_pending_entry_order(order_id="external-old-order")]}
+        orders_payload={"data": [_make_external_pending_limit_entry_order(order_id="external-old-order")]}
     )
-    state = AgentState(pending_order=_make_order(), pending_order_id="external-old-order")
+    state = AgentState(pending_order=_make_limit_order(), pending_order_id="external-old-order")
 
     result = safe_replace_pending_order(
         order_service=service,
         account_id="account-1",
         symbol="EURUSD",
         state=state,
-        new_order=_make_order(),
+        new_order=_make_limit_order(),
     )
 
     assert result == {

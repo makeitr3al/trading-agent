@@ -106,8 +106,8 @@ def _print_live_pending_order(
         print(f"  {k}: {v}")
     if pending.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
         print(
-            "Note: standalone stop entry may be rejected on Propr beta "
-            "(see trading_app _beta_blocks_standalone_entry_order)."
+            "Note: a single-order conditional entry may be rejected on Propr beta (13056); "
+            "run_app_cycle uses bracket batch submit (orderGroupId) for real execution."
         )
 
 

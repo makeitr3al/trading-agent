@@ -314,31 +314,27 @@ def test_run_strategy_cycle_closes_active_countertrend_trade_when_middle_band_is
     assert result.close_active_trade is True
 
 
-def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend_trade_updates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = StrategyConfig()
-    candles = _make_default_candles()
-    active_trade = Trade(
-        trade_type=TradeType.COUNTERTREND,
-        direction=TradeDirection.SHORT,
-        entry=100.0,
-        stop_loss=110.0,
-        take_profit=95.0,
-    )
-    captured: dict[str, float] = {}
-
-    bollinger_df = pd.DataFrame(
+def _bollinger_df_for_countertrend_mbb_test(candles_len: int) -> pd.DataFrame:
+    """Full-length mock: last closed bar mBB is 97.0, forming/current bar mBB is 101.0."""
+    return pd.DataFrame(
         {
-            "bb_upper": [110.0] * len(candles),
-            "bb_middle": [100.0] * (len(candles) - 2) + [97.0, 101.0],
-            "bb_lower": [90.0] * len(candles),
+            "bb_upper": [110.0] * candles_len,
+            "bb_middle": [100.0] * (candles_len - 2) + [97.0, 101.0],
+            "bb_lower": [90.0] * candles_len,
         }
     )
 
+
+def _patch_countertrend_mbb_cycle(monkeypatch: pytest.MonkeyPatch, candles: list[Candle], captured: dict[str, float]) -> None:
+    full_df = _bollinger_df_for_countertrend_mbb_test(len(candles))
+
+    def mock_compute_bollinger(closes: pd.Series, period: int, std_dev: float) -> pd.DataFrame:
+        n = len(closes)
+        return full_df.iloc[:n].reset_index(drop=True)
+
     monkeypatch.setattr(
         "strategy.strategy_runner.compute_bollinger_bands",
-        lambda closes, period, std_dev: bollinger_df,
+        mock_compute_bollinger,
     )
     monkeypatch.setattr(
         "strategy.strategy_runner.detect_trend_signal",
@@ -356,6 +352,55 @@ def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend
         ),
     )
 
+
+def test_run_strategy_cycle_countertrend_tp_uses_last_closed_mbb_when_last_bar_is_forming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """signal_candles excludes forming bar; TP mBB must match bollinger_sig last row (97.0)."""
+    config = StrategyConfig()
+    candles = _make_default_candles()
+    active_trade = Trade(
+        trade_type=TradeType.COUNTERTREND,
+        direction=TradeDirection.SHORT,
+        entry=100.0,
+        stop_loss=110.0,
+        take_profit=95.0,
+    )
+    captured: dict[str, float] = {}
+    _patch_countertrend_mbb_cycle(monkeypatch, candles, captured)
+
+    inferred_interval = candles[-1].timestamp - candles[-2].timestamp
+    now = candles[-1].timestamp + (inferred_interval / 2)
+
+    result = run_strategy_cycle(
+        candles=candles,
+        config=config,
+        account_balance=10000.0,
+        active_trade=active_trade,
+        now=now,
+    )
+
+    assert captured["latest_bb_middle"] == pytest.approx(97.0)
+    assert result.updated_trade is not None
+    assert result.updated_trade.take_profit == pytest.approx(97.0)
+
+
+def test_run_strategy_cycle_countertrend_tp_uses_last_closed_mbb_when_last_bar_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When last raw bar is closed, bollinger_sig includes it; TP mBB must be iloc[-1] (101.0), not iloc[-2]."""
+    config = StrategyConfig()
+    candles = _make_default_candles()
+    active_trade = Trade(
+        trade_type=TradeType.COUNTERTREND,
+        direction=TradeDirection.SHORT,
+        entry=100.0,
+        stop_loss=110.0,
+        take_profit=95.0,
+    )
+    captured: dict[str, float] = {}
+    _patch_countertrend_mbb_cycle(monkeypatch, candles, captured)
+
     result = run_strategy_cycle(
         candles=candles,
         config=config,
@@ -363,7 +408,7 @@ def test_run_strategy_cycle_uses_last_closed_middle_band_for_active_countertrend
         active_trade=active_trade,
     )
 
-    assert captured["latest_bb_middle"] == pytest.approx(97.0)
+    assert captured["latest_bb_middle"] == pytest.approx(101.0)
     assert result.updated_trade is not None
-    assert result.updated_trade.take_profit == pytest.approx(97.0)
+    assert result.updated_trade.take_profit == pytest.approx(101.0)
 

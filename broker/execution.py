@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from models.agent_state import AgentState
-from models.order import Order, OrderStatus
+from models.order import Order, OrderStatus, OrderType
+from models.symbol_spec import SymbolSpec
 from models.trade import Trade
 from broker.order_service import (
     ProprOrderService,
@@ -372,6 +373,9 @@ def submit_agent_order_if_allowed(
     state: AgentState,
     order: Order | None,
     stable_intent_seed: str | None = None,
+    *,
+    symbol_spec: SymbolSpec | None = None,
+    buy_spread: float = 0.0,
 ) -> SubmitAgentOrderResult:
     blocked = _submit_agent_order_skip_reason(state, order)
     if blocked is not None:
@@ -386,11 +390,23 @@ def submit_agent_order_if_allowed(
     if existing_order_id is not None:
         return SubmitAgentOrderResult(None, None, existing_order_id)
 
-    broker_response = order_service.submit_pending_order(
-        account_id, order, symbol, stable_intent_seed=stable_intent_seed
+    assert order is not None
+    if order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+        return SubmitAgentOrderResult(
+            None,
+            "submit blocked: Propr API has no stop entries (limit only)",
+            None,
+        )
+    broker_response = order_service.submit_bracket_entry_with_exits(
+        account_id,
+        order,
+        symbol,
+        symbol_spec=symbol_spec,
+        stable_intent_seed=stable_intent_seed,
+        buy_spread=buy_spread,
     )
     if broker_response is None:
-        return SubmitAgentOrderResult(None, "pending order submit returned no confirmation", None)
+        return SubmitAgentOrderResult(None, "bracket submit returned no confirmation", None)
     return SubmitAgentOrderResult(broker_response, None, None)
 
 
@@ -436,11 +452,21 @@ def safe_replace_pending_order(
     state: AgentState,
     new_order: Order | None,
     stable_intent_seed: str | None = None,
+    *,
+    symbol_spec: SymbolSpec | None = None,
+    buy_spread: float = 0.0,
 ) -> dict | None:
     if not should_cancel_existing_pending_order(state, new_order):
         if new_order is not None and should_submit_order(state, new_order):
-            return order_service.submit_pending_order(
-                account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+            if new_order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+                return {"status": "skipped", "reason": "submit blocked: Propr API has no stop entries (limit only)"}
+            return order_service.submit_bracket_entry_with_exits(
+                account_id,
+                new_order,
+                symbol,
+                symbol_spec=symbol_spec,
+                stable_intent_seed=stable_intent_seed,
+                buy_spread=buy_spread,
             )
         return None
 
@@ -461,8 +487,18 @@ def safe_replace_pending_order(
                 return _build_reused_pending_order_response(existing_order_id)
 
         cancel_response = order_service.cancel_order(account_id, state.pending_order_id)
-        submit_response = order_service.submit_pending_order(
-            account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+        if new_order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+            return {
+                "cancel": cancel_response,
+                "submit": {"status": "skipped", "reason": "submit blocked: Propr API has no stop entries (limit only)"},
+            }
+        submit_response = order_service.submit_bracket_entry_with_exits(
+            account_id,
+            new_order,
+            symbol,
+            symbol_spec=symbol_spec,
+            stable_intent_seed=stable_intent_seed,
+            buy_spread=buy_spread,
         )
         return {
             "cancel": cancel_response,
@@ -478,8 +514,18 @@ def safe_replace_pending_order(
     if equivalent_order_id is not None:
         return _build_reused_pending_order_response(equivalent_order_id)
 
-    submit_response = order_service.submit_pending_order(
-        account_id, new_order, symbol, stable_intent_seed=stable_intent_seed
+    if new_order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+        return {
+            "cancel": None,
+            "submit": {"status": "skipped", "reason": "submit blocked: Propr API has no stop entries (limit only)"},
+        }
+    submit_response = order_service.submit_bracket_entry_with_exits(
+        account_id,
+        new_order,
+        symbol,
+        symbol_spec=symbol_spec,
+        stable_intent_seed=stable_intent_seed,
+        buy_spread=buy_spread,
     )
     return {
         "cancel": None,
