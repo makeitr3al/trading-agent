@@ -97,6 +97,14 @@ class ArmedMarketsSnapshot:
     markets: list[ArmedMarketEntry]
 
 
+def _next_daily_scan_dt(now_utc: datetime, schedule_time_hhmm: str, last_scan_date: date | None) -> datetime:
+    target_time = datetime.strptime(schedule_time_hhmm, "%H:%M").time()
+    candidate = datetime.combine(now_utc.date(), target_time, tzinfo=timezone.utc)
+    if last_scan_date == now_utc.date() or now_utc >= candidate:
+        candidate = datetime.combine(now_utc.date() + timedelta(days=1), target_time, tzinfo=timezone.utc)
+    return candidate
+
+
 def _load_armed_snapshot() -> ArmedMarketsSnapshot:
     payload = load_armed_markets()
     scan_ts, ttl_hours, markets = parse_armed_markets(payload)
@@ -178,9 +186,17 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
 
 
 def _should_remove_from_armed(result: Any) -> bool:
+    """
+    Keep an armed market unless we have a concrete reason to disarm it.
+
+    Important: During fast polling on the same signal bar (1d), strategy evaluation can
+    temporarily yield a state without pending_order even though the stop-intent should
+    remain armed until bar close / next daily scan. Therefore, pending_order==None is
+    *not* a disarm condition by itself.
+    """
     post_cycle_state = getattr(result, "post_cycle_state", None)
     if post_cycle_state is None:
-        return True
+        return False
 
     if getattr(post_cycle_state, "active_trade", None) is not None:
         return True
@@ -190,12 +206,34 @@ def _should_remove_from_armed(result: Any) -> bool:
 
     pending = getattr(post_cycle_state, "pending_order", None)
     if pending is None:
-        return True
+        return False
 
     if getattr(pending, "order_type", None) not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
         return True
 
     return False
+
+
+def _merge_preserving_stop_pending(previous: AgentState, updated: AgentState) -> AgentState:
+    """
+    If a poll tick did not submit but the updated state drops the stop-pending intent,
+    keep the previous stop-pending order so the market remains armed until it triggers
+    or expires.
+    """
+    prev_pending = previous.pending_order
+    if (
+        prev_pending is not None
+        and prev_pending.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
+        and updated.pending_order is None
+        and not updated.pending_order_id
+        and updated.active_trade is None
+    ):
+        updated.pending_order = prev_pending
+        if previous.pending_entry_signal_bar_ts and not updated.pending_entry_signal_bar_ts:
+            updated.pending_entry_signal_bar_ts = previous.pending_entry_signal_bar_ts
+        if previous.last_signal_type and not updated.last_signal_type:
+            updated.last_signal_type = previous.last_signal_type
+    return updated
 
 
 def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> ArmedMarketsSnapshot:
@@ -271,7 +309,9 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
         post_cycle_state = getattr(result, "post_cycle_state", None)
         if post_cycle_state is not None:
             try:
-                save_agent_state(entry.symbol, AgentState.model_validate(post_cycle_state))
+                updated_state = AgentState.model_validate(post_cycle_state)
+                merged_state = _merge_preserving_stop_pending(previous_state, updated_state)
+                save_agent_state(entry.symbol, merged_state)
             except Exception:
                 pass
 
@@ -309,7 +349,8 @@ def main() -> None:
 
     while not _shutdown_requested:
         now_utc = datetime.now(timezone.utc)
-        next_scheduled_scan_at = f"{now_utc.date().isoformat()}T{schedule_time}:00+00:00"
+        next_scan_dt = _next_daily_scan_dt(now_utc, schedule_time, last_scan_date)
+        next_scheduled_scan_at = next_scan_dt.isoformat()
         _write_heartbeat(
             runner_state="daemon_polling",
             armed_count=len(snapshot.markets),
@@ -327,9 +368,27 @@ def main() -> None:
             snapshot = run_full_scan_cycle(now_utc=now_utc)
             last_scan_date = now_utc.date()
 
-        print(f"Polling tick: armed={len(snapshot.markets)}")
-        snapshot = poll_armed_markets(snapshot, now_utc=now_utc)
-        sleep(poll_interval)
+        if snapshot.markets:
+            print(f"Polling tick: armed={len(snapshot.markets)}")
+            snapshot = poll_armed_markets(snapshot, now_utc=now_utc)
+            sleep(poll_interval)
+            continue
+
+        # No armed markets: go idle until next scheduled scan time.
+        seconds_to_scan = max(0.0, (next_scan_dt - now_utc).total_seconds())
+        print(f"Polling idle: armed=0; sleeping_until_scan_s={int(seconds_to_scan)}")
+        _write_heartbeat(
+            runner_state="daemon_idle",
+            armed_count=0,
+            last_scan_at=snapshot.scan_ts,
+            next_scheduled_scan_at=next_scheduled_scan_at,
+        )
+        # Sleep in chunks so SIGTERM is handled quickly.
+        remaining = seconds_to_scan
+        while remaining > 0 and not _shutdown_requested:
+            chunk = min(300.0, remaining)
+            sleep(chunk)
+            remaining -= chunk
 
     _write_heartbeat(
         runner_state="stopped",
