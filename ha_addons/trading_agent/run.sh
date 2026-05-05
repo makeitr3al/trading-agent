@@ -144,6 +144,7 @@ for env, env_targets in targets_by_env.items():
     if not p.exists():
         continue
     kept = []
+    deleted = 0
     for line in p.read_text("utf-8").splitlines():
         if not line.strip():
             continue
@@ -152,16 +153,26 @@ for env, env_targets in targets_by_env.items():
         except Exception:
             kept.append(line)
             continue
-        if not any(
-            e.get("entry_timestamp") == t.get("entry_timestamp")
-            and e.get("symbol") == t.get("symbol")
-            and e.get("entry_type") == t.get("entry_type")
-            and e.get("status") == t.get("status")
-            and str(e.get("environment") or "").strip().lower() == str(t.get("environment") or "").strip().lower()
-            for t in env_targets
-        ):
+        def _match_target(t):
+            target_ts = t.get("entry_timestamp")
+            if target_ts is None:
+                return False
+            ts_match = (e.get("executed_at") == target_ts) or (e.get("entry_timestamp") == target_ts)
+            if not ts_match:
+                return False
+            return (
+                e.get("symbol") == t.get("symbol")
+                and e.get("entry_type") == t.get("entry_type")
+                and e.get("status") == t.get("status")
+                and str(e.get("environment") or "").strip().lower() == str(t.get("environment") or "").strip().lower()
+            )
+
+        if any(_match_target(t) for t in env_targets):
+            deleted += 1
+        else:
             kept.append(line)
     p.write_text("\n".join(kept) + "\n", "utf-8")
+    print(f"[delete_journal_entries] env={env} deleted={deleted} kept={len(kept)}")
 DELETEPY
 
 # Also copy panel assets to /share for host-side sync (proven path)

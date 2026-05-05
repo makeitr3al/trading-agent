@@ -25,6 +25,7 @@ def test_build_agent_state_from_propr_data_returns_state_with_pending_order_only
         orders_payload={
             "data": [
                 {
+                    "symbol": "BTC/USDC",
                     "side": "buy",
                     "type": "stop_limit",
                     "price": 110,
@@ -35,6 +36,7 @@ def test_build_agent_state_from_propr_data_returns_state_with_pending_order_only
             ]
         },
         positions_payload={"data": []},
+        symbol="BTC/USDC",
     )
 
     assert state.pending_order is not None
@@ -47,6 +49,7 @@ def test_build_agent_state_from_propr_data_returns_state_with_active_trade_only(
         positions_payload={
             "data": [
                 {
+                    "symbol": "BTC/USDC",
                     "status": "open",
                     "positionSide": "long",
                     "entryPrice": "100.5",
@@ -57,6 +60,7 @@ def test_build_agent_state_from_propr_data_returns_state_with_active_trade_only(
                 }
             ]
         },
+        symbol="BTC/USDC",
     )
 
     assert state.active_trade is not None
@@ -71,6 +75,7 @@ def test_build_agent_state_from_propr_data_tracks_exit_order_ids_separately() ->
             "data": [
                 {
                     "orderId": "tp-order-1",
+                    "symbol": "BTC/USDC",
                     "type": "take_profit_limit",
                     "side": "sell",
                     "positionId": "position-123",
@@ -79,6 +84,7 @@ def test_build_agent_state_from_propr_data_tracks_exit_order_ids_separately() ->
                 },
                 {
                     "orderId": "sl-order-1",
+                    "symbol": "BTC/USDC",
                     "type": "stop_market",
                     "side": "sell",
                     "positionId": "position-123",
@@ -90,6 +96,7 @@ def test_build_agent_state_from_propr_data_tracks_exit_order_ids_separately() ->
         positions_payload={
             "data": [
                 {
+                    "symbol": "BTC/USDC",
                     "status": "open",
                     "positionSide": "long",
                     "entryPrice": "100.5",
@@ -100,6 +107,7 @@ def test_build_agent_state_from_propr_data_tracks_exit_order_ids_separately() ->
                 }
             ]
         },
+        symbol="BTC/USDC",
     )
 
     assert state.pending_order is None
@@ -136,6 +144,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
             orders_payload={
                 "data": [
                     {
+                        "symbol": "BTC/USDC",
                         "side": "buy",
                         "type": "stop_limit",
                         "price": 110,
@@ -144,6 +153,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
                         "status": "open",
                     },
                     {
+                        "symbol": "BTC/USDC",
                         "side": "sell",
                         "type": "limit",
                         "price": 120,
@@ -154,6 +164,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
                 ]
             },
             positions_payload={"data": []},
+            symbol="BTC/USDC",
         )
 
 
@@ -164,6 +175,7 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
             positions_payload={
                 "data": [
                     {
+                        "symbol": "BTC/USDC",
                         "status": "open",
                         "positionSide": "long",
                         "entryPrice": "100.5",
@@ -173,15 +185,18 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
                         "positionId": "position-123",
                     },
                     {
+                        "symbol": "BTC/USDC",
                         "status": "open",
                         "positionSide": "short",
                         "entry": 100,
                         "stopLoss": 105,
                         "takeProfit": 90,
                         "quantity": "2",
+                        "positionId": "position-456",
                     },
                 ]
             },
+            symbol="BTC/USDC",
         )
 
 
@@ -587,6 +602,105 @@ def test_build_agent_state_from_propr_data_ignores_market_orders() -> None:
     assert state.pending_order is None
 
 
+def test_build_agent_state_from_propr_data_allows_multiple_open_positions_when_symbol_is_none() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "btc-position",
+                    "unrealizedPnl": "10.0",
+                },
+                {
+                    "symbol": "ETH/USDC",
+                    "status": "open",
+                    "positionSide": "short",
+                    "entry": 200,
+                    "stopLoss": 210,
+                    "takeProfit": 180,
+                    "quantity": "2",
+                    "positionId": "eth-position",
+                    "unrealizedPnl": "-2.5",
+                },
+            ]
+        },
+    )
+    assert state.active_trade is None
+    assert state.pending_order is None
+    assert state.pending_order_id is None
+    assert state.stop_loss_order_id is None
+    assert state.take_profit_order_id is None
+    assert state.account_open_positions_count == 2
+    assert state.account_unrealized_pnl == 7.5
+
+
+def test_build_agent_state_from_propr_data_allows_multiple_pending_entries_when_symbol_is_none() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "orderId": "btc-order",
+                    "side": "buy",
+                    "type": "stop_limit",
+                    "price": 110,
+                    "stopLoss": 100,
+                    "takeProfit": 130,
+                    "status": "open",
+                },
+                {
+                    "symbol": "ETH/USDC",
+                    "orderId": "eth-order",
+                    "side": "sell",
+                    "type": "limit",
+                    "price": 200,
+                    "stopLoss": 210,
+                    "takeProfit": 180,
+                    "status": "open",
+                },
+            ]
+        },
+        positions_payload={"data": []},
+    )
+    assert state.active_trade is None
+    assert state.pending_order is None
+    assert state.pending_order_id is None
+    assert state.stop_loss_order_id is None
+    assert state.take_profit_order_id is None
+    assert state.account_open_entry_orders_count == 2
+
+
+def test_build_agent_state_from_propr_data_preserves_memory_fields_in_observability_mode() -> None:
+    previous_state = AgentState(
+        last_decision_action="NO_ACTION",
+        last_signal_type="TREND_LONG",
+        last_regime="bullish",
+        trend_signal_consumed_in_regime=True,
+        last_cycle_timestamp="2026-01-01T10:00:00",
+    )
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={"data": []},
+        previous_state=previous_state,
+        symbol=None,
+    )
+    assert state.last_decision_action == "NO_ACTION"
+    assert state.last_signal_type == "TREND_LONG"
+    assert state.last_regime == "bullish"
+    assert state.trend_signal_consumed_in_regime is True
+    assert state.last_cycle_timestamp == "2026-01-01T10:00:00"
+    assert state.active_trade is None
+    assert state.pending_order is None
+    assert state.pending_order_id is None
+
+
 def test_build_agent_state_omits_partial_fill_pending_when_open_position_exists_for_symbol() -> None:
     state = build_agent_state_from_propr_data(
         orders_payload={
@@ -632,6 +746,7 @@ def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
         "data": [
             {
                 "orderId": "sl-1",
+                "symbol": "BTC/USDC",
                 "type": "stop_market",
                 "side": "sell",
                 "positionId": "pos-1",
@@ -641,6 +756,7 @@ def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
             },
             {
                 "orderId": "tp-1",
+                "symbol": "BTC/USDC",
                 "type": "take_profit_limit",
                 "side": "sell",
                 "positionId": "pos-1",
@@ -653,6 +769,7 @@ def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
     positions = {
         "data": [
             {
+                "symbol": "BTC/USDC",
                 "status": "open",
                 "positionSide": "long",
                 "entryPrice": "100",
@@ -662,7 +779,7 @@ def test_enrich_positions_payload_fills_sl_tp_from_exit_orders() -> None:
         ]
     }
     enriched = enrich_positions_payload_with_exit_levels_from_orders(orders, positions)
-    state = build_agent_state_from_propr_data(orders_payload=orders, positions_payload=enriched)
+    state = build_agent_state_from_propr_data(orders_payload=orders, positions_payload=enriched, symbol="BTC/USDC")
     assert state.account_open_positions_count == 1
     assert state.active_trade is not None
     assert state.active_trade.stop_loss == pytest.approx(88.5)

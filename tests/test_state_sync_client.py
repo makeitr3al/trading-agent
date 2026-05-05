@@ -32,6 +32,7 @@ def test_sync_sets_pending_order_id_when_external_order_id_exists() -> None:
             "data": [
                 {
                     "orderId": "external-123",
+                    "symbol": "BTC/USDC",
                     "side": "buy",
                     "type": "stop_limit",
                     "price": 110,
@@ -44,7 +45,7 @@ def test_sync_sets_pending_order_id_when_external_order_id_exists() -> None:
         positions_payload={"data": []},
     )
 
-    state = sync_agent_state_from_propr(client, "account-1")
+    state = sync_agent_state_from_propr(client, "account-1", symbol="BTC/USDC")
 
     assert state.pending_order is not None
     assert state.pending_order_id == "external-123"
@@ -81,6 +82,7 @@ def test_sync_preserves_strategic_memory_fields_while_replacing_pending_order_an
             "data": [
                 {
                     "orderId": "new-order-id",
+                    "symbol": "BTC/USDC",
                     "side": "sell",
                     "type": "limit",
                     "price": 120,
@@ -94,7 +96,7 @@ def test_sync_preserves_strategic_memory_fields_while_replacing_pending_order_an
         positions_payload={"data": []},
     )
 
-    state = sync_agent_state_from_propr(client, "account-1", previous_state)
+    state = sync_agent_state_from_propr(client, "account-1", previous_state, symbol="BTC/USDC")
 
     assert state.pending_order is not None
     assert state.pending_order.signal_source == "trend_short"

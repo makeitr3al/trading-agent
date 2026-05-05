@@ -126,6 +126,13 @@ Hinweis zur **Offene Positionen** Karte (Fallback auf Live-Status): Wenn keine J
 - Entry: `entry_price`, `entryPrice`, `entry`
 - Size: `position_size`, `positionSize`, `size`
 
+### Journal-Delete (Admin-Panel)
+
+Das Panel kann Order-/Trade-Zeilen aus dem Journal loeschen (Service `shell_command.trading_agent_delete_journal_entries_haos` → `/share/trading-agent-data/delete_journal_entries.py`).
+
+- **Matching-Regel**: Ein Delete-Target matcht eine Journal-Zeile nur, wenn `symbol`, `entry_type`, `status`, `environment` passen und der uebergebene Timestamp gegen **`executed_at` oder `entry_timestamp`** matcht.
+  *(Das Panel verwendet als Row-Timestamp `executed_at` und faellt sonst auf `entry_timestamp` zurueck.)*
+- **Log-Ausgabe**: Pro Umgebung wird eine Zusammenfassung geloggt: `[delete_journal_entries] env=<env> deleted=<n> kept=<n>`.
 ### Viewer-Umgebung vs. Operator-Umgebung
 
 Wichtig: Im Admin-Panel gibt es **zwei** Umgebungs-Begriffe:

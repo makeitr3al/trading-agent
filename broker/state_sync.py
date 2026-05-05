@@ -509,16 +509,34 @@ def build_agent_state_from_propr_data(
                 }
             continue
 
-    if len(valid_order_entries) > 1:
+    if normalized_symbol is not None and len(valid_order_entries) > 1:
         raise ValueError(
             f"Multiple pending entry orders found in Propr state: "
             f"order_ids=[{_format_conflict_ids([order_id for _, order_id in valid_order_entries])}]"
         )
-    if len(mapped_positions) > 1:
+    if normalized_symbol is not None and len(mapped_positions) > 1:
         raise ValueError(
             f"Multiple open positions found in Propr state: "
             f"position_ids=[{_format_conflict_ids([position.position_id for position in mapped_positions])}]"
         )
+
+    account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
+    account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
+
+    if normalized_symbol is None:
+        update = {
+            "active_trade": None,
+            "pending_order": None,
+            "pending_order_id": None,
+            "stop_loss_order_id": None,
+            "take_profit_order_id": None,
+            "account_open_entry_orders_count": len(all_valid_order_entries),
+            "account_open_positions_count": account_open_positions_count,
+            "account_unrealized_pnl": account_unrealized_pnl,
+        }
+        if previous_state is None:
+            return AgentState(**update)
+        return previous_state.model_copy(update=update)
 
     active_trade = _resolve_active_trade_with_previous_fallback(
         mapped_positions,
@@ -527,9 +545,6 @@ def build_agent_state_from_propr_data(
         normalized_symbol,
     )
     active_position_id = active_trade.position_id if active_trade is not None else None
-
-    account_open_positions_count = _extract_account_open_positions_count_from_payload(positions_payload)
-    account_unrealized_pnl = _extract_account_unrealized_pnl_from_payload(positions_payload)
 
     try:
         stop_loss_order_ids = _resolve_exit_order_ids_for_active_position("stop_loss", stop_loss_exit_entries, active_position_id)
