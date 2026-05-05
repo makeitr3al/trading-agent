@@ -3,7 +3,13 @@
 ## Zielbild
 
 Dieses Add-on ist der einzige Runtime-Wrapper fuer den Trading Agent auf Home Assistant OS.
-Home Assistant uebernimmt UI und Scheduling, das Add-on fuehrt immer genau einen Lauf aus und beendet sich danach wieder.
+Home Assistant uebernimmt UI und Scheduling.
+
+- **Default:** Das Add-on fuehrt genau **einen** Lauf aus und beendet sich danach wieder (one-shot).
+- **Trigger-Polling (optional, `mode=scharf`):** Wenn `trigger_polling_enabled=true` in der Operator-Konfiguration aktiv ist, startet das Add-on einen **Long-Running Daemon**:
+  - taeglich um `schedule_time` (Default `07:00` UTC) ein Vollscan
+  - danach alle 60s nur die „armed“ Maerkte pollen, deren `pending_order` ein Stop-Intent (`BUY_STOP`/`SELL_STOP`) ist
+  - bei Trigger-Touch wird lokal ein Market-Bracket-Entry submitted (siehe unten)
 
 ## Architektur
 
@@ -22,6 +28,8 @@ Das Add-on liest und schreibt unter:
 - `/share/trading-agent-data/test_suite_status.json`
 - `/share/trading-agent-data/test_suite_last.log`
 - `/share/trading-agent-data/ha_save_operator_config.py` (wird beim Add-on-Start aus dem Image nach `/share/trading-agent-data/` kopiert; wird von `shell_command.trading_agent_save_operator_config_haos` genutzt)
+- `/share/trading-agent-data/armed_stop_markets.json` (nur bei Trigger-Polling; Liste der armed Stop-Pending-Maerkte aus dem letzten Scan)
+- `/share/trading-agent-data/agent_state_<symbol>.json` (nur bei Trigger-Polling; per-Markt `AgentState`, damit `pending_order` ueber Poll-Ticks und Restarts erhalten bleibt)
 
 ## Add-on-Upgrade / HA-Paket (Checkliste)
 
@@ -101,6 +109,16 @@ Die taegliche Bedienung passiert ueber Helpers, Scripts und Automationen in HA:
 Das Add-on schedult nichts selbst.
 Home Assistant startet das Add-on zur gewuenschten Zeit per Automation. Laut offizieller HA-Doku kann ein Time-Trigger direkt mit einem `input_datetime`-Helper arbeiten.
 Quelle: https://www.home-assistant.io/docs/automation/trigger/
+
+### Trigger-Polling (Long-Running, scharf-only)
+
+Wenn `trigger_polling_enabled=true` und `mode=scharf`, bleibt das Add-on **dauerhaft** aktiv.
+
+- **Scan:** taeglich um `schedule_time` (Helper im Panel), entspricht `OPERATOR_SCHEDULE_TIME`.
+- **Polling:** alle 60 Sekunden (`RUNNER_INTERVAL_SECONDS`, Default 60) nur die „armed“ Stop-Intents.
+- **Armed-Definition:** Ein Markt wird „armed“, wenn nach dem Dry-Run ein `pending_order` existiert und dessen `order_type` in `{BUY_STOP, SELL_STOP}` ist — egal ob Trend oder Gegentrend.
+- **Ausfuehrung bei Touch:** `app/trading_app._phase_pending_trigger` submitted beim Touch des Trigger-Preises einen **Market-Bracket** (`market` + `stop_market` + `take_profit_limit`). Das umgeht Propr Error **13056** (Stop-Entry nicht erlaubt).
+- **Stop:** Home Assistant stoppt das Add-on (SIGTERM). Der Daemon beendet sich sauber und schreibt weiterhin `runtime_status_<env>.json` Heartbeats.
 
 ## HA Helper Sync (Scripts + Automation)
 

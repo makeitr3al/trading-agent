@@ -295,7 +295,12 @@ case "$OPERATOR_MODE" in
         export SCAN_ALLOW_SUBMIT="YES"
         export MANUAL_WRITE_CONFIRM="NO"
         export MANUAL_ORDER_TYPES_CONFIRM="NO"
-        log_cmd_lines python scripts/multi_market_scan.py || run_exit_code=$?
+        if [[ "${OPERATOR_TRIGGER_POLLING_ENABLED:-NO}" == "YES" ]]; then
+            bashio::log.info "Trigger polling enabled: starting long-running daemon"
+            log_cmd_lines python scripts/trigger_polling_daemon.py || run_exit_code=$?
+        else
+            log_cmd_lines python scripts/multi_market_scan.py || run_exit_code=$?
+        fi
         ;;
     preflight)
         export SCAN_ALLOW_SUBMIT="NO"

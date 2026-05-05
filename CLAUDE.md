@@ -171,6 +171,18 @@ Ausgabe: `artifacts/backtests/daily_universe_<UTC>/summary.csv`, optional `…/<
 
 ---
 
+## Home Assistant Add-on: Trigger-Polling (Long-Running)
+
+Wenn das HA Add-on im `mode=scharf` laeuft und `trigger_polling_enabled=true` ist (Operator-Config), startet `ha_addons/trading_agent/run.sh` statt dem one-shot Scan einen Daemon:
+
+- **Entrypoint:** `scripts/trigger_polling_daemon.py`
+- **Scan:** taeglich um `OPERATOR_SCHEDULE_TIME` (Default `07:00` UTC) ein Vollscan (Dry-Run + Execute non-stop Pendings).
+- **Armed Polling:** alle 60s nur Maerkte mit Stop-Pending-Intent (`pending_order.order_type ∈ {BUY_STOP, SELL_STOP}`), egal ob Trend oder Gegentrend.
+- **Persistenz:** `/share/trading-agent-data/armed_stop_markets.json` + `agent_state_<symbol>.json` (pro Markt), damit `pending_order` zwischen Poll-Ticks und Restarts erhalten bleibt.
+- **Heartbeat:** schreibt in `RUNNER_STATUS_PATH` (`runtime_status_<env>.json`) regelmaessig `runner_state`, `armed_markets_count`, `last_poll_tick_at`, `last_scan_at`.
+
+---
+
 ## Multi-Market-Scan
 
 - `SCAN_MARKETS=BTC,ETH,SOL` — einfache Ticker (neues Format)
