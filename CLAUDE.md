@@ -100,6 +100,8 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 | `TRADING_AGENT_LIVE_STATUS_PATH` / `OPERATOR_LIVE_STATUS_PATH` | optional, Ziel für `live_status.json` (REST-Sync, WS-Daemon, HA-Panel) |
 | `PROPR_REQUIRE_HEALTHY_CORE` | `YES`/`NO` für Core-Health-Guard |
 | `PROPR_STABLE_INTENT_ID` | optional `YES`: Pending-Entry-Submits nutzen deterministisches `intentId` aus Seed (`build_order_submission_preview`); nur nach Abgleich mit Propr-Idempotenz-Verhalten aktivieren |
+| `TREND_STOP_TRIGGER_MODE` | `last_candle` oder `disabled` (Default: `last_candle`); bei Touch des Trigger-Preises im letzten Candle wird ein Market-Bracket gesendet statt resting Stop |
+| `JOURNAL_BAR_DEDUPE` | `YES`/`NO` (Default: `YES`); dedupliziert Journal-Emissionen innerhalb derselben Signal-Bar bei Interval-Runs |
 
 ---
 
@@ -118,6 +120,12 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 - **Daily Universe Backtest** (Hyperliquid 1D, offline, kein Submit): `scripts/backtest_daily_universe.py` — siehe Abschnitt **Daily Universe Backtest** unten
 
 **Propr-API (Entry-Orders):** In der Batching-Logik gilt **nur** `market` oder `limit` als **Entry-Order**. Stop-Entries (`BUY_STOP`/`SELL_STOP` → API `stop_limit`) sind **conditional orders** und werden ohne `positionId` bzw. ohne Entry-Order in derselben `orderGroupId` mit `conditional_order_requires_position_or_group` (HTTP 400, Code 13056) abgelehnt. Der Bot blockiert solche Stop-Entry-Submits deshalb **vorab** in `broker/execution.py` mit einem klaren `skip_reason`.
+
+**Workaround (Trend-Stop-Trigger):** Trend-Signale erzeugen intern weiterhin `BUY_STOP`/`SELL_STOP` als `pending_order` (Strategie-Semantik bleibt gleich). Live wird der Stop aber **nicht** als resting Stop-Order an Propr gesendet. Stattdessen: Wenn die Hyperliquid-Quelle im laufenden Bar die Trigger-Price berührt (Last-Candle `high/low`), sendet `app/trading_app._phase_pending_trigger` einen **Market-Bracket** (Entry `market` + SL `stop_market` + TP `take_profit_limit`) als Batch. Das vermeidet Propr 13056 und sorgt für reale Entries, hat aber **Slippage-Risiko** gegenüber Stop-Limit.
+
+Env-Schalter:
+- `TREND_STOP_TRIGGER_MODE=last_candle|disabled` (Default: `last_candle`)
+- `JOURNAL_BAR_DEDUPE=YES|NO` (Default: `YES`)
 
 Der Bot sendet **Bracket-Entries** (Entry + Exits) als **einen** `create_orders`-Batch (`ProprClient.create_orders_batch_raw`): Entry (`market` oder `limit`) + Stop (`stop_market`) + TP (`take_profit_limit`) unter gemeinsamem `orderGroupId` (`broker/order_service.submit_bracket_entry_with_exits`). Beim Live-State-Sync reichert `sync_agent_state_from_propr` Positionszeilen zuerst mit SL/TP aus verknüpften Orders an; liefert der strenge Position-Mapper (`map_propr_position_to_internal`) danach kein `Trade` (benötigt u. a. `stop_loss`), kann `build_agent_state_from_propr_data` für **genau eine** offene Position auf dem Symbol `active_trade` aus **vorherigem** `AgentState` synthetisieren (`pending_order` oder `active_trade`, Richtung passend), damit Exit-Management greift.
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -27,11 +28,14 @@ from config.strategy_config import StrategyConfig
 from models.candle import Candle
 from models.journal import JournalEntry
 from models.order import Order
+from models.order import OrderType
 from models.propr_challenge import ActiveChallengeContext
 from models.runner_result import StrategyRunResult
 from models.symbol_spec import SymbolSpec
 from strategy.engine import run_agent_cycle
 from strategy.state import AgentState
+from strategy.trigger_eval import is_stop_trigger_touched, mark_order_triggered
+from strategy.strategy_runner import _signal_candles_only
 from utils.propr_response import extract_external_order_id
 
 # TODO: Later add challenge-specific risk limits.
@@ -130,6 +134,29 @@ def _build_app_cycle_result(
     signal_lifecycle_id = (
         post_cycle_state.signal_lifecycle_id if post_cycle_state is not None else None
     )
+    # Journal bar-dedupe: with long-running interval runners, we avoid emitting identical
+    # cycle/order rows on every poll while still guaranteeing entries on state changes.
+    journal_bar_dedupe = (os.getenv("JOURNAL_BAR_DEDUPE") or "YES").strip().upper() != "NO"
+    state_changed = bool(submitted_order or replaced_order or closed_trade or managed_exit_orders)
+    if (
+        journal_bar_dedupe
+        and previous_state is not None
+        and post_cycle_state is not None
+        and synced_state is not None
+        and not state_changed
+    ):
+        # Use the same closed-bar view as signal detection to define the "current signal bar".
+        # If we are still within the same bar and nothing meaningful changed, skip journaling.
+        signal_candles = _signal_candles_only(
+            candles,
+            now=datetime.now(timezone.utc),
+        )
+        if signal_candles:
+            current_signal_bar_ts = signal_candles[-1].timestamp.isoformat()
+            prev_bar_ts = previous_state.last_journaled_signal_bar_ts
+            if prev_bar_ts is not None and str(prev_bar_ts).strip() == current_signal_bar_ts:
+                return result
+
     journal_entries = build_journal_entries(
         symbol=symbol,
         environment=environment,
@@ -153,6 +180,17 @@ def _build_app_cycle_result(
     result = result.model_copy(update={"journal_entries": journal_entries})
 
     if journal_path is not None and journal_entries:
+        # Persist the last journaled bar timestamp on successful writes.
+        if post_cycle_state is not None and synced_state is not None:
+            signal_candles = _signal_candles_only(
+                candles,
+                now=datetime.now(timezone.utc),
+            )
+            if signal_candles:
+                current_signal_bar_ts = signal_candles[-1].timestamp.isoformat()
+                result.post_cycle_state = result.post_cycle_state.model_copy(
+                    update={"last_journaled_signal_bar_ts": current_signal_bar_ts}
+                )
         append_journal_entries(journal_path, journal_entries)
 
     return result
@@ -422,6 +460,103 @@ def _phase_exit_orders(ctx: _CycleContext) -> AppCycleResult | None:
     return ctx.build_result()
 
 
+def _trend_stop_trigger_mode() -> str:
+    return (os.getenv("TREND_STOP_TRIGGER_MODE") or "last_candle").strip().lower()
+
+
+def _phase_pending_trigger(ctx: _CycleContext) -> AppCycleResult | None:
+    """If a locally-held stop entry gets touched, enter via a market bracket batch."""
+    if not ctx.pending_order_requested:
+        return None
+    if ctx.post_cycle_state is None or ctx.post_cycle_state.pending_order is None:
+        return None
+    if ctx.synced_state is None:
+        return None
+
+    order = ctx.post_cycle_state.pending_order
+    if order.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+        return None
+    if _trend_stop_trigger_mode() == "disabled":
+        return None
+
+    # If the broker already has a pending entry (or we already have its id), do not trigger-submit.
+    if ctx.synced_state.pending_order is not None:
+        return None
+    if ctx.synced_state.pending_order_id is not None and str(ctx.synced_state.pending_order_id).strip():
+        return None
+    if not ctx.candles:
+        return None
+
+    last_candle = ctx.candles[-1]
+    if not is_stop_trigger_touched(order, last_candle):
+        return None
+
+    # Mirror the safety gates used by the normal pending-order submit phase.
+    open_order_trade_slots = _count_open_order_trade_slots(ctx.synced_state)
+    new_entry_requested = ctx.synced_state.pending_order is None
+    if new_entry_requested and open_order_trade_slots >= MAX_OPEN_ORDER_TRADE_SLOTS:
+        ctx.skipped_reason = (
+            f"max open orders/trades reached ({open_order_trade_slots}/{MAX_OPEN_ORDER_TRADE_SLOTS})"
+        )
+        return ctx.build_result()
+
+    account_id = ctx.challenge_context.account_id
+    ctx.asset_guard_result = evaluate_asset_execution_guard(
+        client=ctx.client,
+        account_id=account_id,
+        symbol=ctx.symbol,
+        desired_leverage=ctx.desired_leverage,
+    )
+    if not ctx.asset_guard_result.allow_execution:
+        ctx.skipped_reason = ctx.asset_guard_result.reason
+        return ctx.build_result()
+
+    effective_balance = ctx.resolved_balance or ctx.account_balance
+    effective_leverage = ctx.asset_guard_result.effective_leverage
+    pending_order_size_reason = _validate_pending_order_execution_size(
+        order=order,
+        account_balance=effective_balance,
+        desired_leverage=effective_leverage,
+        symbol_spec=ctx.symbol_spec,
+    )
+    if pending_order_size_reason is not None:
+        ctx.skipped_reason = pending_order_size_reason
+        return ctx.build_result()
+
+    stable_seed = _stable_intent_seed_for_entry_order(
+        account_id=account_id,
+        symbol=ctx.symbol,
+        executed_at=ctx.executed_at,
+        order=order,
+    )
+
+    submit_order = mark_order_triggered(order)
+    ctx.execution_response = ctx.order_service.submit_market_entry_bracket_with_exits(
+        account_id,
+        submit_order,
+        ctx.symbol,
+        symbol_spec=ctx.symbol_spec,
+        stable_intent_seed=stable_seed,
+        buy_spread=float(ctx.config.buy_spread),
+    )
+    ctx.submitted_order = True
+    ctx.post_cycle_state = ctx.post_cycle_state.model_copy(
+        update={"pending_order_id": extract_external_order_id(ctx.execution_response)}
+    )
+
+    # Prevent the normal pending-order phase from re-processing the stop-intent this cycle.
+    ctx.pending_order_requested = False
+
+    if ctx.strategy_result is not None:
+        detail = (ctx.strategy_result.decision_detail or "").strip()
+        next_detail = "trend_stop_triggered"
+        if detail and next_detail not in detail:
+            next_detail = f"{detail}; {next_detail}"
+        ctx.strategy_result = ctx.strategy_result.model_copy(update={"decision_detail": next_detail})
+
+    return ctx.build_result()
+
+
 def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
     if not ctx.pending_order_requested:
         return None
@@ -571,6 +706,7 @@ def run_app_cycle(
         _phase_precondition_checks,
         _phase_close_trade,
         _phase_exit_orders,
+        _phase_pending_trigger,
         _phase_pending_order,
     ]:
         result = phase(ctx)

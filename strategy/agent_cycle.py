@@ -17,6 +17,7 @@ from strategy.order_manager import build_order_from_decision
 from strategy.regime_detector import build_regime_states
 from strategy.signal_rules import touches_middle_band
 from strategy.strategy_runner import _signal_candles_only, run_strategy_cycle
+from strategy.trigger_eval import is_order_trigger_touched
 from ulid import ULID
 
 # TODO: Later manage pending-order validity across multiple days.
@@ -29,15 +30,7 @@ from ulid import ULID
 
 
 def _is_order_filled(order: Order, candle: Candle) -> bool:
-    if order.order_type == OrderType.BUY_STOP:
-        return candle.high >= order.entry
-    if order.order_type == OrderType.SELL_STOP:
-        return candle.low <= order.entry
-    if order.order_type == OrderType.BUY_LIMIT:
-        return candle.low <= order.entry
-    if order.order_type == OrderType.SELL_LIMIT:
-        return candle.high >= order.entry
-    return False
+    return is_order_trigger_touched(order, candle)
 
 
 def _build_trade_from_filled_order(order: Order, fill_timestamp: str | None = None) -> Trade:

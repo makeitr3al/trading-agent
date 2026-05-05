@@ -26,6 +26,7 @@ const ENTITIES = {
   challengeId: "input_text.trading_agent_challenge_id",
   scheduleEnabled: "input_boolean.trading_agent_scheduling_aktiv",
   scheduleTime: "input_datetime.trading_agent_schedule_time",
+  triggerPollingEnabled: "input_boolean.trading_agent_trigger_polling_aktiv",
   pushEnabled: "input_boolean.trading_agent_push_aktiv",
   operatorConfig: "sensor.trading_agent_operator_config",
   liveStatus: "sensor.trading_agent_live_status",
@@ -1044,6 +1045,13 @@ class TradingAgentAdminPanel extends HTMLElement {
     const viewerSelector = `<label class="field"><span>Viewer Umgebung</span><select data-viewer-env="1">${
       envOptions.map((opt) => `<option value="${escapeHtml(opt)}" ${String(opt).toLowerCase() === viewerEnv ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("")
     }</select></label>`;
+    const triggerPollingOn = this.entity(ENTITIES.triggerPollingEnabled)?.state === "on";
+    const scheduleTimeField = this.field(ENTITIES.scheduleTime, "time");
+    const scheduleEnabledField = this.field(ENTITIES.scheduleEnabled, "checkbox");
+    const scheduleDisabledNote = triggerPollingOn
+      ? `<div class="hint">Trigger-Polling aktiv — Schedule-Zeit wird ignoriert.</div>`
+      : "";
+
     return `<div class="stack">
       <section class="card">
         <h3>Operator</h3>
@@ -1052,13 +1060,15 @@ class TradingAgentAdminPanel extends HTMLElement {
           ${this.field(ENTITIES.mode, "select")}
           ${this.field(ENTITIES.environment, "select")}
           ${this.field(ENTITIES.leverage, "number")}
-          ${this.field(ENTITIES.scheduleTime, "time")}
+          <div class="${triggerPollingOn ? "disabled-field" : ""}">${scheduleTimeField}</div>
           ${this.challengeSelector()}
           ${this.field(ENTITIES.addonSlug)}
         </div>
+        ${scheduleDisabledNote}
         ${this.marketsSelector()}
         <div class="toggle-row">
-          ${this.field(ENTITIES.scheduleEnabled, "checkbox")}
+          <div class="${triggerPollingOn ? "disabled-field" : ""}">${scheduleEnabledField}</div>
+          ${this.field(ENTITIES.triggerPollingEnabled, "checkbox")}
           ${this.field(ENTITIES.pushEnabled, "checkbox")}
         </div>
       </section>
@@ -1737,6 +1747,8 @@ class TradingAgentAdminPanel extends HTMLElement {
       .field, .toggle { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #5d6b81; }
       .toggle { flex-direction: row; align-items: center; gap: 10px; color: #162133; }
       .toggle-row { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; }
+      .disabled-field { opacity: 0.55; pointer-events: none; filter: grayscale(0.1); }
+      .hint { margin-top: 10px; font-size: 12px; color: #6a7890; }
       input, select { width: 100%; border: 1px solid #d4ddea; border-radius: 12px; padding: 10px 12px; box-sizing: border-box; background: #f9fbfd; color: #162133; }
       .button-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
       .status-list { display: flex; flex-direction: column; gap: 10px; }

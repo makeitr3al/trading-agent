@@ -74,6 +74,21 @@ trading_agent_load_current_config_haos:
                     - action: input_boolean.turn_off
                       target:
                         entity_id: input_boolean.trading_agent_scheduling_aktiv
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'trigger_polling_enabled') in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_trigger_polling_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ state_attr('sensor.trading_agent_operator_config', 'trigger_polling_enabled') in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_trigger_polling_aktiv
             - action: input_datetime.set_datetime
               target:
                 entity_id: input_datetime.trading_agent_schedule_time
@@ -164,6 +179,21 @@ trading_agent_load_current_config_haos:
                     - action: input_boolean.turn_off
                       target:
                         entity_id: input_boolean.trading_agent_scheduling_aktiv
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.trigger_polling_enabled in [true, 'true', 'True', 'on', '1'] }}"
+                  sequence:
+                    - action: input_boolean.turn_on
+                      target:
+                        entity_id: input_boolean.trading_agent_trigger_polling_aktiv
+                - conditions:
+                    - condition: template
+                      value_template: "{{ op.trigger_polling_enabled in [false, 'false', 'False', 'off', '0'] }}"
+                  sequence:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.trading_agent_trigger_polling_aktiv
             - action: input_datetime.set_datetime
               target:
                 entity_id: input_datetime.trading_agent_schedule_time
@@ -216,6 +246,7 @@ trading_agent_save_current_config_haos:
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
+        trigger_polling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_trigger_polling_aktiv', 'on') else 'false' }}"
 
 trading_agent_jetzt_ausfuehren_haos:
   alias: Trading Agent Aktuellen Modus ausfuehren
@@ -240,6 +271,7 @@ trading_agent_preflight_test_haos:
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
+        trigger_polling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_trigger_polling_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -258,6 +290,7 @@ trading_agent_beta_write_test_haos:
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
+        trigger_polling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_trigger_polling_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"
@@ -276,6 +309,7 @@ trading_agent_scharf_lauf_haos:
         schedule_time: "{{ states('input_datetime.trading_agent_schedule_time')[:5] }}"
         challenge_attempt_id: "{{ states('input_text.trading_agent_challenge_id') }}"
         push_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_push_aktiv', 'on') else 'false' }}"
+        trigger_polling_enabled: "{{ 'true' if is_state('input_boolean.trading_agent_trigger_polling_aktiv', 'on') else 'false' }}"
     - action: hassio.addon_start
       data:
         addon: "{{ states('input_text.trading_agent_addon_slug') }}"

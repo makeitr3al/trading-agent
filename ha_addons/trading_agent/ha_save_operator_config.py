@@ -26,11 +26,15 @@ def _coerce_push(raw: str) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 9:
-        print("usage: ha_save_operator_config.py MODE ENV LEVERAGE MARKETS SCHED_BOOL SCHED_TIME CHALLENGE_ATTEMPT_ID PUSH_BOOL", file=sys.stderr)
+    if len(sys.argv) not in {9, 10}:
+        print(
+            "usage: ha_save_operator_config.py MODE ENV LEVERAGE MARKETS SCHED_BOOL SCHED_TIME CHALLENGE_ATTEMPT_ID PUSH_BOOL [TRIGGER_POLLING_BOOL]",
+            file=sys.stderr,
+        )
         return 2
 
     mode, environment, leverage_s, markets, sched_s, sched_time, attempt_id, push_s = sys.argv[1:9]
+    trigger_polling_s = sys.argv[9] if len(sys.argv) == 10 else "false"
     mode_t = str(mode or "").strip()
     env_t = str(environment or "").strip()
     if not mode_t or not env_t:
@@ -69,6 +73,7 @@ def main() -> int:
         "markets": markets_stripped,
         "scheduling_enabled": sched_s.strip().lower() == "true",
         "schedule_time": sched_time,
+        "trigger_polling_enabled": (trigger_polling_s or "").strip().lower() == "true",
         "challenge_id": str(existing.get("challenge_id") or ""),
         "challenge_attempt_id": (attempt_id or "").strip(),
         "push_enabled": _coerce_push(push_s),

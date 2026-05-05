@@ -303,6 +303,16 @@ def load_runner_settings_from_env() -> RunnerSettings:
     elif mode == "interval":
         interval_seconds = _validate_interval_seconds(_get_env("RUNNER_INTERVAL_SECONDS") or "60")
 
+    # Operator-config override: when trigger polling is enabled (HA panel), force interval mode.
+    operator_trigger_polling = (_get_env("OPERATOR_TRIGGER_POLLING_ENABLED") or "").strip().upper()
+    if operator_trigger_polling == "YES":
+        forced_interval = _validate_interval_seconds(_get_env("RUNNER_INTERVAL_SECONDS") or "60")
+        if mode != "interval":
+            print("Trigger-Polling active: forcing RUNNER_MODE=interval")
+        mode = "interval"
+        time_utc = None
+        interval_seconds = forced_interval
+
     symbol = _get_env("PROPR_SYMBOL") or DEFAULT_SYMBOL
     require_healthy_core = _parse_yes_no(
         _get_env("PROPR_REQUIRE_HEALTHY_CORE") or "YES",

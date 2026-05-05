@@ -63,6 +63,7 @@ def test_stop_entry_is_blocked_pre_submit_with_clear_reason(monkeypatch: pytest.
     """Stop entries are not submitable on Propr (entry order = market/limit only)."""
     order = make_order()
 
+    monkeypatch.setenv("TREND_STOP_TRIGGER_MODE", "disabled")
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
     monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: make_challenge_context())
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())

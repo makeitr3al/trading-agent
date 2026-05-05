@@ -16,6 +16,7 @@ DEFAULT_OPERATOR_CONFIG = {
     "markets": "BTC,ETH,SOL,XRP",
     "scheduling_enabled": False,
     "schedule_time": "07:00",
+    "trigger_polling_enabled": False,
     "challenge_id": "",
     "challenge_attempt_id": "",
     "push_enabled": False,
@@ -105,6 +106,10 @@ def _normalize_push_enabled(value: Any) -> bool:
     return _normalize_scheduling_enabled(value)
 
 
+def _normalize_trigger_polling_enabled(value: Any) -> bool:
+    return _normalize_scheduling_enabled(value)
+
+
 def _normalize_schedule_time(value: str | None) -> str:
     normalized = (value or DEFAULT_OPERATOR_CONFIG["schedule_time"]).strip()
     try:
@@ -127,6 +132,9 @@ def normalize_operator_config(payload: dict[str, Any]) -> dict[str, Any]:
         "markets": _normalize_markets(merged.get("markets")),
         "scheduling_enabled": _normalize_scheduling_enabled(merged.get("scheduling_enabled")),
         "schedule_time": _normalize_schedule_time(merged.get("schedule_time")),
+        "trigger_polling_enabled": _normalize_trigger_polling_enabled(
+            merged.get("trigger_polling_enabled")
+        ),
         "challenge_id": _normalize_challenge_id(merged.get("challenge_id")),
         "challenge_attempt_id": _normalize_challenge_id(merged.get("challenge_attempt_id")),
         "push_enabled": _normalize_push_enabled(merged.get("push_enabled")),
@@ -224,6 +232,9 @@ def export_operator_env_shell(path: str | Path | None = None) -> str:
         "OPERATOR_MARKETS": config["markets"],
         "OPERATOR_SCHEDULING_ENABLED": "YES" if config["scheduling_enabled"] else "NO",
         "OPERATOR_SCHEDULE_TIME": config["schedule_time"],
+        "OPERATOR_TRIGGER_POLLING_ENABLED": (
+            "YES" if config.get("trigger_polling_enabled", False) else "NO"
+        ),
         "OPERATOR_CHALLENGE_ID": config.get("challenge_id", ""),
         "OPERATOR_CHALLENGE_ATTEMPT_ID": config.get("challenge_attempt_id", ""),
         "OPERATOR_PUSH_ENABLED": "YES" if config.get("push_enabled", False) else "NO",

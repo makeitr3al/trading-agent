@@ -21,6 +21,7 @@ class AgentState(BaseModel):
     account_open_positions_count: int = 0
     account_unrealized_pnl: float | None = None
     signal_lifecycle_id: str | None = None
+    last_journaled_signal_bar_ts: str | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -639,6 +639,44 @@ class ProprOrderService:
             raise ValueError("Bracket create returned no response")
         return ensured
 
+    def submit_market_entry_bracket_with_exits(
+        self,
+        account_id: str,
+        order: Order,
+        symbol: str,
+        *,
+        symbol_spec: SymbolSpec | None = None,
+        stable_intent_seed: str | None = None,
+        buy_spread: float = 0.0,
+    ) -> dict[str, Any]:
+        """Submit a *market entry* + stop-loss + take-profit in one batch.
+
+        This is used when an internal stop-entry intent (BUY_STOP/SELL_STOP) has been
+        **locally triggered** and we want to enter immediately, while still satisfying
+        Propr batching rules (entry must be `market`/`limit`).
+        """
+        normalized_account_id = _require_non_empty(account_id, "account_id")
+        group_id, previews = build_market_entry_bracket_previews(
+            order,
+            symbol,
+            symbol_spec=symbol_spec,
+            stable_intent_seed=stable_intent_seed,
+            buy_spread=buy_spread,
+        )
+        sdk_orders = [
+            _to_sdk_order_payload(build_sdk_create_order_params(p), account_id=normalized_account_id)
+            for p in previews
+        ]
+        response = self.client.create_orders_batch_raw(
+            normalized_account_id,
+            sdk_orders,
+            order_group_id=group_id,
+        )
+        ensured = _ensure_success_response(response, "create")
+        if ensured is None:
+            raise ValueError("Market bracket create returned no response")
+        return ensured
+
     def submit_market_close(
         self,
         account_id: str,
@@ -691,6 +729,7 @@ __all__ = [
     "build_bracket_submission_previews",
     "build_bracket_stop_loss_preview",
     "build_bracket_take_profit_preview",
+    "build_market_entry_bracket_previews",
     "build_market_close_submission_preview",
     "build_stop_loss_submission_preview",
     "build_take_profit_submission_preview",
