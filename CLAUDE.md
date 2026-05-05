@@ -8,6 +8,8 @@ Echtzeit-Marktdaten kommen von **Hyperliquid** (REST, perspektivisch WebSocket).
 Gelieferte Kerzenreihen werden pro Provider durch [`data/providers/contract.py`](data/providers/contract.py) geprüft (UTC, streng aufsteigende Zeitstempel, Mindestlänge bei Golden).
 Execution läuft ausschließlich über die **Propr API**.
 
+**Normative API-Dokumentation (neben diesem Repo):** [XBorgLabs/propr-docs](https://github.com/XBorgLabs/propr-docs) — REST-Referenz in `docs/api.md`, Referenz-SDKs unter `python/` und `javascript/`. Änderungen an Order-Payloads, Batch-Regeln (`orderGroupId`, Conditional Orders) oder Fehlercodes sollten gegen diese Doku verifiziert werden; der Vendored-Client [`broker/propr_sdk.py`](broker/propr_sdk.py) und [`broker/propr_client.py`](broker/propr_client.py) (`_to_sdk_order_payload`) können hinter der offiziellen Spezifikation nachziehen.
+
 ---
 
 ## Architektur-Schichten
@@ -107,14 +109,33 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 - **Golden Scenarios**: fachliche Fixtures für alle Signaltypen — deterministisch, kein Submit
 - **Smoke Test**: read-only gegen Beta-API (`scripts/propr_smoke_test.py`)
 - **Write Test**: Beta-Submit + direkter Cancel (`scripts/propr_submit_cancel_test.py`)
-- **Order Types Test**: Beta-Verifikation aller Order-Typen (`scripts/propr_order_types_test.py`) — inkl. Versuch standalone `BUY_STOP`/`SELL_STOP`; bei Erfolg primär WebSocket-Bestätigung (orders), sonst REST-Fallback; bei Ablehnung 13056 wird übersprungen und der Lauf setzt fort
+- **Order Types Test**: Beta-Verifikation aller Order-Typen (`scripts/propr_order_types_test.py`) — inkl. Versuch **standalone** `BUY_STOP`/`SELL_STOP` (ohne Batch); bei Erfolg primär WebSocket-Bestätigung (orders), sonst REST-Fallback; bei Ablehnung 13056 wird übersprungen und der Lauf setzt fort *(Bot-Entry nutzt dagegen Bracket-Batch mit `orderGroupId`)*
 - **Run Suite**: `python run_test_suite.py --suite <name>` — verfügbare Suites:
   - `core` — fokussierter Regressionstest (Bot-Logik + Runtime-Helpers)
   - `unit` — vollständige pytest-Suite unter `tests/`
   - `preflight` — empfohlener Erststarttest: unit + golden dry-run + smoke test *(Standard für Pi/HA)*
   - `beta_write` — Beta-Write-Verifikation mit echten Orders (opt-in, `--allow-live-beta-writes`)
+- **Daily Universe Backtest** (Hyperliquid 1D, offline, kein Submit): `scripts/backtest_daily_universe.py` — siehe Abschnitt **Daily Universe Backtest** unten
 
-Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werden von der Propr-API mit `conditional_order_requires_position_or_group` (HTTP 400, Code 13056) abgelehnt — unabhängig davon, dass `orderGroupId` in Responses oft `null` ist. Der Agent blockiert diese Submits auf Beta weiterhin vorab (`trading_app`), damit keine nutzlosen API-Fehlschläge entstehen.
+**Propr-API (Entry-Orders):** In der Batching-Logik gilt **nur** `market` oder `limit` als **Entry-Order**. Stop-Entries (`BUY_STOP`/`SELL_STOP` → API `stop_limit`) sind **conditional orders** und werden ohne `positionId` bzw. ohne Entry-Order in derselben `orderGroupId` mit `conditional_order_requires_position_or_group` (HTTP 400, Code 13056) abgelehnt. Der Bot blockiert solche Stop-Entry-Submits deshalb **vorab** in `broker/execution.py` mit einem klaren `skip_reason`.
+
+Der Bot sendet **Limit-Entries** als **einen** `create_orders`-Batch (`ProprClient.create_orders_batch_raw`): Entry + Stop (`stop_market`) + TP (`take_profit_limit`) unter gemeinsamem `orderGroupId` (`broker/order_service.submit_bracket_entry_with_exits`). Beim Live-State-Sync reichert `sync_agent_state_from_propr` Positionszeilen zuerst mit SL/TP aus verknüpften Orders an; liefert der strenge Position-Mapper (`map_propr_position_to_internal`) danach kein `Trade` (benötigt u. a. `stop_loss`), kann `build_agent_state_from_propr_data` für **genau eine** offene Position auf dem Symbol `active_trade` aus **vorherigem** `AgentState` synthetisieren (`pending_order` oder `active_trade`, Richtung passend), damit Exit-Management greift.
+
+---
+
+## Daily Universe Backtest (Hyperliquid 1D)
+
+Offline-Screening über viele HL-Märkte mit **unabhängigem Kapital pro Markt**. Kerzen: `1d` via `data/providers/hyperliquid_historical_provider.py` (`fetch_candles_between` + Jahresfenster-Chunking + Cache unter `artifacts/backtests/cache/`). Logik pro Bar: **`run_agent_cycle`** (Pending-Fills wie live) plus **Intrabar SL/TP** auf Daily-OHLC (Default: bei gleichzeitigem Touch **SL vor TP**, Sensitivity mit `--optimistic-fills`). Strategische Exits (`CLOSE_*`) werden am **Bar-Close** ausgeführt, wenn der Cycle `close_active_trade` setzt.
+
+**Beispiel (nur Krypto-Perps, Shard 0/4, 3 Jahre, 10k pro Markt):**
+
+```bash
+.\.venv\Scripts\python.exe scripts/backtest_daily_universe.py --years 3 --capital 10000 --include crypto --shard 0/4 --sleep-ms 300
+```
+
+Ausgabe: `artifacts/backtests/daily_universe_<UTC>/summary.csv`, optional `…/<coin>/trades.csv`, `run.json` mit Parametern und Annahmen.
+
+**Wichtige Annahmen / Grenzen:** HL-Kerzen ≠ Propr-Ausführung; im Strategiecode sind Trend-Entries `BUY_STOP`/`SELL_STOP`, live gehen Bracket-Entries als Limit-Batch an Propr — der Backtest misst die **Strategie-Trigger-Semantik** auf HL-Daten. Kein Funding, kein intraday außerhalb der 1D-OHLC. `--no-compound` hält das Sizing-Risiko auf dem Startkapital statt auf der laufenden Equity.
 
 ---
 
@@ -125,6 +146,7 @@ Bekannte Beta-Einschränkung: `BUY_STOP` / `SELL_STOP` als standalone Entry werd
   - In `bullish`/`bearish`: nur auf dem ersten Bar des Regimes (First-Bar-Regel)
   - In `neutral`: Richtung aus Outside-Fall (oberhalb oberes Band → SHORT, unterhalb unteres Band → LONG)
   - Pro Regime und Richtung maximal ein valides Gegentrend-Signal
+- **Offenes Gegentrend-Trade-Management**: Take-Profit folgt dem mBB der **letzten geschlossenen** Kerze (dieselbe Closed-Bar-Ansicht wie die Signalerkennung: DataFrame `bollinger_sig` in `strategy_runner.run_strategy_cycle`), nicht dem Tick einer noch formenden Kerze.
 - **Entry-Gating (Signals vs Orders)**: Signale koennen valide sein, waehrend die per-cycle Orchestrierung die **Order-Erzeugung** aus Safety-Gruenden blockiert (z. B. Middle-Band-Retest-Gating) und dann `NO_ACTION` entscheidet; Details dazu stehen im Journal auf der cycle-Zeile als kompakter `decision_detail` in `notes`.
 - PineScript-Verifier: `artifacts/tradingview_strategy_indicator.pine`
 

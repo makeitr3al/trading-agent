@@ -58,3 +58,6 @@ artifacts/live_status.json
 artifacts/journal_snapshot.json
 artifacts/journal_table.json
 artifacts/run_summary.json
+
+# Backtest artifacts (generated output + candle caches)
+artifacts/backtests/

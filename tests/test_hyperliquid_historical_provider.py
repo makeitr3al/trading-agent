@@ -124,6 +124,16 @@ def test_fetch_current_spread_raises_clear_error_for_invalid_l2_book_response() 
         provider.fetch_current_spread()
 
 
+def test_fetch_candles_between_allows_empty_list_without_validation() -> None:
+    provider = HyperliquidHistoricalProvider(
+        HyperliquidConfig(coin="BTC", interval="1d"),
+        http_client=FakeHyperliquidHttpClient([]),
+    )
+    batch = provider.fetch_candles_between(1_000_000_000_000, 2_000_000_000_000)
+    assert batch.candles == []
+    assert batch.symbol == "BTC"
+
+
 def test_raises_clear_error_when_response_is_empty_or_invalid() -> None:
     empty_provider = HyperliquidHistoricalProvider(
         HyperliquidConfig(coin="BTC"),

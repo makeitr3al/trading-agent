@@ -67,6 +67,18 @@ class HyperliquidHistoricalProvider:
             interval=self.config.interval,
             lookback_bars=self.config.lookback_bars,
         )
+        batch = self.fetch_candles_between(start_ms, end_ms)
+        if not batch.candles:
+            raise ValueError("Hyperliquid candleSnapshot response is empty or invalid")
+        return batch
+
+    def fetch_candles_between(self, start_ms: int, end_ms: int) -> DataBatch:
+        """Fetch candles for an explicit UTC millisecond window (inclusive/exclusive per HL API).
+
+        Returns an empty batch when the API returns no rows (e.g. pre-listing window).
+        """
+        if start_ms >= end_ms:
+            raise ValueError(f"start_ms must be < end_ms, got {start_ms=} {end_ms=}")
         response = self._post_info(
             {
                 "type": "candleSnapshot",
@@ -78,6 +90,12 @@ class HyperliquidHistoricalProvider:
                 },
             }
         )
+        if not isinstance(response, list) or not response:
+            return DataBatch(
+                candles=[],
+                symbol=self.config.coin,
+                source_name="hyperliquid_historical",
+            )
         candles = self._parse_candles(response)
         batch = DataBatch(
             candles=candles,

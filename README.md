@@ -12,6 +12,13 @@ Der Agent ist für den Betrieb mit **Propr** (Execution) und **Hyperliquid** (Ma
 - **Architektur (normativ)**: `docs/ARCHITECTURE_MANIFEST.md`
 - **Home Assistant OS Add-on**: `ha_addons/trading_agent/DOCS.md` und `ha_addons/trading_agent/README.md`
 
+## Backtests
+
+Für ein offline Universe-Screening auf Hyperliquid-1D-Daten (kein Propr-Submit) gibt es:
+`.\.venv\Scripts\python.exe scripts/backtest_daily_universe.py --years 3 --capital 10000 --include crypto --shard 0/4`
+
+Details, Annahmen und Output-Pfade stehen in `CLAUDE.md` unter **Daily Universe Backtest**.
+
 ## Signal Rules
 
 Die Strategy verwendet drei Regime auf Basis des MACD:
@@ -211,7 +218,7 @@ Wichtig dabei:
 - der Scanner beruecksichtigt kontoweit maximal 3 offene Entry-Orders oder Positionen
 - wenn mehr ausfuehrbare Markt-Kandidaten vorhanden sind als freie Slots, priorisiert der Scanner nach `signal_strength`; wenn genug Slots frei sind, werden alle validen Markt-Kandidaten verwendet
 - `PROPR_SYMBOL` gilt nur fuer Single-Market-Skripte, nicht fuer die Markt-Auswahl des Multi-Market-Scans
-- Beta-Einschraenkungen fuer standalone Stop-Entries gelten auch im Multi-Market-Scan
+- Propr-API: Stop-Entries (`BUY_STOP`/`SELL_STOP`) sind derzeit nicht als Entry-Orders submitbar (Batching: Entry = `market`/`limit`); der Bot blockiert solche Submits vorab. Das gilt auch im Multi-Market-Scan.
 
 ## Trading Journal
 
