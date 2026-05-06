@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import signal
 import sys
 from dataclasses import dataclass
@@ -13,12 +14,15 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from app.journal import append_journal_entries
 from app.trading_app import run_app_cycle
 from broker.asset_registry import AssetRegistry
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.symbol_service import HyperliquidSymbolService
 from models.agent_state import AgentState
+from models.journal import JournalEntry
+from models.order import Order
 from models.order import OrderType
 from scripts.scan_core import (
     ArmedMarketEntry,
@@ -40,6 +44,7 @@ from utils.env_loader import (
     load_multi_market_scan_settings_from_env,
     load_propr_config_from_env,
 )
+from utils.journal_table import build_journal_table
 from utils.runtime_status import utc_now_iso, write_runtime_status
 
 
@@ -68,6 +73,86 @@ def _resolve_last_candle_prices(candles: list[Any]) -> tuple[str | None, float |
         _safe_float(getattr(last, "low", None)),
         _safe_float(getattr(last, "close", None)),
     )
+
+
+def _entry_date(timestamp: str) -> str:
+    return timestamp.split("T", 1)[0] if "T" in timestamp else timestamp
+
+
+def _append_order_protocol_entry(
+    *,
+    journal_path: str | None,
+    symbol: str,
+    environment: str | None,
+    status: str,
+    executed_at: str,
+    signal_lifecycle_id: str | None,
+    order: Order | None,
+    notes: str,
+    source_signal_type: str | None = None,
+    external_order_id: str | None = None,
+) -> None:
+    if not journal_path:
+        return
+    if not signal_lifecycle_id or not str(signal_lifecycle_id).strip():
+        # Lifecycle protocol needs a stable signal id; skip rather than polluting journal.
+        return
+
+    entry_timestamp = executed_at
+    if order is not None and getattr(order, "created_at", None):
+        entry_timestamp = str(order.created_at)
+
+    entry = JournalEntry(
+        entry_type="order",
+        entry_date=_entry_date(entry_timestamp),
+        entry_timestamp=entry_timestamp,
+        executed_at=executed_at,
+        symbol=symbol,
+        environment=environment,
+        direction=("LONG" if order and order.order_type in {OrderType.BUY_STOP, OrderType.BUY_LIMIT} else "SHORT")
+        if order is not None
+        else None,
+        entry_price=float(order.entry) if order is not None else None,
+        stop_loss=float(order.stop_loss) if order is not None else None,
+        take_profit=float(order.take_profit) if order is not None else None,
+        status=status,
+        notes=notes,
+        source_signal_type=source_signal_type,
+        external_order_id=external_order_id,
+        broker_pending_order_id=external_order_id,
+        lifecycle_id=f"{symbol}_{entry_timestamp}",
+        order_lifecycle_id=external_order_id or f"{symbol}_{entry_timestamp}",
+        signal_lifecycle_id=str(signal_lifecycle_id).strip(),
+    )
+    append_journal_entries(journal_path, [entry])
+
+
+def _emit_arm_disarm_protocol_entries(
+    *,
+    journal_path: str | None,
+    environment: str | None,
+    executed_at: str,
+    prev_armed_symbols: set[str],
+    new_armed_symbols: set[str],
+) -> None:
+    removed = prev_armed_symbols - new_armed_symbols
+    for symbol in sorted(removed):
+        state = load_agent_state(symbol)
+        if state is None:
+            continue
+        pending = state.pending_order
+        _append_order_protocol_entry(
+            journal_path=journal_path,
+            symbol=symbol,
+            environment=environment,
+            status="disarmed",
+            executed_at=executed_at,
+            signal_lifecycle_id=state.signal_lifecycle_id,
+            order=pending,
+            notes="disarmed internal intent (not present in latest scan)",
+            source_signal_type=state.last_signal_type,
+            external_order_id=state.pending_order_id,
+        )
 
 
 def _on_signal(_signum: int, _frame: object | None) -> None:
@@ -112,6 +197,48 @@ def _schedule_time_hhmm() -> str:
 
 def _resolve_runtime_status_path() -> str:
     return (os.getenv("RUNNER_STATUS_PATH") or "artifacts/runtime_status_daemon.json").strip()
+
+
+def _resolve_operator_env() -> str:
+    return (os.getenv("OPERATOR_ENVIRONMENT") or os.getenv("PROPR_ENV") or "unknown").strip().lower()
+
+
+def _resolve_operator_journal_path() -> str | None:
+    raw = (os.getenv("OPERATOR_JOURNAL_PATH") or os.getenv("TRADING_JOURNAL_PATH") or "").strip()
+    return raw or None
+
+
+def _resolve_operator_journal_table_path() -> str | None:
+    raw = (os.getenv("OPERATOR_JOURNAL_TABLE_PATH") or "").strip()
+    return raw or None
+
+
+def _refresh_panel_journal_table(*, journal_path: str) -> None:
+    """
+    In one-shot mode, run.sh updates journal_table.json at process end.
+    In daemon mode, the process does not exit, so we refresh these artifacts here.
+    """
+    payload = build_journal_table(path=journal_path)
+    rendered = json.dumps(payload, ensure_ascii=True)
+
+    # 1) Write to the operator path if present (share path; used by HA sensors/scripts).
+    operator_out = _resolve_operator_journal_table_path()
+    if operator_out:
+        p = Path(operator_out)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(rendered + "\n", encoding="utf-8")
+
+    # 2) Also update panel directory directly (HA serves /local/trading-agent/* from /config/www/trading-agent).
+    panel_dir = Path("/config/www/trading-agent")
+    try:
+        panel_dir.mkdir(parents=True, exist_ok=True)
+        (panel_dir / "journal_table.json").write_text(rendered + "\n", encoding="utf-8")
+        env_name = _resolve_operator_env()
+        if env_name:
+            (panel_dir / f"journal_table_{env_name}.json").write_text(rendered + "\n", encoding="utf-8")
+    except Exception:
+        # Non-fatal: daemon should continue even if HA panel path is not writable in some envs.
+        pass
 
 
 @dataclass(frozen=True)
@@ -184,6 +311,12 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
 
     scan_ts = now_utc.isoformat()
     print(f"Daily scan started at {scan_ts}")
+
+    # Read previous armed list before overwrite (for disarm protocol entries).
+    prev_payload = load_armed_markets()
+    _prev_scan_ts, _prev_ttl, prev_armed = parse_armed_markets(prev_payload)
+    prev_armed_symbols = {m.symbol for m in prev_armed if m.symbol}
+
     scan_results = scan_markets_once(ctx, executed_at=scan_ts, scan_cycle_phase="dry_run")
 
     # Execute only non-stop candidates (stop pendings are skipped inside execute_candidates).
@@ -191,6 +324,16 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
 
     armed = extract_armed_stop_markets(scan_results, scan_ts=scan_ts)
     save_armed_markets(scan_ts=scan_ts, ttl_hours=24, markets=armed)
+    new_armed_symbols = {m.symbol for m in armed if m.symbol}
+
+    # Emit disarm protocol entries for removed symbols (internal "löschen").
+    _emit_arm_disarm_protocol_entries(
+        journal_path=scan_settings.journal_path,
+        environment=propr_config.environment,
+        executed_at=scan_ts,
+        prev_armed_symbols=prev_armed_symbols,
+        new_armed_symbols=new_armed_symbols,
+    )
 
     # Persist per-symbol state so pending_order survives across poll ticks / restarts.
     for row in scan_results:
@@ -204,6 +347,34 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
         except Exception:
             continue
         save_agent_state(row.symbol, state)
+
+    # Emit arm protocol entries for newly armed stop-intents.
+    for market in armed:
+        state = load_agent_state(market.symbol)
+        if state is None or state.pending_order is None:
+            continue
+        if state.pending_order.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+            continue
+        _append_order_protocol_entry(
+            journal_path=scan_settings.journal_path,
+            symbol=market.symbol,
+            environment=propr_config.environment,
+            status="armed",
+            executed_at=scan_ts,
+            signal_lifecycle_id=state.signal_lifecycle_id,
+            order=state.pending_order,
+            notes="armed internal stop-intent; waiting for touch",
+            source_signal_type=market.selected_signal_type,
+            external_order_id=state.pending_order_id,
+        )
+
+    # Refresh panel artifacts so scan results become visible without daemon exit.
+    journal_path = _resolve_operator_journal_path()
+    if journal_path:
+        try:
+            _refresh_panel_journal_table(journal_path=journal_path)
+        except Exception as exc:
+            print(f"Journal table refresh failed (non-fatal): {exc}")
 
     print(f"Daily scan finished: armed_markets={len(armed)}")
     return ArmedMarketsSnapshot(scan_ts=scan_ts, ttl_hours=24, markets=armed)
@@ -286,6 +457,7 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
     ttl_delta = timedelta(hours=snapshot.ttl_hours)
 
     kept: list[ArmedMarketEntry] = []
+    any_submitted = False
     for entry in snapshot.markets:
         if _shutdown_requested:
             break
@@ -334,6 +506,7 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
         )
 
         post_cycle_state = getattr(result, "post_cycle_state", None)
+        merged_state: AgentState | None = None
         if post_cycle_state is not None:
             try:
                 updated_state = AgentState.model_validate(post_cycle_state)
@@ -343,11 +516,30 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
                 pass
 
         if getattr(result, "submitted_order", False):
+            any_submitted = True
             print(
                 "Trigger touched: "
                 f"symbol={entry.symbol} submitted=true "
                 f"target={target_price} actual_close={candle_c} "
                 f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+            )
+            # Lifecycle protocol entry for internal trigger -> effective Propr submit.
+            if merged_state is None:
+                merged_state = previous_state
+            _append_order_protocol_entry(
+                journal_path=scan_settings.journal_path,
+                symbol=entry.symbol,
+                environment=propr_config.environment,
+                status="trigger_submitted",
+                executed_at=now_utc.isoformat(),
+                signal_lifecycle_id=merged_state.signal_lifecycle_id if merged_state is not None else None,
+                order=merged_state.pending_order if merged_state is not None else None,
+                notes=(
+                    "trigger touched; submitted bracket to Propr "
+                    f"(target={target_price} candle_ts={candle_ts} high={candle_h} low={candle_l} close={candle_c})"
+                ),
+                source_signal_type=getattr(entry, "selected_signal_type", None),
+                external_order_id=(merged_state.pending_order_id if merged_state is not None else None),
             )
         else:
             print(
@@ -364,6 +556,15 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
     new_snapshot = ArmedMarketsSnapshot(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
     if snapshot.scan_ts:
         save_armed_markets(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
+
+    # If we actually submitted, update panel artifacts so the operator sees the change quickly.
+    if any_submitted:
+        journal_path = _resolve_operator_journal_path()
+        if journal_path:
+            try:
+                _refresh_panel_journal_table(journal_path=journal_path)
+            except Exception as exc:
+                print(f"Journal table refresh failed (non-fatal): {exc}")
     return new_snapshot
 
 

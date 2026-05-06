@@ -10,6 +10,8 @@ from models.order import Order, OrderType
 from scripts.scan_core import ArmedMarketEntry
 from scripts.trigger_polling_daemon import (
     ArmedMarketsSnapshot,
+    _append_order_protocol_entry,
+    _emit_arm_disarm_protocol_entries,
     _next_daily_scan_dt,
     poll_armed_markets,
     should_run_daily_scan,
@@ -187,4 +189,83 @@ def test_poll_armed_markets_keeps_armed_when_state_temporarily_drops_pending(mon
     assert [m.symbol for m in out.markets] == ["NEAR"]
     assert saved["NEAR"].pending_order is not None
     assert saved["NEAR"].pending_order.order_type == OrderType.BUY_STOP
+
+
+def test_append_order_protocol_entry_writes_order_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.trigger_polling_daemon as m
+
+    captured = {}
+
+    def _fake_append(_path: str, entries: list[object]) -> None:
+        captured["path"] = _path
+        captured["entries"] = entries
+
+    monkeypatch.setattr(m, "append_journal_entries", _fake_append)
+
+    order = Order(
+        order_type=OrderType.BUY_STOP,
+        entry=100.0,
+        stop_loss=90.0,
+        take_profit=120.0,
+        signal_source="trend_signal",
+    )
+
+    _append_order_protocol_entry(
+        journal_path="journal.jsonl",
+        symbol="BTC",
+        environment="beta",
+        status="armed",
+        executed_at="2026-05-06T00:00:00+00:00",
+        signal_lifecycle_id="sid_1",
+        order=order,
+        notes="armed",
+        source_signal_type="TREND_LONG",
+        external_order_id=None,
+    )
+
+    assert captured["path"] == "journal.jsonl"
+    entries = captured["entries"]
+    assert len(entries) == 1
+    e = entries[0]
+    assert getattr(e, "entry_type") == "order"
+    assert getattr(e, "status") == "armed"
+    assert getattr(e, "signal_lifecycle_id") == "sid_1"
+
+
+def test_emit_disarm_protocol_entries_emits_for_removed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.trigger_polling_daemon as m
+
+    emitted: list[tuple[str, str]] = []
+
+    def _fake_append(_path: str, entries: list[object]) -> None:
+        for e in entries:
+            emitted.append((getattr(e, "symbol"), getattr(e, "status")))
+
+    monkeypatch.setattr(m, "append_journal_entries", _fake_append)
+    monkeypatch.setattr(
+        m,
+        "load_agent_state",
+        lambda symbol: AgentState(
+            signal_lifecycle_id="sid_x",
+            pending_order=Order(
+                order_type=OrderType.SELL_STOP,
+                entry=10.0,
+                stop_loss=11.0,
+                take_profit=8.0,
+                signal_source="trend_signal",
+            ),
+        )
+        if symbol == "NEAR"
+        else None,
+    )
+
+    _emit_arm_disarm_protocol_entries(
+        journal_path="journal.jsonl",
+        environment="beta",
+        executed_at="2026-05-06T00:00:00+00:00",
+        prev_armed_symbols={"NEAR"},
+        new_armed_symbols=set(),
+    )
+
+    assert ("NEAR", "disarmed") in emitted
 
