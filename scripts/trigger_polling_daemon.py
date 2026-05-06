@@ -46,6 +46,30 @@ from utils.runtime_status import utc_now_iso, write_runtime_status
 _shutdown_requested = False
 
 
+def _safe_float(value: object | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _resolve_last_candle_prices(candles: list[Any]) -> tuple[str | None, float | None, float | None, float | None, float | None]:
+    if not candles:
+        return None, None, None, None, None
+    last = candles[-1]
+    ts = getattr(last, "timestamp", None)
+    ts_str = ts.isoformat() if hasattr(ts, "isoformat") else (str(ts) if ts is not None else None)
+    return (
+        ts_str,
+        _safe_float(getattr(last, "open", None)),
+        _safe_float(getattr(last, "high", None)),
+        _safe_float(getattr(last, "low", None)),
+        _safe_float(getattr(last, "close", None)),
+    )
+
+
 def _on_signal(_signum: int, _frame: object | None) -> None:
     global _shutdown_requested
     _shutdown_requested = True
@@ -279,6 +303,9 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
             require_for_execution=True,
         )
 
+        candle_ts, candle_o, candle_h, candle_l, candle_c = _resolve_last_candle_prices(getattr(data_batch, "candles", []))
+        target_price = _safe_float(getattr(entry, "entry", None))
+
         symbol_spec = None
         try:
             symbol_spec = symbol_service.get_symbol_spec(entry.symbol)
@@ -316,9 +343,19 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
                 pass
 
         if getattr(result, "submitted_order", False):
-            print(f"Trigger touched: symbol={entry.symbol} submitted=true")
+            print(
+                "Trigger touched: "
+                f"symbol={entry.symbol} submitted=true "
+                f"target={target_price} actual_close={candle_c} "
+                f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+            )
         else:
-            print(f"Market tick: symbol={entry.symbol} submitted=false")
+            print(
+                "Market tick: "
+                f"symbol={entry.symbol} submitted=false "
+                f"target={target_price} actual_close={candle_c} "
+                f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+            )
 
         if _should_remove_from_armed(result):
             continue
