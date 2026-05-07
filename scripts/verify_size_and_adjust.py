@@ -505,8 +505,13 @@ def cmd_open(args: argparse.Namespace) -> int:
         return 1
 
     state0 = sync_agent_state_from_propr(client, ctx.account_id, symbol=manual.symbol)
-    if state0.active_trade is not None:
-        print("Abort: an open position already exists for this symbol. Use `manage` or close manually first.")
+    if state0.active_trade is not None or state0.has_open_broker_position_for_symbol:
+        reason = (
+            "active trade mapped from broker state"
+            if state0.active_trade is not None
+            else "open broker position present (SL/TP unmappable from REST snapshot)"
+        )
+        print(f"Abort: {reason}. Use `manage` or close manually first.")
         return 1
 
     order_service = ProprOrderService(client)

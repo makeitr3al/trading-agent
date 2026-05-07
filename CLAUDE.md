@@ -67,6 +67,7 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
   - Scanner: `SCAN_ALLOW_SUBMIT=YES`
 - Im `DATA_SOURCE=golden`-Modus ist Submit **hart blockiert**, egal welche Flags gesetzt sind
 - **Niemals** `PROPR_PROD_CONFIRM=YES` in Code-Änderungen oder Beispielen setzen
+- **Kein Pyramiding:** Solange Propr für das Symbol eine offene Position meldet (`AgentState.has_open_broker_position_for_symbol` oder frischer `/positions`-Check), sendet der Bot **kein** neues Entry/bracket — auch wenn keine SL/TP aus dem REST-Snapshot auf eine `Trade`-Zeile gemappt werden können. Blockierung mit klarem `skipped_reason` im Journal (`submit blocked: open position present at broker for symbol` bzw. bei Trend-Trigger `open position present at broker for symbol`).
 
 ---
 

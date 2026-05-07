@@ -168,6 +168,98 @@ def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_vali
         )
 
 
+def test_has_open_broker_position_for_symbol_true_when_mapped_trade() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "stopLoss": "95.0",
+                    "takeProfit": "110.0",
+                    "quantity": "1.25",
+                    "positionId": "position-123",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+    )
+    assert state.active_trade is not None
+    assert state.has_open_broker_position_for_symbol is True
+
+
+def test_has_open_broker_position_for_symbol_true_when_trade_unmapped_bare_position() -> None:
+    """Open row without mappable SL: strict Trade mapping fails; flag still signals pyramiding risk."""
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "1.25",
+                    "positionId": "position-123",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+        previous_state=None,
+    )
+    assert state.active_trade is None
+    assert state.has_open_broker_position_for_symbol is True
+
+
+def test_has_open_broker_position_for_symbol_false_zero_quantity_open_row() -> None:
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100.5",
+                    "quantity": "0",
+                    "stopLoss": "95",
+                    "takeProfit": "110",
+                    "positionId": "position-123",
+                }
+            ]
+        },
+        symbol="BTC/USDC",
+    )
+    assert state.has_open_broker_position_for_symbol is False
+
+
+def test_has_open_broker_position_for_symbol_false_when_symbol_scope_none() -> None:
+    previous = AgentState(last_regime="bullish")
+    state = build_agent_state_from_propr_data(
+        orders_payload={"data": []},
+        positions_payload={
+            "data": [
+                {
+                    "symbol": "BTC/USDC",
+                    "status": "open",
+                    "positionSide": "long",
+                    "entryPrice": "100",
+                    "stopLoss": "95",
+                    "takeProfit": "110",
+                    "quantity": "1",
+                    "positionId": "p",
+                }
+            ]
+        },
+        previous_state=previous,
+        symbol=None,
+    )
+    assert state.has_open_broker_position_for_symbol is False
+
+
 def test_build_agent_state_from_propr_data_raises_value_error_when_multiple_valid_positions_exist() -> None:
     with pytest.raises(ValueError, match="Multiple open positions found in Propr state"):
         build_agent_state_from_propr_data(

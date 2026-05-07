@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import signal
 import sys
 from dataclasses import dataclass
@@ -466,92 +466,107 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
             print(f"Armed timeout: symbol={entry.symbol} scan_ts={snapshot.scan_ts}")
             continue
 
-        previous_state = load_agent_state(entry.symbol) or AgentState()
-        data_batch, strategy_config, live_buy_spread = build_data_batch_and_config(
-            data_source="live",
-            golden_scenario=None,
-            hyperliquid_base_config=ctx.hyperliquid_base_config,
-            coin=entry.coin,
-            require_for_execution=True,
-        )
-
-        candle_ts, candle_o, candle_h, candle_l, candle_c = _resolve_last_candle_prices(getattr(data_batch, "candles", []))
-        target_price = _safe_float(getattr(entry, "entry", None))
-
-        symbol_spec = None
         try:
-            symbol_spec = symbol_service.get_symbol_spec(entry.symbol)
-        except Exception:
+            previous_state = load_agent_state(entry.symbol) or AgentState()
+            data_batch, strategy_config, live_buy_spread = build_data_batch_and_config(
+                data_source="live",
+                golden_scenario=None,
+                hyperliquid_base_config=ctx.hyperliquid_base_config,
+                coin=entry.coin,
+                require_for_execution=True,
+            )
+
+            candle_ts, candle_o, candle_h, candle_l, candle_c = _resolve_last_candle_prices(
+                getattr(data_batch, "candles", [])
+            )
+            target_price = _safe_float(getattr(entry, "entry", None))
+
             symbol_spec = None
-
-        result = run_app_cycle(
-            client=client,
-            order_service=order_service,
-            symbol=entry.symbol,
-            candles=data_batch.candles,
-            config=strategy_config,
-            account_balance=data_batch.account_balance or 10000.0,
-            previous_state=previous_state,
-            require_healthy_core=scan_settings.require_healthy_core,
-            allow_execution=True,
-            desired_leverage=scan_settings.leverage,
-            symbol_spec=symbol_spec,
-            data_source="live",
-            journal_path=scan_settings.journal_path,
-            executed_at=now_utc.isoformat(),
-            challenge_id=scan_settings.challenge_id,
-            challenge_attempt_id=scan_settings.challenge_attempt_id,
-            scan_effective_submit_allowed=True,
-            scan_cycle_phase="trigger_poll",
-        )
-
-        post_cycle_state = getattr(result, "post_cycle_state", None)
-        merged_state: AgentState | None = None
-        if post_cycle_state is not None:
             try:
-                updated_state = AgentState.model_validate(post_cycle_state)
-                merged_state = _merge_preserving_stop_pending(previous_state, updated_state)
-                save_agent_state(entry.symbol, merged_state)
+                symbol_spec = symbol_service.get_symbol_spec(entry.symbol)
             except Exception:
-                pass
+                symbol_spec = None
 
-        if getattr(result, "submitted_order", False):
-            any_submitted = True
-            print(
-                "Trigger touched: "
-                f"symbol={entry.symbol} submitted=true "
-                f"target={target_price} actual_close={candle_c} "
-                f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
-            )
-            # Lifecycle protocol entry for internal trigger -> effective Propr submit.
-            if merged_state is None:
-                merged_state = previous_state
-            _append_order_protocol_entry(
-                journal_path=scan_settings.journal_path,
+            result = run_app_cycle(
+                client=client,
+                order_service=order_service,
                 symbol=entry.symbol,
-                environment=propr_config.environment,
-                status="trigger_submitted",
+                candles=data_batch.candles,
+                config=strategy_config,
+                account_balance=data_batch.account_balance or 10000.0,
+                previous_state=previous_state,
+                require_healthy_core=scan_settings.require_healthy_core,
+                allow_execution=True,
+                desired_leverage=scan_settings.leverage,
+                symbol_spec=symbol_spec,
+                data_source="live",
+                journal_path=scan_settings.journal_path,
                 executed_at=now_utc.isoformat(),
-                signal_lifecycle_id=merged_state.signal_lifecycle_id if merged_state is not None else None,
-                order=merged_state.pending_order if merged_state is not None else None,
-                notes=(
-                    "trigger touched; submitted bracket to Propr "
-                    f"(target={target_price} candle_ts={candle_ts} high={candle_h} low={candle_l} close={candle_c})"
-                ),
-                source_signal_type=getattr(entry, "selected_signal_type", None),
-                external_order_id=(merged_state.pending_order_id if merged_state is not None else None),
-            )
-        else:
-            print(
-                "Market tick: "
-                f"symbol={entry.symbol} submitted=false "
-                f"target={target_price} actual_close={candle_c} "
-                f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+                challenge_id=scan_settings.challenge_id,
+                challenge_attempt_id=scan_settings.challenge_attempt_id,
+                scan_effective_submit_allowed=True,
+                scan_cycle_phase="trigger_poll",
             )
 
-        if _should_remove_from_armed(result):
+            post_cycle_state = getattr(result, "post_cycle_state", None)
+            merged_state: AgentState | None = None
+            if post_cycle_state is not None:
+                try:
+                    updated_state = AgentState.model_validate(post_cycle_state)
+                    merged_state = _merge_preserving_stop_pending(previous_state, updated_state)
+                    save_agent_state(entry.symbol, merged_state)
+                except Exception:
+                    pass
+
+            if getattr(result, "submitted_order", False):
+                any_submitted = True
+                print(
+                    "Trigger touched: "
+                    f"symbol={entry.symbol} submitted=true "
+                    f"target={target_price} actual_close={candle_c} "
+                    f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+                )
+                # Lifecycle protocol entry for internal trigger -> effective Propr submit.
+                if merged_state is None:
+                    merged_state = previous_state
+                _append_order_protocol_entry(
+                    journal_path=scan_settings.journal_path,
+                    symbol=entry.symbol,
+                    environment=propr_config.environment,
+                    status="trigger_submitted",
+                    executed_at=now_utc.isoformat(),
+                    signal_lifecycle_id=merged_state.signal_lifecycle_id if merged_state is not None else None,
+                    order=merged_state.pending_order if merged_state is not None else None,
+                    notes=(
+                        "trigger touched; submitted bracket to Propr "
+                        f"(target={target_price} candle_ts={candle_ts} high={candle_h} low={candle_l} close={candle_c})"
+                    ),
+                    source_signal_type=getattr(entry, "selected_signal_type", None),
+                    external_order_id=(merged_state.pending_order_id if merged_state is not None else None),
+                )
+            else:
+                print(
+                    "Market tick: "
+                    f"symbol={entry.symbol} submitted=false "
+                    f"target={target_price} actual_close={candle_c} "
+                    f"candle_ts={candle_ts} high={candle_h} low={candle_l}"
+                )
+
+            if _should_remove_from_armed(result):
+                continue
+            kept.append(entry)
+        except Exception as exc:
+            # Defensive isolation: a single market's transient HL/Propr failure must not
+            # kill the long-running daemon. Keep the market armed and retry next tick.
+            print(
+                "Armed poll skipped (kept armed for next tick): "
+                f"symbol={entry.symbol} coin={entry.coin} "
+                f"error_class={exc.__class__.__name__} error={exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            kept.append(entry)
             continue
-        kept.append(entry)
 
     new_snapshot = ArmedMarketsSnapshot(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
     if snapshot.scan_ts:

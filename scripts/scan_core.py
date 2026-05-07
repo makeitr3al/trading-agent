@@ -127,6 +127,7 @@ def select_execution_candidates(scan_summaries: list[dict[str, Any]], available_
 
 def failed_market_summary(symbol: str, coin: str, exc: Exception) -> dict[str, Any]:
     print(f"Market: {symbol} ({coin})")
+    print(f"  scan_failed_class: {exc.__class__.__name__}")
     print(f"  scan_failed: {exc}")
     return {
         "symbol": symbol,

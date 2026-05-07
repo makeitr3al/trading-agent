@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -28,7 +30,30 @@ class HyperliquidHttpClient(Protocol):
 
 class RequestsHyperliquidHttpClient:
     def post(self, url: str, json: dict[str, Any]) -> Any:
-        response = requests.post(url, json=json, timeout=30)
+        _start = time.monotonic()
+        _payload_type = json.get("type") if isinstance(json, dict) else None
+        if isinstance(json, dict):
+            _coin = json.get("coin") or (json.get("req") or {}).get("coin")
+        else:
+            _coin = None
+        try:
+            response = requests.post(url, json=json, timeout=30)
+        except Exception as exc:
+            print(
+                f"[hl_http] POST {url} type={_payload_type} coin={_coin} "
+                f"network_error={exc.__class__.__name__}: {exc} "
+                f"duration_ms={int((time.monotonic() - _start) * 1000)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
+        print(
+            f"[hl_http] POST {url} type={_payload_type} coin={_coin} "
+            f"status={response.status_code} "
+            f"duration_ms={int((time.monotonic() - _start) * 1000)}",
+            file=sys.stderr,
+            flush=True,
+        )
         response.raise_for_status()
         return response.json()
 

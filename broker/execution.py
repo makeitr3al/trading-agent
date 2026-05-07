@@ -23,6 +23,8 @@ from broker.propr_payload_parse import _map_order_status, _normalize_order_type
 
 FLOAT_TOLERANCE = 1e-9
 
+# Blocks pyramiding into an existing Propr position (merged fills share positionId).
+SUBMIT_BLOCKED_OPEN_POSITION_AT_BROKER = "submit blocked: open position present at broker for symbol"
 
 
 def _extract_first(payload: dict[str, Any], keys: list[str]) -> Any:
@@ -94,6 +96,65 @@ def _extract_external_order_id(order_payload: dict[str, Any]) -> str | None:
 def _supports_open_orders_lookup(order_service: ProprOrderService) -> bool:
     client = getattr(order_service, "client", None)
     return client is not None and hasattr(client, "get_orders")
+
+
+def _supports_positions_lookup(order_service: ProprOrderService) -> bool:
+    client = getattr(order_service, "client", None)
+    return client is not None and hasattr(client, "get_positions")
+
+
+def _get_positions_payload(order_service: ProprOrderService, account_id: str) -> list[dict[str, Any]]:
+    if not _supports_positions_lookup(order_service):
+        return []
+
+    client = getattr(order_service, "client", None)
+    try:
+        payload = client.get_positions(account_id)
+    except Exception:
+        return []
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("data", [])
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def open_position_probe_for_symbol(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+) -> int:
+    """Fresh ``get_positions`` snapshot; count lenient open rows matching ``symbol``.
+
+    Returns ``0`` when the client lacks ``get_positions`` (test doubles).
+    """
+    from broker.propr_payload_parse import _payload_matches_symbol as _sym_match
+    from broker.state_sync import _is_open_position_row_lenient
+
+    sym = symbol.strip().upper()
+    n = 0
+    for item in _get_positions_payload(order_service, account_id):
+        if _is_open_position_row_lenient(item) and _sym_match(item, sym):
+            n += 1
+    return n
+
+
+def _open_position_blocks_new_bracket(
+    order_service: ProprOrderService,
+    account_id: str,
+    symbol: str,
+    state: AgentState,
+) -> bool:
+    if bool(getattr(state, "has_open_broker_position_for_symbol", False)):
+        return True
+    return open_position_probe_for_symbol(order_service, account_id, symbol) > 0
+
+
+def _bracket_submit_blocked_payload() -> dict[str, Any]:
+    return {"cancel": None, "submit": {"status": "skipped", "reason": SUBMIT_BLOCKED_OPEN_POSITION_AT_BROKER}}
 
 
 
@@ -345,6 +406,8 @@ def _submit_agent_order_skip_reason(state: AgentState, order: Order | None) -> s
         return "submit blocked: order is None"
     if state.active_trade is not None:
         return "submit blocked: active trade present"
+    if state.has_open_broker_position_for_symbol:
+        return SUBMIT_BLOCKED_OPEN_POSITION_AT_BROKER
     if state.pending_order is not None:
         return "submit blocked: pending order already in agent state"
     return None
@@ -380,6 +443,9 @@ def submit_agent_order_if_allowed(
     blocked = _submit_agent_order_skip_reason(state, order)
     if blocked is not None:
         return SubmitAgentOrderResult(None, blocked, None)
+
+    if open_position_probe_for_symbol(order_service, account_id, symbol) > 0:
+        return SubmitAgentOrderResult(None, SUBMIT_BLOCKED_OPEN_POSITION_AT_BROKER, None)
 
     existing_order_id = find_equivalent_external_pending_order_id(
         order_service=order_service,
@@ -456,6 +522,15 @@ def safe_replace_pending_order(
     symbol_spec: SymbolSpec | None = None,
     buy_spread: float = 0.0,
 ) -> dict | None:
+    # Block before branch logic: ``should_submit_order`` is False when ``has_open_broker_position_for_symbol``,
+    # but callers still need an explicit skipped payload (not ``None``) for observability.
+    if (
+        new_order is not None
+        and new_order.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}
+        and _open_position_blocks_new_bracket(order_service, account_id, symbol, state)
+    ):
+        return _bracket_submit_blocked_payload()
+
     if not should_cancel_existing_pending_order(state, new_order):
         if new_order is not None and should_submit_order(state, new_order):
             if new_order.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
@@ -718,7 +793,9 @@ def manage_active_trade_exit_orders(
 
 
 __all__ = [
+    "SUBMIT_BLOCKED_OPEN_POSITION_AT_BROKER",
     "find_equivalent_external_pending_order_id",
+    "open_position_probe_for_symbol",
     "should_submit_order",
     "SubmitAgentOrderResult",
     "submit_agent_order_if_allowed",

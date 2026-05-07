@@ -232,6 +232,90 @@ def test_append_order_protocol_entry_writes_order_row(monkeypatch: pytest.Monkey
     assert getattr(e, "signal_lifecycle_id") == "sid_1"
 
 
+def test_poll_armed_markets_keeps_market_armed_when_build_data_raises(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: a transient HL 5xx during build_data_batch_and_config must NOT
+    crash the trigger_polling_daemon. The market stays armed for the next tick."""
+    import scripts.trigger_polling_daemon as m
+
+    monkeypatch.setattr(m, "load_propr_config_from_env", lambda: SimpleNamespace(environment="beta"))
+    monkeypatch.setattr(m, "load_data_source_settings_from_env", lambda: SimpleNamespace(data_source="live"))
+    monkeypatch.setattr(
+        m,
+        "load_multi_market_scan_settings_from_env",
+        lambda: SimpleNamespace(
+            assets=["BTC", "ETH"],
+            allow_submit=True,
+            require_healthy_core=True,
+            leverage=1,
+            journal_path="",
+            challenge_id=None,
+            challenge_attempt_id=None,
+        ),
+    )
+    monkeypatch.setattr(m, "ProprClient", lambda *_a, **_k: object())
+    monkeypatch.setattr(m, "ProprOrderService", lambda *_a, **_k: object())
+
+    class _FakeSymbolService:
+        def get_symbol_spec(self, _symbol: str):
+            return None
+
+    monkeypatch.setattr(m, "HyperliquidSymbolService", lambda: _FakeSymbolService())
+    monkeypatch.setattr(m, "AssetRegistry", lambda: object())
+
+    call_count = {"n": 0}
+
+    def _raising_build(**_kwargs: object):
+        call_count["n"] += 1
+        # Simulate HL 502 like the production stack trace: requests.HTTPError → ValueError.
+        raise ValueError("Failed to fetch live spread from Hyperliquid: 502 Server Error")
+
+    monkeypatch.setattr(m, "build_data_batch_and_config", _raising_build)
+    monkeypatch.setattr(m, "load_agent_state", lambda *_a, **_k: AgentState())
+    monkeypatch.setattr(m, "save_agent_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "save_armed_markets", lambda **_k: None)
+
+    snapshot = ArmedMarketsSnapshot(
+        scan_ts="2026-05-07T07:00:00+00:00",
+        ttl_hours=24,
+        markets=[
+            ArmedMarketEntry(
+                symbol="BTC",
+                coin="BTC",
+                order_type="OrderType.BUY_STOP",
+                entry=100.0,
+                stop_loss=90.0,
+                take_profit=120.0,
+                signal_source="trend_signal",
+                selected_signal_type="trend",
+                scan_ts="2026-05-07T07:00:00+00:00",
+            ),
+            ArmedMarketEntry(
+                symbol="ETH",
+                coin="ETH",
+                order_type="OrderType.SELL_STOP",
+                entry=2000.0,
+                stop_loss=2200.0,
+                take_profit=1700.0,
+                signal_source="trend_signal",
+                selected_signal_type="trend",
+                scan_ts="2026-05-07T07:00:00+00:00",
+            ),
+        ],
+    )
+
+    out = poll_armed_markets(snapshot, now_utc=datetime(2026, 5, 7, 9, 45, tzinfo=timezone.utc))
+
+    # Both markets must be processed (loop did not abort on first failure) and stay armed.
+    assert call_count["n"] == 2
+    assert {row.symbol for row in out.markets} == {"BTC", "ETH"}
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Armed poll skipped" in combined
+    assert "BTC" in combined and "ETH" in combined
+
+
 def test_emit_disarm_protocol_entries_emits_for_removed(monkeypatch: pytest.MonkeyPatch) -> None:
     import scripts.trigger_polling_daemon as m
 

@@ -106,6 +106,45 @@ def test_trend_stop_trigger_does_nothing_when_not_touched(monkeypatch: pytest.Mo
     assert result.submitted_order is False
 
 
+def test_trend_stop_trigger_skipped_when_open_broker_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    order = make_order()
+
+    class TriggerOrderService(FakeOrderService):
+        def submit_market_entry_bracket_with_exits(self, *_args, **_kwargs):
+            raise AssertionError("should not submit when broker already has an open position")
+
+    monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
+    monkeypatch.setattr("app.trading_app.get_active_challenge_context", lambda client, challenge_id=None: make_challenge_context())
+    monkeypatch.setattr(
+        "app.trading_app.sync_agent_state_from_propr",
+        lambda client, account_id, previous_state: AgentState(has_open_broker_position_for_symbol=True),
+    )
+    monkeypatch.setattr(
+        "app.trading_app.run_agent_cycle",
+        lambda candles, config, account_balance, state: (make_strategy_result(order), AgentState(pending_order=order)),
+    )
+    monkeypatch.setattr(
+        "app.trading_app.evaluate_asset_execution_guard",
+        lambda client, account_id, symbol, desired_leverage: AssetGuardResult(
+            allow_execution=True, reason=None, asset="BTC", desired_leverage=desired_leverage, max_leverage=5
+        ),
+    )
+
+    result = run_app_cycle(
+        client=FakeClient(environment="beta"),
+        order_service=TriggerOrderService(),
+        symbol="BTC/USDC",
+        candles=_touching_candle(order.entry),
+        config=StrategyConfig(),
+        account_balance=10000.0,
+        allow_execution=True,
+        data_source="live",
+    )
+
+    assert result.submitted_order is False
+    assert result.skipped_reason == "open position present at broker for symbol"
+
+
 def test_trend_stop_trigger_respects_mode_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TREND_STOP_TRIGGER_MODE", "disabled")
     order = make_order()

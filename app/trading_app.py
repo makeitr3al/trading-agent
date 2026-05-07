@@ -16,6 +16,7 @@ from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
 from broker.challenge_service import get_active_challenge_context
 from broker.execution import (
     manage_active_trade_exit_orders,
+    open_position_probe_for_symbol,
     safe_replace_pending_order,
     submit_active_trade_close_if_allowed,
     submit_agent_order_if_allowed,
@@ -501,6 +502,13 @@ def _phase_pending_trigger(ctx: _CycleContext) -> AppCycleResult | None:
         return ctx.build_result()
 
     account_id = ctx.challenge_context.account_id
+    if ctx.synced_state.has_open_broker_position_for_symbol:
+        ctx.skipped_reason = "open position present at broker for symbol"
+        return ctx.build_result()
+    if open_position_probe_for_symbol(ctx.order_service, account_id, ctx.symbol) > 0:
+        ctx.skipped_reason = "open position present at broker for symbol"
+        return ctx.build_result()
+
     ctx.asset_guard_result = evaluate_asset_execution_guard(
         client=ctx.client,
         account_id=account_id,

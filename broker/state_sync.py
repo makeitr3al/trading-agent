@@ -415,6 +415,28 @@ def _resolve_exit_order_ids_for_active_position(
     return []
 
 
+def symbol_has_lenient_open_position_row(
+    positions_payload: dict | list[dict],
+    normalized_symbol: str | None,
+) -> bool:
+    """True if any position row is open (lenient) and matches ``normalized_symbol`` (asset scope).
+
+    Used for pyramiding guards: Propr merges same-side fills into one position; any open row for the
+    symbol blocks new entry brackets regardless of strict ``Trade`` mapping success.
+    """
+    if normalized_symbol is None or not str(normalized_symbol).strip():
+        return False
+    sym = str(normalized_symbol).strip().upper()
+    for row in _get_items(positions_payload):
+        if (
+            isinstance(row, dict)
+            and _is_open_position_row_lenient(row)
+            and _payload_matches_symbol(row, sym)
+        ):
+            return True
+    return False
+
+
 def _mapped_positions_for_symbol(
     positions_payload: dict | list[dict],
     normalized_symbol: str | None,
@@ -530,6 +552,7 @@ def build_agent_state_from_propr_data(
             "pending_order_id": None,
             "stop_loss_order_id": None,
             "take_profit_order_id": None,
+            "has_open_broker_position_for_symbol": False,
             "account_open_entry_orders_count": len(all_valid_order_entries),
             "account_open_positions_count": account_open_positions_count,
             "account_unrealized_pnl": account_unrealized_pnl,
@@ -542,6 +565,10 @@ def build_agent_state_from_propr_data(
         mapped_positions,
         positions_payload,
         previous_state,
+        normalized_symbol,
+    )
+    has_open_broker_position_for_symbol = symbol_has_lenient_open_position_row(
+        positions_payload,
         normalized_symbol,
     )
     active_position_id = active_trade.position_id if active_trade is not None else None
@@ -574,6 +601,7 @@ def build_agent_state_from_propr_data(
             pending_order_id=pending_order_id,
             stop_loss_order_id=stop_loss_order_id,
             take_profit_order_id=take_profit_order_id,
+            has_open_broker_position_for_symbol=has_open_broker_position_for_symbol,
             account_open_entry_orders_count=len(all_valid_order_entries),
             account_open_positions_count=account_open_positions_count,
             account_unrealized_pnl=account_unrealized_pnl,
@@ -586,6 +614,7 @@ def build_agent_state_from_propr_data(
             "pending_order_id": pending_order_id,
             "stop_loss_order_id": stop_loss_order_id,
             "take_profit_order_id": take_profit_order_id,
+            "has_open_broker_position_for_symbol": has_open_broker_position_for_symbol,
             "account_open_entry_orders_count": len(all_valid_order_entries),
             "account_open_positions_count": account_open_positions_count,
             "account_unrealized_pnl": account_unrealized_pnl,
@@ -643,6 +672,7 @@ __all__ = [
     "_extract_account_unrealized_pnl_from_payload",
     "build_agent_state_from_propr_data",
     "enrich_positions_payload_with_exit_levels_from_orders",
+    "symbol_has_lenient_open_position_row",
     "sync_agent_state_from_propr",
     "sync_agent_state_from_propr_with_position_summary",
     "summarize_open_position_rows",

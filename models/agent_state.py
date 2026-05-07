@@ -22,6 +22,9 @@ class AgentState(BaseModel):
     account_unrealized_pnl: float | None = None
     signal_lifecycle_id: str | None = None
     last_journaled_signal_bar_ts: str | None = None
+    # True when Propr reports any lenient open position row for normalized_symbol (symbol-scoped sync).
+    # Used to block new entry brackets even when strict mapper cannot reconstruct active_trade (no SL/TP).
+    has_open_broker_position_for_symbol: bool = False
 
     @model_validator(mode="before")
     @classmethod
