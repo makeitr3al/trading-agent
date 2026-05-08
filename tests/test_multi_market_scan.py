@@ -82,6 +82,9 @@ def test_maybe_upgrade_to_hip3_market_keeps_bare_ticker_when_not_hip3() -> None:
 
 def test_main_scans_remaining_markets_after_hyperliquid_preflight_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Invalid HL coin for one market must not abort the whole multi-market scan."""
+    # Disable preflight network probing here \u2014 this test is about per-market exception
+    # isolation in the registry/scan path, not about preflight prefix repair.
+    monkeypatch.setenv("SCAN_PREFLIGHT_DISABLED", "YES")
 
     def _fake_propr_config() -> SimpleNamespace:
         return SimpleNamespace(environment="beta")

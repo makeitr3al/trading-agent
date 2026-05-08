@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -21,6 +22,7 @@ from data.providers.hyperliquid_historical_provider import HyperliquidHistorical
 from models.order import OrderType
 from utils.env_loader import DataSourceSettings, MultiMarketScanSettings, load_hyperliquid_config_from_env
 from utils.live_status import write_live_status_from_state
+from utils.scan_market_preflight import is_preflight_disabled, preflight_scan_markets
 
 
 @dataclass(frozen=True)
@@ -356,10 +358,25 @@ def build_scan_context(
     effective_hl_base = hyperliquid_base_config
     if effective_hl_base is None and data_source_settings.data_source == "live":
         effective_hl_base = load_hyperliquid_config_from_env()
+
+    effective_settings = scan_settings
+    if data_source_settings.data_source == "live" and not is_preflight_disabled():
+        try:
+            working, _results = preflight_scan_markets(scan_settings.assets)
+            if working != list(scan_settings.assets):
+                effective_settings = scan_settings.model_copy(update={"assets": working})
+        except Exception as exc:  # never let preflight infra failures kill a scan
+            print(
+                f"[preflight] preflight failed (continuing with raw assets): "
+                f"{exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+
     return ScanContext(
         environment=environment,
         data_source_settings=data_source_settings,
-        scan_settings=scan_settings,
+        scan_settings=effective_settings,
         effective_allow_submit=effective_allow_submit,
         client=propr_client,
         order_service=order_service,

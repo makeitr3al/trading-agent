@@ -427,11 +427,14 @@ def symbol_has_lenient_open_position_row(
     if normalized_symbol is None or not str(normalized_symbol).strip():
         return False
     sym = str(normalized_symbol).strip().upper()
+    # Propr `/positions` rows often identify the instrument as the base asset (e.g. "BTC")
+    # rather than "BTC/USDC". For symbol-scoped guards we treat "BTC/USDC" as matching "BTC".
+    sym_base = sym.split("/", 1)[0] if "/" in sym else sym
     for row in _get_items(positions_payload):
         if (
             isinstance(row, dict)
             and _is_open_position_row_lenient(row)
-            and _payload_matches_symbol(row, sym)
+            and (_payload_matches_symbol(row, sym) or _payload_matches_symbol(row, sym_base))
         ):
             return True
     return False

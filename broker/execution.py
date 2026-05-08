@@ -135,9 +135,10 @@ def open_position_probe_for_symbol(
     from broker.state_sync import _is_open_position_row_lenient
 
     sym = symbol.strip().upper()
+    sym_base = sym.split("/", 1)[0] if "/" in sym else sym
     n = 0
     for item in _get_positions_payload(order_service, account_id):
-        if _is_open_position_row_lenient(item) and _sym_match(item, sym):
+        if _is_open_position_row_lenient(item) and (_sym_match(item, sym) or _sym_match(item, sym_base)):
             n += 1
     return n
 

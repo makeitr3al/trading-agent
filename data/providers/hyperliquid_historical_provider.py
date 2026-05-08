@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -11,6 +12,11 @@ from config.hyperliquid_config import HyperliquidConfig
 from data.providers.base import DataBatch
 from data.providers.contract import validate_data_batch
 from models.candle import Candle
+
+
+def _hl_http_logging_enabled() -> bool:
+    raw = (os.getenv("LOG_HL_HTTP") or "").strip().lower()
+    return raw in {"1", "yes", "true", "on"}
 
 
 _INTERVAL_TO_MS = {
@@ -30,30 +36,34 @@ class HyperliquidHttpClient(Protocol):
 
 class RequestsHyperliquidHttpClient:
     def post(self, url: str, json: dict[str, Any]) -> Any:
-        _start = time.monotonic()
-        _payload_type = json.get("type") if isinstance(json, dict) else None
-        if isinstance(json, dict):
-            _coin = json.get("coin") or (json.get("req") or {}).get("coin")
-        else:
-            _coin = None
+        log_enabled = _hl_http_logging_enabled()
+        _start = time.monotonic() if log_enabled else 0.0
+        _payload_type: str | None = None
+        _coin: str | None = None
+        if log_enabled:
+            _payload_type = json.get("type") if isinstance(json, dict) else None
+            if isinstance(json, dict):
+                _coin = json.get("coin") or (json.get("req") or {}).get("coin")
         try:
             response = requests.post(url, json=json, timeout=30)
         except Exception as exc:
+            if log_enabled:
+                print(
+                    f"[hl_http] POST {url} type={_payload_type} coin={_coin} "
+                    f"network_error={exc.__class__.__name__}: {exc} "
+                    f"duration_ms={int((time.monotonic() - _start) * 1000)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            raise
+        if log_enabled:
             print(
                 f"[hl_http] POST {url} type={_payload_type} coin={_coin} "
-                f"network_error={exc.__class__.__name__}: {exc} "
+                f"status={response.status_code} "
                 f"duration_ms={int((time.monotonic() - _start) * 1000)}",
                 file=sys.stderr,
                 flush=True,
             )
-            raise
-        print(
-            f"[hl_http] POST {url} type={_payload_type} coin={_coin} "
-            f"status={response.status_code} "
-            f"duration_ms={int((time.monotonic() - _start) * 1000)}",
-            file=sys.stderr,
-            flush=True,
-        )
         response.raise_for_status()
         return response.json()
 
