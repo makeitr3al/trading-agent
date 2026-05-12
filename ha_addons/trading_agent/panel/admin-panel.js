@@ -9,6 +9,10 @@ const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
 const TA_CHALLENGE_LS_KEY = "trading_agent_panel_challenge_id";
 const TA_VIEWER_ENV_LS_KEY = "trading_agent_panel_view_env";
 
+function utf8ToB64(s) {
+  return btoa(unescape(encodeURIComponent(String(s))));
+}
+
 function envScopedUrl(base, env) {
   const safe = String(env || "").trim().toLowerCase();
   if (!safe) return base;
@@ -899,7 +903,10 @@ class TradingAgentAdminPanel extends HTMLElement {
     }
     if (!entries.length) return;
     try {
-      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", { entries: JSON.stringify(entries) });
+      const entriesJson = JSON.stringify(entries);
+      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", {
+        entries_b64: utf8ToB64(entriesJson),
+      });
       this._selectedTradeRows.clear(); this._expandedTradeRows.clear();
       await new Promise(r => setTimeout(r, 1000));
       await this.refreshJournal();

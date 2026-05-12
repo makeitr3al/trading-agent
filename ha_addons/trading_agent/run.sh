@@ -125,18 +125,73 @@ if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
     find "$PANEL_DIR" -name "admin-panel-*.js" -delete 2>/dev/null || true
 fi
 
-# Deploy journal delete helper script to /share (called by HA shell_command)
+# Deploy journal delete helper script to /share (called by HA shell_command).
+# Targets JSON must arrive on stdin (e.g. base64 -d | python3 ...) so inner quotes do not break the shell.
+cp "$APP_PATH/utils/journal_table_core.py" "$DATA_PATH/journal_table_core.py" || true
 cat > "$DATA_PATH/delete_journal_entries.py" << 'DELETEPY'
-import json, sys
+import importlib.util
+import json
+import sys
 from pathlib import Path
 
-targets = json.loads(sys.argv[1])
+
+def _load_targets():
+    stdin_data = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
+    if stdin_data:
+        return json.loads(stdin_data)
+    if len(sys.argv) >= 2 and sys.argv[1].strip():
+        return json.loads(sys.argv[1])
+    raise SystemExit("delete_journal_entries: missing JSON targets (stdin or argv)")
+
+
+def _rebuild_journal_artifacts() -> None:
+    core_p = Path("/share/trading-agent-data/journal_table_core.py")
+    if not core_p.is_file():
+        print("[delete_journal_entries] journal_table_core.py missing; skip table rebuild")
+        return
+    spec = importlib.util.spec_from_file_location("journal_table_core", core_p)
+    if spec is None or spec.loader is None:
+        print("[delete_journal_entries] journal_table_core load failed; skip table rebuild")
+        return
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    data = Path("/share/trading-agent-data")
+    active = "beta"
+    cfg_path = data / "operator_config.json"
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            active = str(cfg.get("environment") or "beta").strip().lower() or "beta"
+        except Exception:
+            pass
+    www = Path("/config/www/trading-agent")
+    for env in ("beta", "prod"):
+        jp = data / f"trading_journal_{env}.jsonl"
+        if not jp.is_file():
+            continue
+        payload = mod.build_journal_table_payload(jp)
+        txt = json.dumps(payload, ensure_ascii=True) + "\n"
+        (data / f"journal_table_{env}.json").write_text(txt, encoding="utf-8")
+        if env == active:
+            (data / "journal_table.json").write_text(txt, encoding="utf-8")
+        try:
+            www.mkdir(parents=True, exist_ok=True)
+            (www / f"journal_table_{env}.json").write_text(txt, encoding="utf-8")
+            if env == active:
+                (www / "journal_table.json").write_text(txt, encoding="utf-8")
+        except Exception as exc:
+            print(f"[delete_journal_entries] panel www write failed ({env}): {exc}")
+    print("[delete_journal_entries] journal tables refreshed")
+
+
+targets = _load_targets()
 targets_by_env = {"beta": [], "prod": []}
 for t in targets:
     env = str(t.get("environment") or "").strip().lower()
     if env in targets_by_env:
         targets_by_env[env].append(t)
 
+total_deleted = 0
 for env, env_targets in targets_by_env.items():
     if not env_targets:
         continue
@@ -172,7 +227,11 @@ for env, env_targets in targets_by_env.items():
         else:
             kept.append(line)
     p.write_text("\n".join(kept) + "\n", "utf-8")
+    total_deleted += deleted
     print(f"[delete_journal_entries] env={env} deleted={deleted} kept={len(kept)}")
+
+if total_deleted > 0:
+    _rebuild_journal_artifacts()
 DELETEPY
 
 # Also copy panel assets to /share for host-side sync (proven path)

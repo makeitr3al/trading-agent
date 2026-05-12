@@ -266,3 +266,18 @@ def test_build_journal_table_warns_for_large_entry_count(tmp_path: Path) -> None
 
     assert payload["entry_count_total"] == 10_001
     assert payload["warnings"]
+
+
+def test_build_journal_table_matches_stdlib_core_payload(tmp_path: Path) -> None:
+    from utils.journal_table_core import build_journal_table_payload
+
+    journal_path = tmp_path / "journal.jsonl"
+    journal_path.write_text(
+        '{"entry_type":"cycle","entry_timestamp":"2026-01-01T00:00:00Z","symbol":"X","environment":"beta","received_signals":[]}\n',
+        encoding="utf-8",
+    )
+    a = build_journal_table(path=journal_path)
+    b = build_journal_table_payload(journal_path)
+    a.pop("generated_at", None)
+    b.pop("generated_at", None)
+    assert a == b

@@ -149,6 +149,8 @@ Hinweis zur **Offene Positionen** Karte (Fallback auf Live-Status): Wenn keine J
 
 Das Panel kann Order-/Trade-Zeilen aus dem Journal loeschen (Service `shell_command.trading_agent_delete_journal_entries_haos` → `/share/trading-agent-data/delete_journal_entries.py`).
 
+- **Transport**: Das Panel uebergibt `entries_b64` (Base64 von UTF-8 JSON), damit innerhalb des JSON **keine Shell-Anfuehrungszeichen** den `shell_command` zerlegen. Die Shell leitet per `base64 -d | python3 ...` **stdin** an das Skript weiter (Argumentliste bleibt leer).
+- **Nach dem Loeschen**: Wenn mindestens eine Zeile entfernt wurde, baut das Skript `journal_table.json` / `journal_table_<env>.json` auf `/share/trading-agent-data` und unter `/config/www/trading-agent` neu (sofern schreibbar), damit die Orders-&-Trades-Ansicht nicht auf einem alten Export haengen bleibt.
 - **Matching-Regel**: Ein Delete-Target matcht eine Journal-Zeile nur, wenn `symbol`, `entry_type`, `status`, `environment` passen und der uebergebene Timestamp gegen **`executed_at` oder `entry_timestamp`** matcht.
   *(Das Panel verwendet als Row-Timestamp `executed_at` und faellt sonst auf `entry_timestamp` zurueck.)*
 - **Log-Ausgabe**: Pro Umgebung wird eine Zusammenfassung geloggt: `[delete_journal_entries] env=<env> deleted=<n> kept=<n>`.
