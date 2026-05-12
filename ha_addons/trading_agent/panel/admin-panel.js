@@ -9,18 +9,6 @@ const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
 const TA_CHALLENGE_LS_KEY = "trading_agent_panel_challenge_id";
 const TA_VIEWER_ENV_LS_KEY = "trading_agent_panel_view_env";
 
-// #region agent log
-function _agentDbg(hypothesisId, location, message, data) {
-  try {
-    fetch("http://127.0.0.1:7558/ingest/7f207313-b83d-4922-b184-cdfd4f2118d9", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e69761" },
-      body: JSON.stringify({ sessionId: "e69761", hypothesisId, location, message, data, timestamp: Date.now() }),
-    }).catch(() => {});
-  } catch (_) {}
-}
-// #endregion
-
 function envScopedUrl(base, env) {
   const safe = String(env || "").trim().toLowerCase();
   if (!safe) return base;
@@ -517,7 +505,6 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
     this._viewerEnv = null;
     this._stateByEnv = {};
-    this._agentDebugFirstHass = true;
     this._dataFetchEnvAtConnect = null;
     this._hassEnvMismatchSynced = false;
     this._directRunSummary = null;
@@ -575,12 +562,6 @@ class TradingAgentAdminPanel extends HTMLElement {
       const stored = (typeof localStorage !== "undefined" ? localStorage.getItem(TA_VIEWER_ENV_LS_KEY) : "") || "";
       if (stored.trim()) this._viewerEnv = stored.trim();
     } catch (_) {}
-    // #region agent log
-    try {
-      const ls = typeof localStorage !== "undefined" ? localStorage.getItem(TA_VIEWER_ENV_LS_KEY) : null;
-      _agentDbg("H6", "admin-panel.js:connectedCallback", "before initial poll", { lsStored: ls, viewerEnv: this.viewerEnv() });
-    } catch (_) {}
-    // #endregion
     this._dataFetchEnvAtConnect = this.viewerEnv();
     this._startLivePolling();
     this.refreshJournal();
@@ -622,35 +603,16 @@ class TradingAgentAdminPanel extends HTMLElement {
       const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (resp.ok) {
         this._directLiveStatus = await resp.json();
-        // #region agent log
-        const d = this._directLiveStatus || {};
-        _agentDbg("H1", "admin-panel.js:_fetchLiveStatus", "live ok", {
-          url: primaryUrl, env,
-          balance: d.balance, margin_balance: d.margin_balance, account_unrealized_pnl: d.account_unrealized_pnl,
-          active_challenges_count: d.active_challenges_count, last_error: d.last_error,
-        });
-        // #endregion
         this.render();
       }
       else if (primaryUrl !== "/local/trading-agent/live_status.json") {
         const fallback = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
         if (fallback.ok) {
           this._directLiveStatus = await fallback.json();
-          // #region agent log
-          _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live fallback", { primaryStatus: resp.status, env: this.viewerEnv() });
-          // #endregion
           this.render();
         }
-      } else {
-        // #region agent log
-        _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live failed", { primaryUrl, status: resp.status, env });
-        // #endregion
       }
-    } catch (e) {
-      // #region agent log
-      _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live exception", { err: String(e), env: this.viewerEnv() });
-      // #endregion
-    }
+    } catch (_) {}
     this._checkPanelVersion();
   }
 
@@ -714,16 +676,6 @@ class TradingAgentAdminPanel extends HTMLElement {
     if (runId && !["unknown", "unavailable"].includes(runId) && runId !== this.lastRunId) {
       this.lastRunId = runId; this.refreshJournal();
     }
-    // #region agent log
-    if (this._agentDebugFirstHass && value) {
-      this._agentDebugFirstHass = false;
-      const rs = value.states?.[ENTITIES.runSummary];
-      const ls = (() => { try { return localStorage.getItem(TA_VIEWER_ENV_LS_KEY); } catch (_) { return null; } })();
-      _agentDbg("H4", "admin-panel.js:set hass", "first hass", {
-        viewerEnv: this.viewerEnv(), lsStored: ls, runSummaryState: rs?.state, runSummaryAttrsKeys: rs?.attributes ? Object.keys(rs.attributes).slice(0, 12) : [],
-      });
-    }
-    // #endregion
     if (value && !this._challengeHydrateAttempted) {
       this._challengeHydrateAttempted = true;
       try {
@@ -754,9 +706,6 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._viewerEnv = env;
     try { localStorage.setItem(TA_VIEWER_ENV_LS_KEY, env); } catch (_) {}
     this._directLiveStatus = null;
-    // #region agent log
-    _agentDbg("H5", "admin-panel.js:_setViewerEnv", "viewer env set", { env, prev: cur });
-    // #endregion
     this.refreshJournal(); this.fetchChallenges();
     if (this._liveStatusInterval) this._fetchLiveStatus();
     this.render();
@@ -782,9 +731,6 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.loading = true; this.loadError = null; this._lastJournalRefresh = Date.now(); this.render();
     try {
       const env = this.viewerEnv();
-      // #region agent log
-      _agentDbg("H6", "admin-panel.js:refreshJournal", "start", { env, primaryWillBe: envScopedUrl(JOURNAL_URL, env) });
-      // #endregion
       const primaryUrl = envScopedUrl(JOURNAL_URL, env);
       const response = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (response.ok) { this.journalPayload = await response.json(); }
@@ -794,17 +740,7 @@ class TradingAgentAdminPanel extends HTMLElement {
         this.journalPayload = { ...await fallback.json(), warnings: [`Viewer env '${env}' konnte nicht env-spezifisch geladen werden. Fallback auf legacy ${JOURNAL_URL}.`] };
       } else throw new Error(`HTTP ${response.status}`);
     } catch (error) { this.loadError = error instanceof Error ? error.message : String(error); }
-    finally {
-      // #region agent log
-      const tr = this.journalPayload?.trade_rows || [];
-      const closed = tr.filter(r => r.entry_type === "trade" && r.status === "closed");
-      const types = [...new Set(tr.slice(0, 30).map(r => `${r.entry_type}/${r.status}`))];
-      _agentDbg("H3", "admin-panel.js:refreshJournal", "done", {
-        env: this.viewerEnv(), loadError: this.loadError, tradeRows: tr.length, closedTradeKpi: closed.length, sampleTypes: types,
-      });
-      // #endregion
-      this.loading = false; this.render();
-    }
+    finally { this.loading = false; this.render(); }
   }
 
   async fetchAssetRegistry() {

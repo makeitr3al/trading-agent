@@ -7,7 +7,8 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from time import sleep
+import subprocess
+from time import monotonic, sleep
 from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,7 @@ from utils.runtime_status import utc_now_iso, write_runtime_status
 
 
 _shutdown_requested = False
+_last_live_status_sync_m: float = 0.0
 
 
 def _safe_float(value: object | None) -> float | None:
@@ -213,6 +215,55 @@ def _resolve_operator_journal_table_path() -> str | None:
     return raw or None
 
 
+def _resolve_operator_live_status_path() -> str | None:
+    raw = (os.getenv("OPERATOR_LIVE_STATUS_PATH") or os.getenv("TRADING_AGENT_LIVE_STATUS_PATH") or "").strip()
+    return raw or None
+
+
+def _refresh_panel_live_status(*, min_interval_s: float = 0.0, force: bool = False) -> None:
+    """
+    Write live_status.json via REST (same as run.sh) and mirror to HA www for /local/trading-agent/.
+    Without this, trigger-polling mode only refreshed journal_table — Open PnL / balances stayed stale.
+    """
+    global _last_live_status_sync_m
+    now_m = monotonic()
+    if not force and min_interval_s > 0 and (now_m - _last_live_status_sync_m) < min_interval_s:
+        return
+
+    out_raw = _resolve_operator_live_status_path()
+    if not out_raw:
+        return
+
+    script = _PROJECT_ROOT / "scripts" / "sync_live_status.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), "--output-path", out_raw],
+        cwd=str(_PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print(
+            f"sync_live_status failed (non-fatal) rc={proc.returncode}: {proc.stderr or proc.stdout}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    _last_live_status_sync_m = monotonic()
+    env_name = _resolve_operator_env()
+    panel_dir = Path("/config/www/trading-agent")
+    try:
+        src = Path(out_raw)
+        if not src.is_file():
+            return
+        text = src.read_text(encoding="utf-8")
+        panel_dir.mkdir(parents=True, exist_ok=True)
+        (panel_dir / "live_status.json").write_text(text, encoding="utf-8")
+        if env_name and env_name != "unknown":
+            (panel_dir / f"live_status_{env_name}.json").write_text(text, encoding="utf-8")
+    except Exception as exc:
+        print(f"Live status panel copy failed (non-fatal): {exc}", file=sys.stderr, flush=True)
+
+
 def _refresh_panel_journal_table(*, journal_path: str) -> None:
     """
     In one-shot mode, run.sh updates journal_table.json at process end.
@@ -375,6 +426,7 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
             _refresh_panel_journal_table(journal_path=journal_path)
         except Exception as exc:
             print(f"Journal table refresh failed (non-fatal): {exc}")
+    _refresh_panel_live_status(force=True)
 
     print(f"Daily scan finished: armed_markets={len(armed)}")
     return ArmedMarketsSnapshot(scan_ts=scan_ts, ttl_hours=24, markets=armed)
@@ -572,7 +624,6 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
     if snapshot.scan_ts:
         save_armed_markets(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
 
-    # If we actually submitted, update panel artifacts so the operator sees the change quickly.
     if any_submitted:
         journal_path = _resolve_operator_journal_path()
         if journal_path:
@@ -580,6 +631,8 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
                 _refresh_panel_journal_table(journal_path=journal_path)
             except Exception as exc:
                 print(f"Journal table refresh failed (non-fatal): {exc}")
+    # Open PnL / balances: refresh every poll tick (journal alone is insufficient).
+    _refresh_panel_live_status(force=True)
     return new_snapshot
 
 
@@ -636,12 +689,13 @@ def main() -> None:
             last_scan_at=snapshot.scan_ts,
             next_scheduled_scan_at=next_scheduled_scan_at,
         )
-        # Sleep in chunks so SIGTERM is handled quickly.
+        # Sleep in chunks so SIGTERM is handled quickly; refresh live_status periodically while idle.
         remaining = seconds_to_scan
         while remaining > 0 and not _shutdown_requested:
-            chunk = min(300.0, remaining)
+            chunk = min(60.0, remaining)
             sleep(chunk)
             remaining -= chunk
+            _refresh_panel_live_status(min_interval_s=55.0, force=False)
 
     _write_heartbeat(
         runner_state="stopped",
