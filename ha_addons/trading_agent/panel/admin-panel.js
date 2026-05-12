@@ -17,24 +17,111 @@ function envScopedUrl(base, env) {
   return `${m[1]}_${safe}.json`;
 }
 
-// #region agent log
-function _agentDbg(hypothesisId, location, message, data, runId) {
-  const payload = {
-    sessionId: "fd13d3",
-    runId: runId || "pre-fix",
-    hypothesisId,
-    location,
-    message,
-    data: data || {},
-    timestamp: Date.now(),
-  };
-  fetch("http://127.0.0.1:7558/ingest/7f207313-b83d-4922-b184-cdfd4f2118d9", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd13d3" },
-    body: JSON.stringify(payload),
-  }).catch(() => {});
+/** HA `trading_agent_sync_panel_assets_haos` may write a JSON placeholder with source "unknown" (HTTP 200). It must not shadow the live_status sensor. */
+function isUsableLiveStatusPayload(d) {
+  if (!d || typeof d !== "object") return false;
+  const src = String(d.source ?? "").toLowerCase();
+  if (src === "unknown") return false;
+  const ovN = Array.isArray(d.challenges_overview) ? d.challenges_overview.length : 0;
+  const posN = Array.isArray(d.open_positions_summary) ? d.open_positions_summary.length : 0;
+  const nOpen = Number(d.account_open_positions_count ?? 0);
+  const pnl = d.account_unrealized_pnl;
+  const hasPnl = pnl !== null && pnl !== undefined && pnl !== "" && !Number.isNaN(Number(pnl));
+  const hasMoney = [d.margin_balance, d.balance, d.available_balance, d.initial_balance].some(
+    (v) => v !== null && v !== undefined && v !== "" && !Number.isNaN(Number(v)),
+  );
+  if (d.updated_at) return true;
+  if (hasMoney || hasPnl || nOpen > 0 || ovN > 0 || posN > 0) return true;
+  if (d.last_error && String(d.last_error).trim() && src === "poll") return true;
+  return false;
 }
-// #endregion
+
+function mergeNonNullLive(base, overlay) {
+  if (!overlay) return base || null;
+  if (!base) return { ...overlay };
+  const out = { ...base };
+  for (const k of Object.keys(overlay)) {
+    const v = overlay[k];
+    if (k === "challenges_overview" || k === "open_positions_summary") {
+      if (Array.isArray(v) && v.length) out[k] = v;
+      continue;
+    }
+    if (v === null || v === undefined || v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function liveStatusFromEntity(entity) {
+  if (!entity) return null;
+  const a = entity.attributes || {};
+  return {
+    account_unrealized_pnl: a.account_unrealized_pnl,
+    account_open_positions_count: a.account_open_positions_count,
+    websocket_connected: a.websocket_connected,
+    source: entity.state,
+    last_error: a.last_error,
+    updated_at: a.updated_at,
+    environment: a.environment,
+    challenge_name: a.challenge_name,
+    challenge_id: a.challenge_id,
+    initial_balance: a.initial_balance,
+    balance: a.balance,
+    margin_balance: a.margin_balance,
+    available_balance: a.available_balance,
+    high_water_mark: a.high_water_mark,
+    open_positions_summary: a.open_positions_summary,
+    challenges_overview: a.challenges_overview,
+    active_challenges_count: a.active_challenges_count,
+    account_total_margin_balance: a.account_total_margin_balance,
+  };
+}
+
+function isUsableRunSummaryPayload(s) {
+  if (!s || typeof s !== "object") return false;
+  const rid = String(s.run_id ?? "").trim().toLowerCase();
+  if (!rid || rid === "unknown" || rid === "unavailable") return false;
+  return true;
+}
+
+function runSummaryFromEntity(entity) {
+  if (!entity) return null;
+  const a = entity.attributes || {};
+  return {
+    run_id: entity.state,
+    mode: a.mode,
+    environment: a.environment,
+    started_at: a.started_at,
+    finished_at: a.finished_at,
+    success: a.success,
+    exit_code: a.exit_code,
+    suite: a.suite,
+    entry_count: a.entry_count,
+    cycle_count: a.cycle_count,
+    order_count: a.order_count,
+    trade_count: a.trade_count,
+    symbols: a.symbols,
+    latest_symbol: a.latest_symbol,
+    latest_outcome: a.latest_outcome,
+    title: a.title,
+    notification_title: a.notification_title,
+    notification_message: a.notification_message,
+    summary_lines: a.summary_lines,
+  };
+}
+
+function mergeNonNullRunSummary(base, overlay) {
+  if (!overlay) return base || null;
+  if (!base) return { ...overlay };
+  const out = { ...base };
+  for (const k of Object.keys(overlay)) {
+    const v = overlay[k];
+    if (v === null || v === undefined || v === "") continue;
+    if (k === "summary_lines" && Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
 
 /** When Propr reports multiple active challenges, sync_live_status omits top-level balances; aggregate from challenges_overview. */
 function aggregateKpiBalances(ld) {
@@ -622,29 +709,12 @@ class TradingAgentAdminPanel extends HTMLElement {
       const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (resp.ok) {
         this._directLiveStatus = await resp.json();
-        // #region agent log
-        const d = this._directLiveStatus;
-        _agentDbg("H3", "admin-panel.js:_fetchLiveStatus", "live_status_loaded", {
-          primaryUrl,
-          updated_at: d?.updated_at,
-          account_open_positions_count: d?.account_open_positions_count,
-          open_summary_n: Array.isArray(d?.open_positions_summary) ? d.open_positions_summary.length : null,
-        });
-        // #endregion
         this.render();
       }
       else if (primaryUrl !== "/local/trading-agent/live_status.json") {
         const fallback = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
         if (fallback.ok) {
           this._directLiveStatus = await fallback.json();
-          // #region agent log
-          const d = this._directLiveStatus;
-          _agentDbg("H3", "admin-panel.js:_fetchLiveStatus", "live_status_loaded_fallback", {
-            updated_at: d?.updated_at,
-            account_open_positions_count: d?.account_open_positions_count,
-            open_summary_n: Array.isArray(d?.open_positions_summary) ? d.open_positions_summary.length : null,
-          });
-          // #endregion
           this.render();
         }
       }
@@ -678,19 +748,19 @@ class TradingAgentAdminPanel extends HTMLElement {
   // ── Data ─────────────────────────────────────────────────────────────────────
 
   _effectiveLiveData() {
-    if (this._directLiveStatus) return this._directLiveStatus;
-    const entity = this.entity(ENTITIES.liveStatus);
-    if (!entity) return null;
-    const a = entity.attributes || {};
-    return {
-      account_unrealized_pnl: a.account_unrealized_pnl, account_open_positions_count: a.account_open_positions_count,
-      websocket_connected: a.websocket_connected, source: entity.state, last_error: a.last_error,
-      updated_at: a.updated_at, challenge_name: a.challenge_name, challenge_id: a.challenge_id,
-      initial_balance: a.initial_balance, balance: a.balance, margin_balance: a.margin_balance,
-      available_balance: a.available_balance, high_water_mark: a.high_water_mark,
-      open_positions_summary: a.open_positions_summary, challenges_overview: a.challenges_overview,
-      active_challenges_count: a.active_challenges_count, account_total_margin_balance: a.account_total_margin_balance,
-    };
+    const fromEntity = liveStatusFromEntity(this.entity(ENTITIES.liveStatus));
+    const raw = this._directLiveStatus;
+    const fromFile = raw && isUsableLiveStatusPayload(raw) ? raw : null;
+    if (!fromFile) return fromEntity || null;
+    return mergeNonNullLive(fromEntity, fromFile);
+  }
+
+  _effectiveRunSummary() {
+    const fromEntity = runSummaryFromEntity(this.entity(ENTITIES.runSummary));
+    const raw = this._directRunSummary;
+    const fromFile = raw && isUsableRunSummaryPayload(raw) ? raw : null;
+    if (!fromFile) return fromEntity || null;
+    return mergeNonNullRunSummary(fromEntity, fromFile);
   }
 
   set hass(value) {
@@ -771,37 +841,14 @@ class TradingAgentAdminPanel extends HTMLElement {
       const response = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (response.ok) {
         this.journalPayload = await response.json();
-        // #region agent log
-        const jp = this.journalPayload;
-        const life = jp.lifecycle_rows || [];
-        _agentDbg("H3", "admin-panel.js:refreshJournal", "journal_table_loaded", {
-          primaryUrl,
-          generated_at: jp.generated_at,
-          entry_count_total: jp.entry_count_total,
-          trade_n: (jp.trade_rows || []).length,
-          lifecycle_n: life.length,
-          lifecycle_open_n: life.filter(r => r.phase === "open").length,
-          lifecycle_pending_n: life.filter(r => r.phase === "pending_order").length,
-        });
-        // #endregion
       }
       else if (primaryUrl !== JOURNAL_URL) {
         const fallback = await fetch(`${JOURNAL_URL}?ts=${Date.now()}`, { cache: "no-store" });
         if (!fallback.ok) throw new Error(`HTTP ${fallback.status}`);
         this.journalPayload = { ...await fallback.json(), warnings: [`Viewer env '${env}' konnte nicht env-spezifisch geladen werden. Fallback auf legacy ${JOURNAL_URL}.`] };
-        // #region agent log
-        const jp = this.journalPayload;
-        _agentDbg("H4", "admin-panel.js:refreshJournal", "journal_table_loaded_legacy_fallback", {
-          generated_at: jp.generated_at,
-          entry_count_total: jp.entry_count_total,
-        });
-        // #endregion
       } else throw new Error(`HTTP ${response.status}`);
     } catch (error) {
       this.loadError = error instanceof Error ? error.message : String(error);
-      // #region agent log
-      _agentDbg("H4", "admin-panel.js:refreshJournal", "journal_fetch_failed", { message: this.loadError, primaryUrl: envScopedUrl(JOURNAL_URL, this.viewerEnv()) });
-      // #endregion
     }
     finally { this.loading = false; this.render(); }
   }
@@ -851,36 +898,13 @@ class TradingAgentAdminPanel extends HTMLElement {
       if (row) entries.push({ entry_timestamp: row.timestamp, symbol: row.symbol, environment: row.environment || this.viewerEnv(), entry_type: row.entry_type, status: row.status });
     }
     if (!entries.length) return;
-    const beforeTotal = this.journalPayload?.entry_count_total ?? -1;
-    const entriesJson = JSON.stringify(entries);
-    // #region agent log
-    _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_attempt", {
-      n: entries.length,
-      jsonLen: entriesJson.length,
-      innerDoubleQuotes: (entriesJson.match(/"/g) || []).length,
-      first_entry: entries[0] || null,
-    });
-    // #endregion
     try {
-      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", { entries: entriesJson });
-      // #region agent log
-      _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_service_resolved", { n: entries.length });
-      // #endregion
+      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", { entries: JSON.stringify(entries) });
       this._selectedTradeRows.clear(); this._expandedTradeRows.clear();
       await new Promise(r => setTimeout(r, 1000));
       await this.refreshJournal();
-      // #region agent log
-      _agentDbg("H2", "admin-panel.js:_deleteSelectedTrades", "delete_refresh_compare", {
-        beforeTotal,
-        afterTotal: this.journalPayload?.entry_count_total ?? -1,
-        deletedSelectionN: entries.length,
-      });
-      // #endregion
     } catch (err) {
       console.error("[Trading Agent] Delete failed:", err);
-      // #region agent log
-      _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_service_rejected", { err: String(err) });
-      // #endregion
     }
   }
 
@@ -1646,18 +1670,11 @@ table.da-table tr.da-detail-row:hover{background:var(--bg-3)}
   }
 
   _renderLogsTab() {
-    const rs = this._directRunSummary;
+    const rs = this._effectiveRunSummary();
     if (rs && typeof rs === "object") {
-      const content = JSON.stringify(rs, null, 2);
-      return `<pre class="dirA-logs-pre">${escapeHtml(content)}</pre>`;
+      return `<pre class="dirA-logs-pre">${escapeHtml(JSON.stringify(rs, null, 2))}</pre>`;
     }
-    const entity = this.entity(ENTITIES.runSummary);
-    if (!entity) return `<div class="dirA-placeholder"><span class="muted">Kein Run-Summary (${escapeHtml(RUN_SUMMARY_URL)} fehlt oder ${escapeHtml(ENTITIES.runSummary)}).</span></div>`;
-    const attrs = entity.attributes || {};
-    const content = [`state: ${entity.state || "—"}`, "---",
-      ...Object.entries(attrs).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v, null, 2) : String(v ?? "")}`)
-    ].join("\n");
-    return `<pre class="dirA-logs-pre">${escapeHtml(content)}</pre>`;
+    return `<div class="dirA-placeholder"><span class="muted">Kein Run-Summary (${escapeHtml(RUN_SUMMARY_URL)} und ${escapeHtml(ENTITIES.runSummary)} leer).</span></div>`;
   }
 
   // ── Main render ────────────────────────────────────────────────────────────
