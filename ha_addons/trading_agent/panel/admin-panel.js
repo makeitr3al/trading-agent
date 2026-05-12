@@ -17,6 +17,25 @@ function envScopedUrl(base, env) {
   return `${m[1]}_${safe}.json`;
 }
 
+// #region agent log
+function _agentDbg(hypothesisId, location, message, data, runId) {
+  const payload = {
+    sessionId: "fd13d3",
+    runId: runId || "pre-fix",
+    hypothesisId,
+    location,
+    message,
+    data: data || {},
+    timestamp: Date.now(),
+  };
+  fetch("http://127.0.0.1:7558/ingest/7f207313-b83d-4922-b184-cdfd4f2118d9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd13d3" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+// #endregion
+
 /** When Propr reports multiple active challenges, sync_live_status omits top-level balances; aggregate from challenges_overview. */
 function aggregateKpiBalances(ld) {
   let balance = ld?.margin_balance ?? ld?.balance ?? null;
@@ -603,12 +622,29 @@ class TradingAgentAdminPanel extends HTMLElement {
       const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (resp.ok) {
         this._directLiveStatus = await resp.json();
+        // #region agent log
+        const d = this._directLiveStatus;
+        _agentDbg("H3", "admin-panel.js:_fetchLiveStatus", "live_status_loaded", {
+          primaryUrl,
+          updated_at: d?.updated_at,
+          account_open_positions_count: d?.account_open_positions_count,
+          open_summary_n: Array.isArray(d?.open_positions_summary) ? d.open_positions_summary.length : null,
+        });
+        // #endregion
         this.render();
       }
       else if (primaryUrl !== "/local/trading-agent/live_status.json") {
         const fallback = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
         if (fallback.ok) {
           this._directLiveStatus = await fallback.json();
+          // #region agent log
+          const d = this._directLiveStatus;
+          _agentDbg("H3", "admin-panel.js:_fetchLiveStatus", "live_status_loaded_fallback", {
+            updated_at: d?.updated_at,
+            account_open_positions_count: d?.account_open_positions_count,
+            open_summary_n: Array.isArray(d?.open_positions_summary) ? d.open_positions_summary.length : null,
+          });
+          // #endregion
           this.render();
         }
       }
@@ -733,13 +769,40 @@ class TradingAgentAdminPanel extends HTMLElement {
       const env = this.viewerEnv();
       const primaryUrl = envScopedUrl(JOURNAL_URL, env);
       const response = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
-      if (response.ok) { this.journalPayload = await response.json(); }
+      if (response.ok) {
+        this.journalPayload = await response.json();
+        // #region agent log
+        const jp = this.journalPayload;
+        const life = jp.lifecycle_rows || [];
+        _agentDbg("H3", "admin-panel.js:refreshJournal", "journal_table_loaded", {
+          primaryUrl,
+          generated_at: jp.generated_at,
+          entry_count_total: jp.entry_count_total,
+          trade_n: (jp.trade_rows || []).length,
+          lifecycle_n: life.length,
+          lifecycle_open_n: life.filter(r => r.phase === "open").length,
+          lifecycle_pending_n: life.filter(r => r.phase === "pending_order").length,
+        });
+        // #endregion
+      }
       else if (primaryUrl !== JOURNAL_URL) {
         const fallback = await fetch(`${JOURNAL_URL}?ts=${Date.now()}`, { cache: "no-store" });
         if (!fallback.ok) throw new Error(`HTTP ${fallback.status}`);
         this.journalPayload = { ...await fallback.json(), warnings: [`Viewer env '${env}' konnte nicht env-spezifisch geladen werden. Fallback auf legacy ${JOURNAL_URL}.`] };
+        // #region agent log
+        const jp = this.journalPayload;
+        _agentDbg("H4", "admin-panel.js:refreshJournal", "journal_table_loaded_legacy_fallback", {
+          generated_at: jp.generated_at,
+          entry_count_total: jp.entry_count_total,
+        });
+        // #endregion
       } else throw new Error(`HTTP ${response.status}`);
-    } catch (error) { this.loadError = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      this.loadError = error instanceof Error ? error.message : String(error);
+      // #region agent log
+      _agentDbg("H4", "admin-panel.js:refreshJournal", "journal_fetch_failed", { message: this.loadError, primaryUrl: envScopedUrl(JOURNAL_URL, this.viewerEnv()) });
+      // #endregion
+    }
     finally { this.loading = false; this.render(); }
   }
 
@@ -788,12 +851,37 @@ class TradingAgentAdminPanel extends HTMLElement {
       if (row) entries.push({ entry_timestamp: row.timestamp, symbol: row.symbol, environment: row.environment || this.viewerEnv(), entry_type: row.entry_type, status: row.status });
     }
     if (!entries.length) return;
+    const beforeTotal = this.journalPayload?.entry_count_total ?? -1;
+    const entriesJson = JSON.stringify(entries);
+    // #region agent log
+    _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_attempt", {
+      n: entries.length,
+      jsonLen: entriesJson.length,
+      innerDoubleQuotes: (entriesJson.match(/"/g) || []).length,
+      first_entry: entries[0] || null,
+    });
+    // #endregion
     try {
-      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", { entries: JSON.stringify(entries) });
+      await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", { entries: entriesJson });
+      // #region agent log
+      _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_service_resolved", { n: entries.length });
+      // #endregion
       this._selectedTradeRows.clear(); this._expandedTradeRows.clear();
       await new Promise(r => setTimeout(r, 1000));
       await this.refreshJournal();
-    } catch (err) { console.error("[Trading Agent] Delete failed:", err); }
+      // #region agent log
+      _agentDbg("H2", "admin-panel.js:_deleteSelectedTrades", "delete_refresh_compare", {
+        beforeTotal,
+        afterTotal: this.journalPayload?.entry_count_total ?? -1,
+        deletedSelectionN: entries.length,
+      });
+      // #endregion
+    } catch (err) {
+      console.error("[Trading Agent] Delete failed:", err);
+      // #region agent log
+      _agentDbg("H1", "admin-panel.js:_deleteSelectedTrades", "delete_service_rejected", { err: String(err) });
+      // #endregion
+    }
   }
 
   effectiveJournal() {
