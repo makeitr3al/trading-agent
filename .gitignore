@@ -33,6 +33,7 @@ Thumbs.db
 trading-agent.code-workspace
 
 # Cursor (local rules, agent prompts — not part of the shipped app)
+.cursorrules
 .cursor/
 !.cursor/commands/
 !.cursor/commands/**
@@ -61,3 +62,5 @@ artifacts/run_summary.json
 
 # Backtest artifacts (generated output + candle caches)
 artifacts/backtests/
+# Added by code-review-graph
+.code-review-graph/
