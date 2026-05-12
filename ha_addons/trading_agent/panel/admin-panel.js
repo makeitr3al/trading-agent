@@ -4,9 +4,22 @@ const REGISTRY_URL = "/local/trading-agent/asset_registry.json";
 const HOME_URL = "/lovelace";
 const PANEL_VERSION = "__PANEL_VERSION__";
 const CHALLENGES_URL = "/local/trading-agent/challenges.json";
+const RUN_SUMMARY_URL = "/local/trading-agent/run_summary.json";
 const PERSIST_OPERATOR_DEBOUNCE_MS = 400;
 const TA_CHALLENGE_LS_KEY = "trading_agent_panel_challenge_id";
 const TA_VIEWER_ENV_LS_KEY = "trading_agent_panel_view_env";
+
+// #region agent log
+function _agentDbg(hypothesisId, location, message, data) {
+  try {
+    fetch("http://127.0.0.1:7558/ingest/7f207313-b83d-4922-b184-cdfd4f2118d9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e69761" },
+      body: JSON.stringify({ sessionId: "e69761", hypothesisId, location, message, data, timestamp: Date.now() }),
+    }).catch(() => {});
+  } catch (_) {}
+}
+// #endregion
 
 function envScopedUrl(base, env) {
   const safe = String(env || "").trim().toLowerCase();
@@ -14,6 +27,33 @@ function envScopedUrl(base, env) {
   const m = base.match(/^(.*)\.json$/);
   if (!m) return base;
   return `${m[1]}_${safe}.json`;
+}
+
+/** When Propr reports multiple active challenges, sync_live_status omits top-level balances; aggregate from challenges_overview. */
+function aggregateKpiBalances(ld) {
+  let balance = ld?.margin_balance ?? ld?.balance ?? null;
+  let initialBalance = ld?.initial_balance ?? null;
+  let marginBalance = ld?.margin_balance ?? null;
+  let availableBalance = ld?.available_balance ?? null;
+  const ov = Array.isArray(ld?.challenges_overview) ? ld.challenges_overview : [];
+  const sumKey = (rows, key) => {
+    const parts = rows.map(r => Number(r[key])).filter(n => !Number.isNaN(n));
+    return parts.length ? parts.reduce((a, c) => a + c, 0) : null;
+  };
+  if (ov.length && (balance == null || initialBalance == null)) {
+    if (balance == null) {
+      const t = ld?.account_total_margin_balance;
+      balance = t != null && !Number.isNaN(Number(t)) ? Number(t) : sumKey(ov, "margin_balance");
+    }
+    if (balance == null) balance = sumKey(ov, "balance");
+    if (marginBalance == null) marginBalance = sumKey(ov, "margin_balance");
+    if (availableBalance == null) availableBalance = sumKey(ov, "available_balance");
+    if (initialBalance == null) initialBalance = sumKey(ov, "initial_balance");
+  }
+  const challengeLabel =
+    ld?.challenge_name
+    || (ov.length > 1 ? `${ov.length} aktive Challenges` : (ov[0]?.challenge_name || ov[0]?.challenge_id || null));
+  return { balance, initialBalance, marginBalance, availableBalance, challengeLabel };
 }
 
 const ENTITIES = {
@@ -477,6 +517,10 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._onVisibilityChange = () => { if (!document.hidden && this._liveStatusInterval) this._fetchLiveStatus(); };
     this._viewerEnv = null;
     this._stateByEnv = {};
+    this._agentDebugFirstHass = true;
+    this._dataFetchEnvAtConnect = null;
+    this._hassEnvMismatchSynced = false;
+    this._directRunSummary = null;
   }
 
   // ── Focus preservation ──────────────────────────────────────────────────────
@@ -527,6 +571,17 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.shadowRoot.addEventListener("change", e => this.onChange(e));
     this.shadowRoot.addEventListener("input", e => this.onInput(e));
     document.addEventListener("visibilitychange", this._onVisibilityChange);
+    try {
+      const stored = (typeof localStorage !== "undefined" ? localStorage.getItem(TA_VIEWER_ENV_LS_KEY) : "") || "";
+      if (stored.trim()) this._viewerEnv = stored.trim();
+    } catch (_) {}
+    // #region agent log
+    try {
+      const ls = typeof localStorage !== "undefined" ? localStorage.getItem(TA_VIEWER_ENV_LS_KEY) : null;
+      _agentDbg("H6", "admin-panel.js:connectedCallback", "before initial poll", { lsStored: ls, viewerEnv: this.viewerEnv() });
+    } catch (_) {}
+    // #endregion
+    this._dataFetchEnvAtConnect = this.viewerEnv();
     this._startLivePolling();
     this.refreshJournal();
     this.fetchAssetRegistry();
@@ -545,7 +600,13 @@ class TradingAgentAdminPanel extends HTMLElement {
   _startLivePolling() {
     if (this._liveStatusInterval) return;
     this._fetchLiveStatus();
-    this._liveStatusInterval = setInterval(() => { if (!document.hidden) this._fetchLiveStatus(); }, 10_000);
+    this._fetchRunSummary();
+    this._liveStatusInterval = setInterval(() => {
+      if (!document.hidden) {
+        this._fetchLiveStatus();
+        this._fetchRunSummary();
+      }
+    }, 10_000);
   }
 
   _stopLivePolling() {
@@ -559,13 +620,47 @@ class TradingAgentAdminPanel extends HTMLElement {
       const env = this.viewerEnv();
       const primaryUrl = envScopedUrl("/local/trading-agent/live_status.json", env);
       const resp = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
-      if (resp.ok) { this._directLiveStatus = await resp.json(); this.render(); }
+      if (resp.ok) {
+        this._directLiveStatus = await resp.json();
+        // #region agent log
+        const d = this._directLiveStatus || {};
+        _agentDbg("H1", "admin-panel.js:_fetchLiveStatus", "live ok", {
+          url: primaryUrl, env,
+          balance: d.balance, margin_balance: d.margin_balance, account_unrealized_pnl: d.account_unrealized_pnl,
+          active_challenges_count: d.active_challenges_count, last_error: d.last_error,
+        });
+        // #endregion
+        this.render();
+      }
       else if (primaryUrl !== "/local/trading-agent/live_status.json") {
         const fallback = await fetch(`/local/trading-agent/live_status.json?ts=${Date.now()}`, { cache: "no-store" });
-        if (fallback.ok) { this._directLiveStatus = await fallback.json(); this.render(); }
+        if (fallback.ok) {
+          this._directLiveStatus = await fallback.json();
+          // #region agent log
+          _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live fallback", { primaryStatus: resp.status, env: this.viewerEnv() });
+          // #endregion
+          this.render();
+        }
+      } else {
+        // #region agent log
+        _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live failed", { primaryUrl, status: resp.status, env });
+        // #endregion
       }
-    } catch (_) {}
+    } catch (e) {
+      // #region agent log
+      _agentDbg("H2", "admin-panel.js:_fetchLiveStatus", "live exception", { err: String(e), env: this.viewerEnv() });
+      // #endregion
+    }
     this._checkPanelVersion();
+  }
+
+  async _fetchRunSummary() {
+    try {
+      const resp = await fetch(`${RUN_SUMMARY_URL}?ts=${Date.now()}`, { cache: "no-store" });
+      if (!resp.ok) return;
+      this._directRunSummary = await resp.json();
+      if (this.currentTab === "logs") this.render();
+    } catch (_) {}
   }
 
   async _checkPanelVersion() {
@@ -609,10 +704,26 @@ class TradingAgentAdminPanel extends HTMLElement {
       const opEnv = value?.states?.[ENTITIES.operatorConfig]?.attributes?.environment || value?.states?.[ENTITIES.environment]?.state || "";
       this._viewerEnv = String(opEnv || "").trim() || "beta";
     }
+    if (value && !this._hassEnvMismatchSynced && this._dataFetchEnvAtConnect != null && this.viewerEnv() !== this._dataFetchEnvAtConnect) {
+      this._hassEnvMismatchSynced = true;
+      this.refreshJournal();
+      this.fetchChallenges();
+      this._fetchLiveStatus();
+    }
     const runId = value?.states?.[ENTITIES.runSummary]?.state;
     if (runId && !["unknown", "unavailable"].includes(runId) && runId !== this.lastRunId) {
       this.lastRunId = runId; this.refreshJournal();
     }
+    // #region agent log
+    if (this._agentDebugFirstHass && value) {
+      this._agentDebugFirstHass = false;
+      const rs = value.states?.[ENTITIES.runSummary];
+      const ls = (() => { try { return localStorage.getItem(TA_VIEWER_ENV_LS_KEY); } catch (_) { return null; } })();
+      _agentDbg("H4", "admin-panel.js:set hass", "first hass", {
+        viewerEnv: this.viewerEnv(), lsStored: ls, runSummaryState: rs?.state, runSummaryAttrsKeys: rs?.attributes ? Object.keys(rs.attributes).slice(0, 12) : [],
+      });
+    }
+    // #endregion
     if (value && !this._challengeHydrateAttempted) {
       this._challengeHydrateAttempted = true;
       try {
@@ -643,6 +754,9 @@ class TradingAgentAdminPanel extends HTMLElement {
     this._viewerEnv = env;
     try { localStorage.setItem(TA_VIEWER_ENV_LS_KEY, env); } catch (_) {}
     this._directLiveStatus = null;
+    // #region agent log
+    _agentDbg("H5", "admin-panel.js:_setViewerEnv", "viewer env set", { env, prev: cur });
+    // #endregion
     this.refreshJournal(); this.fetchChallenges();
     if (this._liveStatusInterval) this._fetchLiveStatus();
     this.render();
@@ -668,6 +782,9 @@ class TradingAgentAdminPanel extends HTMLElement {
     this.loading = true; this.loadError = null; this._lastJournalRefresh = Date.now(); this.render();
     try {
       const env = this.viewerEnv();
+      // #region agent log
+      _agentDbg("H6", "admin-panel.js:refreshJournal", "start", { env, primaryWillBe: envScopedUrl(JOURNAL_URL, env) });
+      // #endregion
       const primaryUrl = envScopedUrl(JOURNAL_URL, env);
       const response = await fetch(`${primaryUrl}?ts=${Date.now()}`, { cache: "no-store" });
       if (response.ok) { this.journalPayload = await response.json(); }
@@ -677,7 +794,17 @@ class TradingAgentAdminPanel extends HTMLElement {
         this.journalPayload = { ...await fallback.json(), warnings: [`Viewer env '${env}' konnte nicht env-spezifisch geladen werden. Fallback auf legacy ${JOURNAL_URL}.`] };
       } else throw new Error(`HTTP ${response.status}`);
     } catch (error) { this.loadError = error instanceof Error ? error.message : String(error); }
-    finally { this.loading = false; this.render(); }
+    finally {
+      // #region agent log
+      const tr = this.journalPayload?.trade_rows || [];
+      const closed = tr.filter(r => r.entry_type === "trade" && r.status === "closed");
+      const types = [...new Set(tr.slice(0, 30).map(r => `${r.entry_type}/${r.status}`))];
+      _agentDbg("H3", "admin-panel.js:refreshJournal", "done", {
+        env: this.viewerEnv(), loadError: this.loadError, tradeRows: tr.length, closedTradeKpi: closed.length, sampleTypes: types,
+      });
+      // #endregion
+      this.loading = false; this.render();
+    }
   }
 
   async fetchAssetRegistry() {
@@ -1021,15 +1148,27 @@ table.da-table tr.da-detail-row:hover{background:var(--bg-3)}
   // ── Render: KPI strip ──────────────────────────────────────────────────────
 
   _renderKpiStrip(ld, journal) {
-    const balance = ld?.margin_balance ?? ld?.balance ?? null;
-    const initialBalance = ld?.initial_balance ?? null;
+    const agg = aggregateKpiBalances(ld || {});
+    const balance = agg.balance;
+    const initialBalance = agg.initialBalance;
+    const marginForRow = agg.marginBalance ?? ld?.margin_balance ?? null;
+    const availForRow = agg.availableBalance ?? ld?.available_balance ?? null;
     const openPnl = ld?.account_unrealized_pnl ?? null;
     const openCount = Number(ld?.account_open_positions_count ?? 0);
     const openPositions = Array.isArray(ld?.open_positions_summary) ? ld.open_positions_summary : [];
+    const lifeClosed = (journal.lifecycle_rows || []).filter(r => r.phase === "closed" && r.pnl != null && r.pnl !== "");
     const closedTrades = (journal.trade_rows || []).filter(r => r.entry_type === "trade" && r.status === "closed");
-    const realizedPnl = closedTrades.reduce((sum, r) => sum + (Number(r.pnl) || 0), 0);
-    const winCount = closedTrades.filter(r => Number(r.pnl) > 0).length;
-    const winRate = closedTrades.length ? Math.round(winCount / closedTrades.length * 100) : null;
+    let realizedPnl; let winCount; let closedCountLabel;
+    if (lifeClosed.length) {
+      realizedPnl = lifeClosed.reduce((sum, r) => sum + (Number(r.pnl) || 0), 0);
+      winCount = lifeClosed.filter(r => Number(r.pnl) > 0).length;
+      closedCountLabel = lifeClosed.length;
+    } else {
+      realizedPnl = closedTrades.reduce((sum, r) => sum + (Number(r.pnl) || 0), 0);
+      winCount = closedTrades.filter(r => Number(r.pnl) > 0).length;
+      closedCountLabel = closedTrades.length;
+    }
+    const winRate = closedCountLabel ? Math.round(winCount / closedCountLabel * 100) : null;
     const fmtBal = n => n != null ? "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
     const balChg = (balance != null && initialBalance && initialBalance !== 0)
       ? ((balance - initialBalance) / initialBalance * 100) : null;
@@ -1058,17 +1197,17 @@ table.da-table tr.da-detail-row:hover{background:var(--bg-3)}
         <div class="dirA-kpi-mini">${openDesc}</div>
       </div>
       <div class="dirA-kpi">
-        <div class="dirA-kpi-label">Realisiert · ${closedTrades.length} Trades</div>
+        <div class="dirA-kpi-label">Realisiert · ${closedCountLabel} Trades</div>
         <div class="dirA-kpi-value ${realPnlNum >= 0 ? "pos" : "neg"}">${formatPnl(realizedPnl)}</div>
         ${winRate != null ? `<div class="dirA-kpi-sub">${winRate}% Trefferquote · ${winCount} Gewinner</div>` : '<div class="dirA-kpi-sub muted">—</div>'}
       </div>
       <div class="dirA-kpi">
         <div class="dirA-kpi-label">Konto</div>
         <div class="dirA-kpi-value">${fmtBal(balance)}</div>
-        ${ld?.challenge_name ? `<div class="dirA-kpi-sub">${escapeHtml(String(ld.challenge_name).slice(0, 32))}</div>` : '<div class="dirA-kpi-sub muted">—</div>'}
+        ${(agg.challengeLabel || ld?.challenge_name) ? `<div class="dirA-kpi-sub">${escapeHtml(String(agg.challengeLabel || ld.challenge_name).slice(0, 40))}</div>` : '<div class="dirA-kpi-sub muted">—</div>'}
         <div class="dirA-kpi-row">
-          <div class="dirA-kpi-cell"><span class="muted">Verfügbar</span><span>${fmtBal(ld?.available_balance)}</span></div>
-          <div class="dirA-kpi-cell"><span class="muted">Margin</span><span>${fmtBal(ld?.margin_balance)}</span></div>
+          <div class="dirA-kpi-cell"><span class="muted">Verfügbar</span><span>${fmtBal(availForRow)}</span></div>
+          <div class="dirA-kpi-cell"><span class="muted">Margin</span><span>${fmtBal(marginForRow)}</span></div>
         </div>
       </div>
       <div class="dirA-kpi">
@@ -1483,8 +1622,13 @@ table.da-table tr.da-detail-row:hover{background:var(--bg-3)}
   }
 
   _renderLogsTab() {
+    const rs = this._directRunSummary;
+    if (rs && typeof rs === "object") {
+      const content = JSON.stringify(rs, null, 2);
+      return `<pre class="dirA-logs-pre">${escapeHtml(content)}</pre>`;
+    }
     const entity = this.entity(ENTITIES.runSummary);
-    if (!entity) return `<div class="dirA-placeholder"><span class="muted">Kein Run-Summary verfügbar (${escapeHtml(ENTITIES.runSummary)}).</span></div>`;
+    if (!entity) return `<div class="dirA-placeholder"><span class="muted">Kein Run-Summary (${escapeHtml(RUN_SUMMARY_URL)} fehlt oder ${escapeHtml(ENTITIES.runSummary)}).</span></div>`;
     const attrs = entity.attributes || {};
     const content = [`state: ${entity.state || "—"}`, "---",
       ...Object.entries(attrs).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v, null, 2) : String(v ?? "")}`)
@@ -1547,6 +1691,7 @@ table.da-table tr.da-detail-row:hover{background:var(--bg-3)}
     const action = el.dataset.action;
     if (action === "main-tab") {
       this.currentTab = el.dataset.tab || "scans";
+      if (this.currentTab === "logs") this._fetchRunSummary();
       this.render();
     } else if (action === "toggle-cycle") {
       const key = el.dataset.cycleKey;

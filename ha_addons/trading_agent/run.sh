@@ -330,5 +330,7 @@ python scripts/sync_live_status.py --output-path "$OPERATOR_LIVE_STATUS_PATH" ||
 cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_PATH" || true
 cp "$OPERATOR_LIVE_STATUS_PATH" "$PANEL_LIVE_STATUS_ENV_PATH" || true
 python run_summary.py --mode "$OPERATOR_MODE" --environment "$OPERATOR_ENVIRONMENT" --started-at "$run_started_at" --finished-at "$run_finished_at" --exit-code "$run_exit_code" --journal-path "$OPERATOR_JOURNAL_PATH" --test-status-path "$OPERATOR_TEST_STATUS_PATH" --output-path "$OPERATOR_RUN_SUMMARY_PATH" || true
+cp "$OPERATOR_RUN_SUMMARY_PATH" "$PANEL_DIR/run_summary.json" 2>/dev/null || true
+cp "$OPERATOR_RUN_SUMMARY_PATH" "$PANEL_SHARE_DIR/run_summary.json" 2>/dev/null || true
 
 exit "$run_exit_code"
