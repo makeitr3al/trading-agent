@@ -126,21 +126,35 @@ if [[ -f "$PANEL_ASSET_SOURCE" ]]; then
 fi
 
 # Deploy journal delete helper script to /share (called by HA shell_command).
-# Targets JSON must arrive on stdin (e.g. base64 -d | python3 ...) so inner quotes do not break the shell.
+# Panel sends base64(JSON) as the `entries` template var (legacy: python3 ... "{{ entries }}") or JSON on stdin after base64 -d.
 cp "$APP_PATH/utils/journal_table_core.py" "$DATA_PATH/journal_table_core.py" || true
 cat > "$DATA_PATH/delete_journal_entries.py" << 'DELETEPY'
+import base64
 import importlib.util
 import json
 import sys
 from pathlib import Path
 
 
+def _parse_targets_payload(raw: str):
+    """JSON array, or base64(UTF-8 JSON) so legacy `python3 ... \"{{ entries }}\"` stays shell-safe."""
+    raw = raw.strip()
+    if not raw:
+        raise ValueError("empty targets payload")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pad = (4 - len(raw) % 4) % 4
+        decoded = base64.standard_b64decode(raw + ("=" * pad)).decode("utf-8")
+        return json.loads(decoded)
+
+
 def _load_targets():
-    stdin_data = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
-    if stdin_data:
-        return json.loads(stdin_data)
+    stdin_data = sys.stdin.read() if not sys.stdin.isatty() else ""
+    if stdin_data.strip():
+        return _parse_targets_payload(stdin_data)
     if len(sys.argv) >= 2 and sys.argv[1].strip():
-        return json.loads(sys.argv[1])
+        return _parse_targets_payload(sys.argv[1])
     raise SystemExit("delete_journal_entries: missing JSON targets (stdin or argv)")
 
 

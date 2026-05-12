@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+import base64
+import json
+
+
+def _parse_targets_payload(raw: str):
+    """Mirrors delete_journal_entries.py _parse_targets_payload (run.sh heredoc)."""
+    raw = raw.strip()
+    if not raw:
+        raise ValueError("empty targets payload")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pad = (4 - len(raw) % 4) % 4
+        decoded = base64.standard_b64decode(raw + ("=" * pad)).decode("utf-8")
+        return json.loads(decoded)
+
 
 def _matches_delete_target(entry: dict, target: dict) -> bool:
     """
@@ -79,4 +95,28 @@ def test_delete_matching_rejects_wrong_symbol_or_type_or_status() -> None:
     assert _matches_delete_target(entry, {**base_target, "symbol": "ETH/USDC"}) is False
     assert _matches_delete_target(entry, {**base_target, "entry_type": "order"}) is False
     assert _matches_delete_target(entry, {**base_target, "status": "closed"}) is False
+
+
+def test_parse_targets_payload_accepts_plain_json() -> None:
+    assert _parse_targets_payload('[{"a": 1}]') == [{"a": 1}]
+
+
+def test_parse_targets_payload_accepts_base64_json() -> None:
+    b = base64.standard_b64encode('[{"x": 2}]'.encode("utf-8")).decode("ascii")
+    assert _parse_targets_payload(b) == [{"x": 2}]
+
+
+def test_parse_targets_payload_accepts_base64_without_padding() -> None:
+    payload = [
+        {
+            "entry_timestamp": "2026-05-05T18:00:02Z",
+            "symbol": "BTC/USDC",
+            "environment": "beta",
+            "entry_type": "trade",
+            "status": "filled",
+        }
+    ]
+    raw = json.dumps(payload, ensure_ascii=True)
+    b64 = base64.standard_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+    assert _parse_targets_payload(b64) == payload
 

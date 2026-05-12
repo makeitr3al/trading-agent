@@ -905,7 +905,7 @@ class TradingAgentAdminPanel extends HTMLElement {
     try {
       const entriesJson = JSON.stringify(entries);
       await this.hassState.callService("shell_command", "trading_agent_delete_journal_entries_haos", {
-        entries_b64: utf8ToB64(entriesJson),
+        entries: utf8ToB64(entriesJson),
       });
       this._selectedTradeRows.clear(); this._expandedTradeRows.clear();
       await new Promise(r => setTimeout(r, 1000));
