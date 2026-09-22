@@ -459,6 +459,34 @@ def _mapped_positions_for_symbol(
     ]
 
 
+def _resolve_local_virtual_stop_pending(
+    *,
+    previous_state: AgentState | None,
+    active_trade: Trade | None,
+    has_open_broker_position_for_symbol: bool,
+) -> tuple[Order | None, str | None]:
+    """Keep broker-less BUY_STOP/SELL_STOP intents across Propr sync.
+
+    Propr never holds stop *entries*; the bot stores them only in AgentState.
+    Sync must not wipe those intents just because the REST order book is empty.
+    Strategy cancels still win on the next closed-bar cycle (pending set to None).
+    """
+    if previous_state is None:
+        return None, None
+    if active_trade is not None or has_open_broker_position_for_symbol:
+        return None, None
+    prev_id = previous_state.pending_order_id
+    if prev_id is not None and str(prev_id).strip():
+        # Had a broker entry id that is gone → order filled/cancelled externally.
+        return None, None
+    prev_order = previous_state.pending_order
+    if prev_order is None:
+        return None, None
+    if prev_order.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+        return None, None
+    return prev_order, None
+
+
 def build_agent_state_from_propr_data(
     orders_payload: dict | list[dict],
     positions_payload: dict | list[dict],
@@ -596,6 +624,12 @@ def build_agent_state_from_propr_data(
     take_profit_order_id: str | None = take_profit_order_ids[0] if take_profit_order_ids else None
     if valid_order_entries:
         pending_order, pending_order_id = valid_order_entries[0]
+    else:
+        pending_order, pending_order_id = _resolve_local_virtual_stop_pending(
+            previous_state=previous_state,
+            active_trade=active_trade,
+            has_open_broker_position_for_symbol=has_open_broker_position_for_symbol,
+        )
 
     if previous_state is None:
         return AgentState(

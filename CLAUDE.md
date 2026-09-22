@@ -25,6 +25,8 @@ broker/         # alle Propr-API-Integration (propr_client, propr_sdk, execution
 config/         # propr_config.py, hyperliquid_config.py, strategy_config.py
 indicators/     # bollinger.py, macd.py (Indikator-Implementierungen)
 models/         # Datenmodelle: candle, decision, order, regime, signal, symbol_spec, trade, ...
+backtest/       # Offline-Simulation/Screening (kein Submit): daily_universe, screener,
+                # metrics, propr_exchange_assets (öffentlicher Propr-Catalog, ohne API-Key)
 deploy/         # Deployment-Artefakte; deploy/raspberry_pi/managed_runner.py (Haupt-Runner)
 ha_addons/      # Home Assistant Add-on Dateien
 scripts/        # manuelle Test- und Run-Skripte
@@ -101,7 +103,8 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
 | `TRADING_AGENT_LIVE_STATUS_PATH` / `OPERATOR_LIVE_STATUS_PATH` | optional, Ziel für `live_status.json` (REST-Sync, WS-Daemon, HA-Panel) |
 | `PROPR_REQUIRE_HEALTHY_CORE` | `YES`/`NO` für Core-Health-Guard |
 | `PROPR_STABLE_INTENT_ID` | optional `YES`: Pending-Entry-Submits nutzen deterministisches `intentId` aus Seed (`build_order_submission_preview`); nur nach Abgleich mit Propr-Idempotenz-Verhalten aktivieren |
-| `TREND_STOP_TRIGGER_MODE` | `last_candle` oder `disabled` (Default: `last_candle`); bei Touch des Trigger-Preises im letzten Candle wird ein Market-Bracket gesendet statt resting Stop |
+| `TREND_STOP_TRIGGER_MODE` | `last_candle` (Default), `ws`, oder `disabled`. `last_candle`: OHLC-Poll → Market-Bracket. `ws`: Hyperliquid-Trades-Watcher im Trigger-Daemon. `disabled`: kein Auto-Submit |
+| `TREND_STOP_MAX_GAP_R_RATIO` | Max. Overshoot past Entry als Anteil von \|Entry−SL\| (Default `0.5`); bei Überschreitung Skip + Disarm. `OFF` deaktiviert den Gap-Guard |
 | `JOURNAL_BAR_DEDUPE` | `YES`/`NO` (Default: `YES`); dedupliziert Journal-Emissionen innerhalb derselben Signal-Bar bei Interval-Runs |
 
 ---
@@ -119,13 +122,22 @@ Abhängigkeiten: `pandas`, `numpy`, `pydantic`, `python-dotenv`, `pytest`, `requ
   - `preflight` — empfohlener Erststarttest: unit + golden dry-run + smoke test *(Standard für Pi/HA)*
   - `beta_write` — Beta-Write-Verifikation mit echten Orders (opt-in, `--allow-live-beta-writes`)
 - **Daily Universe Backtest** (Hyperliquid 1D, offline, kein Submit): `scripts/backtest_daily_universe.py` — siehe Abschnitt **Daily Universe Backtest** unten
+- **Market Profitability Screener** (Propr-Whitelist ∩ HL-1D, GO/NO_GO): `scripts/backtest_market_screener.py` — siehe Abschnitt **Market Profitability Screener** unten
 
 **Propr-API (Entry-Orders):** In der Batching-Logik gilt **nur** `market` oder `limit` als **Entry-Order**. Stop-Entries (`BUY_STOP`/`SELL_STOP` → API `stop_limit`) sind **conditional orders** und werden ohne `positionId` bzw. ohne Entry-Order in derselben `orderGroupId` mit `conditional_order_requires_position_or_group` (HTTP 400, Code 13056) abgelehnt. Der Bot blockiert solche Stop-Entry-Submits deshalb **vorab** in `broker/execution.py` mit einem klaren `skip_reason`.
 
-**Workaround (Trend-Stop-Trigger):** Trend-Signale erzeugen intern weiterhin `BUY_STOP`/`SELL_STOP` als `pending_order` (Strategie-Semantik bleibt gleich). Live wird der Stop aber **nicht** als resting Stop-Order an Propr gesendet. Stattdessen: Wenn die Hyperliquid-Quelle im laufenden Bar die Trigger-Price berührt (Last-Candle `high/low`), sendet `app/trading_app._phase_pending_trigger` einen **Market-Bracket** (Entry `market` + SL `stop_market` + TP `take_profit_limit`) als Batch. Das vermeidet Propr 13056 und sorgt für reale Entries, hat aber **Slippage-Risiko** gegenüber Stop-Limit.
+**Workaround (Virtual Stop):** Trend- und Gegentrend-Signale erzeugen intern weiterhin `BUY_STOP`/`SELL_STOP` als `pending_order` (Strategie-Semantik bleibt gleich). Live wird der Stop **nicht** als resting Stop-Order an Propr gesendet. State-Sync erhält broker-lose Stop-Intents. Submit läuft über `app/armed_stop_submit.execute_armed_stop_market_bracket` (Market-Bracket).
+
+Auslöser (`TREND_STOP_TRIGGER_MODE`):
+- `last_candle` (Default): Last-Candle High/Low im Cycle / 60s-Poll
+- `ws`: Hyperliquid `trades` WebSocket im `scripts/trigger_polling_daemon.py` (Last Print ≥/≤ Entry); Kerzengrenze macht Catch-up auf dem eingefrorenen Level, danach Strategy-Refresh/Cancel. Universum-Scan bleibt `OPERATOR_SCHEDULE_TIME`
+- `disabled`: kein Auto-Submit
+
+Gap-Guard: `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`). Live setzt `run_agent_cycle(..., synthesize_local_fills=False)`, damit kein lokales `active_trade` ohne Propr-Fill entsteht.
 
 Env-Schalter:
-- `TREND_STOP_TRIGGER_MODE=last_candle|disabled` (Default: `last_candle`)
+- `TREND_STOP_TRIGGER_MODE=last_candle|ws|disabled` (Default: `last_candle`)
+- `TREND_STOP_MAX_GAP_R_RATIO=0.5|OFF` (Default: `0.5`)
 - `JOURNAL_BAR_DEDUPE=YES|NO` (Default: `YES`)
 
 Der Bot sendet **Bracket-Entries** (Entry + Exits) als **einen** `create_orders`-Batch (`ProprClient.create_orders_batch_raw`): Entry (`market` oder `limit`) + Stop (`stop_market`) + TP (`take_profit_limit`) unter gemeinsamem `orderGroupId` (`broker/order_service.submit_bracket_entry_with_exits`). Beim Live-State-Sync reichert `sync_agent_state_from_propr` Positionszeilen zuerst mit SL/TP aus verknüpften Orders an; liefert der strenge Position-Mapper (`map_propr_position_to_internal`) danach kein `Trade` (benötigt u. a. `stop_loss`), kann `build_agent_state_from_propr_data` für **genau eine** offene Position auf dem Symbol `active_trade` aus **vorherigem** `AgentState` synthetisieren (`pending_order` oder `active_trade`, Richtung passend), damit Exit-Management greift.
@@ -145,6 +157,26 @@ Offline-Screening über viele HL-Märkte mit **unabhängigem Kapital pro Markt**
 Ausgabe: `artifacts/backtests/daily_universe_<UTC>/summary.csv`, optional `…/<coin>/trades.csv`, `run.json` mit Parametern und Annahmen.
 
 **Wichtige Annahmen / Grenzen:** HL-Kerzen ≠ Propr-Ausführung; im Strategiecode sind Trend-Entries `BUY_STOP`/`SELL_STOP`, live gehen Bracket-Entries als Limit-Batch an Propr — der Backtest misst die **Strategie-Trigger-Semantik** auf HL-Daten. Kein Funding, kein intraday außerhalb der 1D-OHLC. `--no-compound` hält das Sizing-Risiko auf dem Startkapital statt auf der laufenden Equity.
+
+---
+
+## Market Profitability Screener
+
+Research-Pipeline über die **Propr-Whitelist** der gewählten Umgebung (öffentlicher Catalog `GET …/v1/exchange-assets/config/hyperliquid`, Base folgt `PROPR_ENV` / `--propr-env`; **kein API-Key**, kein Submit). Implementierung: `scripts/backtest_market_screener.py` plus `backtest/propr_exchange_assets.py` (Catalog), `backtest/screener.py` (End-MTM, Jahres-Stabilität, GO/NO_GO), `backtest/metrics.py` (Calmar-Ranking). Kerzen weiterhin Hyperliquid 1D über `backtest/daily_universe.py`. Pro Markt **eine** kontinuierliche Simulation (`run_agent_cycle`: Trend + Gegentrend), dann End-MTM offener Positionen, Gates und Ranking. Kein Auto-Export nach `SCAN_MARKETS`.
+
+**Beispiel (5 Jahre, Beta-Catalog, Shard 0/4):**
+
+```bash
+.\.venv\Scripts\python.exe scripts/backtest_market_screener.py --years 5 --capital 10000 --shard 0/4 --sleep-ms 300
+```
+
+Offline-Catalog: `--propr-assets-file path/to/snapshot.json` (oder Cache `artifacts/backtests/propr_exchange_assets_{env}.json`). Shard-Merge:
+
+```bash
+.\.venv\Scripts\python.exe scripts/backtest_screener_merge.py artifacts/backtests/screener_*/summary.csv --out artifacts/backtests/screener_merged
+```
+
+Ausgabe unter `artifacts/backtests/screener_<UTC>/`: `summary.csv`, `shortlist.csv` (nur `GO`), `report.md`, `run.json`. Defaults: kein Compound, Slippage 5 bps, Fees `2×taker` aus dem Catalog, `min_trades` 8, `max_dd` 35 %, Profit-Faktor ≥ 1.2, `year_pass_rate` ≥ 0.5, `min_active_years` 2, `min_history_coverage` 0.80, positives Recent-12m-Fenster (`min_trades_recent` 2). Entscheidungen: `GO` / `NO_GO` / `INSUFFICIENT_DATA` / `SKIPPED`. Ranking: Calmar ↓, dann Return% ↓, dann `n_trades` ↓.
 
 ---
 
@@ -178,8 +210,11 @@ Wenn das HA Add-on im `mode=scharf` laeuft und `trigger_polling_enabled=true` is
 
 - **Entrypoint:** `scripts/trigger_polling_daemon.py`
 - **Scan:** taeglich um `OPERATOR_SCHEDULE_TIME` (Default `07:00` UTC) ein Vollscan (Dry-Run + Execute non-stop Pendings).
-- **Armed Polling:** alle 60s nur Maerkte mit Stop-Pending-Intent (`pending_order.order_type ∈ {BUY_STOP, SELL_STOP}`), egal ob Trend oder Gegentrend.
-- **Persistenz:** `/share/trading-agent-data/armed_stop_markets.json` + `agent_state_<symbol>.json` (pro Markt), damit `pending_order` zwischen Poll-Ticks und Restarts erhalten bleibt.
+- **Armed Watch:** Maerkte mit Stop-Pending-Intent (`pending_order.order_type ∈ {BUY_STOP, SELL_STOP}`).
+  - `TREND_STOP_TRIGGER_MODE=last_candle` (Default): Poll alle ~60s (OHLC via `run_app_cycle` / `_phase_pending_trigger`) plus Kerzengrenzen-Catch-up/Refresh.
+  - `TREND_STOP_TRIGGER_MODE=ws`: Hyperliquid-Trades-WebSocket (Last Print) plus Kerzengrenzen-Catch-up/Refresh; bei WS-Ausfall Fallback auf OHLC-Poll.
+  - Gap-Guard: `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`; `OFF` deaktiviert).
+- **Persistenz:** `/share/trading-agent-data/armed_stop_markets.json` + `agent_state_<symbol>.json` (pro Markt); Sync loescht broker-lose Stops nicht mehr (`_resolve_local_virtual_stop_pending`).
 - **Heartbeat:** schreibt in `RUNNER_STATUS_PATH` (`runtime_status_<env>.json`) regelmaessig `runner_state`, `armed_markets_count`, `last_poll_tick_at`, `last_scan_at`.
 
 ---

@@ -1,1 +1,1 @@
-"""Offline backtest utilities (Hyperliquid universe, etc.)."""
+"""Offline backtest utilities (Hyperliquid universe, Propr whitelist screener)."""

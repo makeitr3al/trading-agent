@@ -235,13 +235,21 @@ def run_agent_cycle(
     account_balance: float,
     state: AgentState,
     now: datetime | None = None,
+    *,
+    synthesize_local_fills: bool = True,
 ) -> tuple[StrategyRunResult, AgentState]:
     old_pending_order = state.pending_order
     latest_candle = candles[-1]
     filled_trade = None
     working_active_trade = state.active_trade
 
-    if old_pending_order is not None and _is_order_filled(old_pending_order, latest_candle):
+    # Backtest / golden: convert a touched pending stop/limit into a local active_trade.
+    # Live Propr execution owns the fill via market-bracket submit — do not invent a trade.
+    if (
+        synthesize_local_fills
+        and old_pending_order is not None
+        and _is_order_filled(old_pending_order, latest_candle)
+    ):
         filled_trade = _build_trade_from_filled_order(old_pending_order, latest_candle.timestamp.isoformat())
         working_active_trade = filled_trade
         old_pending_order = None
