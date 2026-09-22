@@ -14,10 +14,13 @@ Der Agent ist für den Betrieb mit **Propr** (Execution) und **Hyperliquid** (Ma
 
 ## Backtests
 
-Für ein offline Universe-Screening auf Hyperliquid-1D-Daten (kein Propr-Submit) gibt es:
-`.\.venv\Scripts\python.exe scripts/backtest_daily_universe.py --years 3 --capital 10000 --include crypto --shard 0/4`
+Offline Hyperliquid-1D screening (kein Propr-Submit):
 
-Details, Annahmen und Output-Pfade stehen in `CLAUDE.md` unter **Daily Universe Backtest**.
+- Raw universe: `.\.venv\Scripts\python.exe scripts/backtest_daily_universe.py --years 3 --capital 10000 --include crypto --shard 0/4`
+- Profitability screener (Propr whitelist, GO/NO_GO): `.\.venv\Scripts\python.exe scripts/backtest_market_screener.py --years 5 --capital 10000 --shard 0/4`
+- Shard merge: `.\.venv\Scripts\python.exe scripts/backtest_screener_merge.py artifacts/backtests/screener_*/summary.csv --out artifacts/backtests/screener_merged`
+
+Details in `CLAUDE.md` unter **Daily Universe Backtest** und **Market Profitability Screener**.
 
 ## Signal Rules
 

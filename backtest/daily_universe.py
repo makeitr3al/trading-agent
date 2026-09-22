@@ -253,6 +253,9 @@ def simulate_market_daily(
             "oos_n_trades": 0,
             "exit_reason_distribution": {},
             "trades": [],
+            "equity_curve": [],
+            "open_trade": None,
+            "final_equity": float(cfg.initial_capital),
         }
 
     state = AgentState()
@@ -264,6 +267,7 @@ def simulate_market_daily(
     longest_dd_bars = 0
 
     trades_out: list[TradeRecord] = []
+    equity_curve: list[float] = []
     gross_sum = 0.0
     fees_sum = 0.0
     slip_sum = 0.0
@@ -397,6 +401,7 @@ def simulate_market_daily(
                 state = state.model_copy(update={"active_trade": None, "pending_order": None})
 
         _bump_dd()
+        equity_curve.append(float(equity))
 
     n_trades = len(trades_out)
     net_pnl = equity - initial
@@ -451,6 +456,9 @@ def simulate_market_daily(
         "oos_n_trades": oos_n,
         "exit_reason_distribution": exit_hist,
         "trades": trades_out,
+        "equity_curve": equity_curve,
+        "open_trade": state.active_trade,
+        "final_equity": float(equity),
     }
 
 
