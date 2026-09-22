@@ -26,6 +26,38 @@
     - action: input_boolean.turn_off
       target:
         entity_id: input_boolean.trading_agent_scheduling_aktiv
+    # Persist helpers then start the add-on so the long-running daemon actually comes up.
+    - action: script.trading_agent_save_current_config_haos
+    - delay:
+        seconds: 2
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
+
+- alias: Trading Agent Trigger-Polling Ensure Running
+  id: trading_agent_trigger_polling_ensure_running
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: input_boolean.trading_agent_trigger_polling_aktiv
+      state: "on"
+    - condition: template
+      value_template: >-
+        {{ states('input_select.trading_agent_mode') == 'Scharf'
+           or state_attr('sensor.trading_agent_operator_config', 'mode') == 'scharf' }}
+  actions:
+    # After Helper Sync / share sensors settle, ensure the application-mode add-on is running.
+    - delay:
+        seconds: 45
+    - condition: state
+      entity_id: input_boolean.trading_agent_trigger_polling_aktiv
+      state: "on"
+    - action: hassio.addon_start
+      data:
+        addon: "{{ states('input_text.trading_agent_addon_slug') }}"
 
 - alias: Trading Agent Helper Sync
   id: trading_agent_helper_sync
