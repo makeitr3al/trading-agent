@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
+from queue import Empty, Queue
 from time import monotonic, sleep
 from typing import Any
 
@@ -15,16 +16,20 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from app.armed_stop_submit import trend_stop_trigger_mode
 from app.journal import append_journal_entries
 from app.trading_app import run_app_cycle
 from broker.asset_registry import AssetRegistry
+from broker.challenge_service import get_active_challenge_context
 from broker.order_service import ProprOrderService
 from broker.propr_client import ProprClient
 from broker.symbol_service import HyperliquidSymbolService
+from data.providers.hyperliquid_ws import HyperliquidTradeTick, HyperliquidTradesWatcher
 from models.agent_state import AgentState
 from models.journal import JournalEntry
 from models.order import Order
 from models.order import OrderType
+from scripts.armed_stop_runtime import try_submit_on_candle_touch, try_submit_on_trade_print
 from scripts.scan_core import (
     ArmedMarketEntry,
     build_data_batch_and_config,
@@ -40,8 +45,10 @@ from scripts.trigger_polling_store import (
     save_agent_state,
     save_armed_markets,
 )
+from utils.bar_time import floor_bar_open_utc
 from utils.env_loader import (
     load_data_source_settings_from_env,
+    load_hyperliquid_config_from_env,
     load_multi_market_scan_settings_from_env,
     load_propr_config_from_env,
 )
@@ -433,14 +440,7 @@ def run_full_scan_cycle(*, now_utc: datetime) -> ArmedMarketsSnapshot:
 
 
 def _should_remove_from_armed(result: Any) -> bool:
-    """
-    Keep an armed market unless we have a concrete reason to disarm it.
-
-    Important: During fast polling on the same signal bar (1d), strategy evaluation can
-    temporarily yield a state without pending_order even though the stop-intent should
-    remain armed until bar close / next daily scan. Therefore, pending_order==None is
-    *not* a disarm condition by itself.
-    """
+    """Disarm when submitted, position open, or strategy dropped the stop intent."""
     post_cycle_state = getattr(result, "post_cycle_state", None)
     if post_cycle_state is None:
         return False
@@ -453,7 +453,7 @@ def _should_remove_from_armed(result: Any) -> bool:
 
     pending = getattr(post_cycle_state, "pending_order", None)
     if pending is None:
-        return False
+        return True
 
     if getattr(pending, "order_type", None) not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
         return True
@@ -462,24 +462,13 @@ def _should_remove_from_armed(result: Any) -> bool:
 
 
 def _merge_preserving_stop_pending(previous: AgentState, updated: AgentState) -> AgentState:
+    """No-op identity merge.
+
+    Broker-less virtual stops are preserved inside ``build_agent_state_from_propr_data``.
+    Restoring a stop after the strategy cleared ``pending_order`` would override intentional
+    cancels (trend invalid / countertrend expiry) — that must not happen.
     """
-    If a poll tick did not submit but the updated state drops the stop-pending intent,
-    keep the previous stop-pending order so the market remains armed until it triggers
-    or expires.
-    """
-    prev_pending = previous.pending_order
-    if (
-        prev_pending is not None
-        and prev_pending.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}
-        and updated.pending_order is None
-        and not updated.pending_order_id
-        and updated.active_trade is None
-    ):
-        updated.pending_order = prev_pending
-        if previous.pending_entry_signal_bar_ts and not updated.pending_entry_signal_bar_ts:
-            updated.pending_entry_signal_bar_ts = previous.pending_entry_signal_bar_ts
-        if previous.last_signal_type and not updated.last_signal_type:
-            updated.last_signal_type = previous.last_signal_type
+    del previous  # retained for call-site compatibility
     return updated
 
 
@@ -636,12 +625,407 @@ def poll_armed_markets(snapshot: ArmedMarketsSnapshot, *, now_utc: datetime) -> 
     return new_snapshot
 
 
+def _hyperliquid_interval() -> str:
+    try:
+        return load_hyperliquid_config_from_env().interval
+    except Exception:
+        return (os.getenv("HYPERLIQUID_INTERVAL") or "1h").strip() or "1h"
+
+
+def _apply_touch_outcome_to_state(
+    *,
+    symbol: str,
+    state: AgentState,
+    outcome: Any,
+    journal_path: str | None,
+    environment: str | None,
+    executed_at: str,
+    selected_signal_type: str | None,
+) -> AgentState:
+    if outcome.submitted:
+        updated = state.model_copy(
+            update={
+                "pending_order_id": outcome.pending_order_id,
+            }
+        )
+        save_agent_state(symbol, updated)
+        _append_order_protocol_entry(
+            journal_path=journal_path,
+            symbol=symbol,
+            environment=environment,
+            status="trigger_submitted",
+            executed_at=executed_at,
+            signal_lifecycle_id=outcome.signal_lifecycle_id or state.signal_lifecycle_id,
+            order=outcome.order or state.pending_order,
+            notes=f"virtual stop touched; submitted market bracket ({outcome.decision_detail or 'triggered'})",
+            source_signal_type=selected_signal_type or state.last_signal_type,
+            external_order_id=outcome.pending_order_id,
+        )
+        return updated
+    if outcome.disarmed:
+        updated = state.model_copy(update={"pending_order": None, "pending_order_id": None})
+        save_agent_state(symbol, updated)
+        if outcome.skipped_reason:
+            _append_order_protocol_entry(
+                journal_path=journal_path,
+                symbol=symbol,
+                environment=environment,
+                status="trigger_skipped",
+                executed_at=executed_at,
+                signal_lifecycle_id=outcome.signal_lifecycle_id or state.signal_lifecycle_id,
+                order=outcome.order or state.pending_order,
+                notes=f"virtual stop disarmed: {outcome.skipped_reason}",
+                source_signal_type=selected_signal_type or state.last_signal_type,
+                external_order_id=None,
+            )
+        return updated
+    return state
+
+
+def catch_up_then_revalidate_armed_markets(
+    snapshot: ArmedMarketsSnapshot,
+    *,
+    now_utc: datetime,
+) -> ArmedMarketsSnapshot:
+    """At a strategy bar boundary: catch-up on the frozen entry, then strategy refresh/cancel."""
+    if not snapshot.markets:
+        return snapshot
+
+    propr_config = load_propr_config_from_env()
+    data_source_settings = load_data_source_settings_from_env()
+    scan_settings = load_multi_market_scan_settings_from_env()
+    client = ProprClient(propr_config)
+    order_service = ProprOrderService(client)
+    symbol_service = HyperliquidSymbolService()
+    registry = AssetRegistry()
+    ctx = build_scan_context(
+        environment=propr_config.environment,
+        data_source_settings=data_source_settings,
+        scan_settings=scan_settings,
+        propr_client=client,
+        order_service=order_service,
+        symbol_service=symbol_service,
+        registry=registry,
+    )
+
+    challenge = get_active_challenge_context(
+        client,
+        attempt_id=scan_settings.challenge_attempt_id,
+        challenge_id=scan_settings.challenge_id,
+    )
+    account_id = challenge.account_id if challenge is not None else ""
+    account_balance = 10000.0
+    if challenge is not None and challenge.account_balance is not None:
+        account_balance = float(challenge.account_balance.margin_balance)
+
+    kept: list[ArmedMarketEntry] = []
+    any_submitted = False
+    for entry in snapshot.markets:
+        if _shutdown_requested:
+            kept.append(entry)
+            continue
+        try:
+            previous_state = load_agent_state(entry.symbol) or AgentState()
+            data_batch, strategy_config, live_buy_spread = build_data_batch_and_config(
+                data_source="live",
+                golden_scenario=None,
+                hyperliquid_base_config=ctx.hyperliquid_base_config,
+                coin=entry.coin,
+                require_for_execution=True,
+            )
+            candles = list(getattr(data_batch, "candles", []) or [])
+            if len(candles) < 2:
+                kept.append(entry)
+                continue
+
+            # Closed bar for catch-up = previous fully closed candle (candles[-2] when [-1] is forming).
+            closed_candle = candles[-2]
+            symbol_spec = None
+            try:
+                symbol_spec = symbol_service.get_symbol_spec(entry.symbol)
+            except Exception:
+                symbol_spec = None
+
+            if account_id and previous_state.pending_order is not None:
+                catch_up = try_submit_on_candle_touch(
+                    client=client,
+                    order_service=order_service,
+                    account_id=account_id,
+                    symbol=entry.symbol,
+                    state=previous_state,
+                    candle=closed_candle,
+                    account_balance=account_balance,
+                    desired_leverage=scan_settings.leverage,
+                    symbol_spec=symbol_spec,
+                    buy_spread=float(live_buy_spread or strategy_config.buy_spread),
+                )
+                previous_state = _apply_touch_outcome_to_state(
+                    symbol=entry.symbol,
+                    state=previous_state,
+                    outcome=catch_up,
+                    journal_path=scan_settings.journal_path,
+                    environment=propr_config.environment,
+                    executed_at=now_utc.isoformat(),
+                    selected_signal_type=getattr(entry, "selected_signal_type", None),
+                )
+                if catch_up.submitted:
+                    any_submitted = True
+                    continue
+                if catch_up.disarmed:
+                    continue
+
+            # Strategy refresh / CT expiry — only after catch-up on the frozen level.
+            result = run_app_cycle(
+                client=client,
+                order_service=order_service,
+                symbol=entry.symbol,
+                candles=candles,
+                config=strategy_config,
+                account_balance=data_batch.account_balance or account_balance,
+                previous_state=previous_state,
+                require_healthy_core=scan_settings.require_healthy_core,
+                allow_execution=True,
+                desired_leverage=scan_settings.leverage,
+                symbol_spec=symbol_spec,
+                data_source="live",
+                journal_path=scan_settings.journal_path,
+                executed_at=now_utc.isoformat(),
+                challenge_id=scan_settings.challenge_id,
+                challenge_attempt_id=scan_settings.challenge_attempt_id,
+                scan_effective_submit_allowed=True,
+                scan_cycle_phase="bar_boundary",
+            )
+            post_cycle_state = getattr(result, "post_cycle_state", None)
+            if post_cycle_state is not None:
+                try:
+                    updated_state = AgentState.model_validate(post_cycle_state)
+                    save_agent_state(entry.symbol, updated_state)
+                except Exception:
+                    updated_state = previous_state
+            else:
+                updated_state = previous_state
+
+            if getattr(result, "submitted_order", False):
+                any_submitted = True
+                continue
+            if _should_remove_from_armed(result):
+                continue
+            pending = getattr(updated_state, "pending_order", None)
+            if pending is None or pending.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+                continue
+            kept.append(entry)
+        except Exception as exc:
+            print(
+                "Bar-boundary revalidate skipped (kept armed): "
+                f"symbol={entry.symbol} error={exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            kept.append(entry)
+
+    save_armed_markets(scan_ts=snapshot.scan_ts or now_utc.isoformat(), ttl_hours=snapshot.ttl_hours, markets=kept)
+    if any_submitted:
+        journal_path = _resolve_operator_journal_path()
+        if journal_path:
+            try:
+                _refresh_panel_journal_table(journal_path=journal_path)
+            except Exception as exc:
+                print(f"Journal table refresh failed (non-fatal): {exc}")
+    _refresh_panel_live_status(force=True)
+    return ArmedMarketsSnapshot(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
+
+
+def _process_trade_tick(
+    *,
+    tick: HyperliquidTradeTick,
+    snapshot: ArmedMarketsSnapshot,
+    coin_to_entry: dict[str, ArmedMarketEntry],
+    client: ProprClient,
+    order_service: ProprOrderService,
+    account_id: str,
+    account_balance: float,
+    scan_settings: Any,
+    propr_config: Any,
+    symbol_service: HyperliquidSymbolService,
+    hyperliquid_base_config: Any,
+) -> ArmedMarketsSnapshot:
+    entry = coin_to_entry.get(tick.coin)
+    if entry is None:
+        return snapshot
+    state = load_agent_state(entry.symbol) or AgentState()
+    symbol_spec = None
+    try:
+        symbol_spec = symbol_service.get_symbol_spec(entry.symbol)
+    except Exception:
+        symbol_spec = None
+    buy_spread = 0.0
+    try:
+        _batch, strategy_config, live_buy_spread = build_data_batch_and_config(
+            data_source="live",
+            golden_scenario=None,
+            hyperliquid_base_config=hyperliquid_base_config,
+            coin=entry.coin,
+            require_for_execution=False,
+        )
+        buy_spread = float(live_buy_spread or strategy_config.buy_spread)
+    except Exception:
+        buy_spread = 0.0
+
+    outcome = try_submit_on_trade_print(
+        client=client,
+        order_service=order_service,
+        account_id=account_id,
+        symbol=entry.symbol,
+        state=state,
+        trade_price=tick.price,
+        account_balance=account_balance,
+        desired_leverage=scan_settings.leverage,
+        symbol_spec=symbol_spec,
+        buy_spread=buy_spread,
+    )
+    if not outcome.submitted and not outcome.disarmed:
+        return snapshot
+
+    _apply_touch_outcome_to_state(
+        symbol=entry.symbol,
+        state=state,
+        outcome=outcome,
+        journal_path=scan_settings.journal_path,
+        environment=propr_config.environment,
+        executed_at=datetime.now(timezone.utc).isoformat(),
+        selected_signal_type=getattr(entry, "selected_signal_type", None),
+    )
+    kept = [m for m in snapshot.markets if m.symbol != entry.symbol]
+    save_armed_markets(
+        scan_ts=snapshot.scan_ts or datetime.now(timezone.utc).isoformat(),
+        ttl_hours=snapshot.ttl_hours,
+        markets=kept,
+    )
+    if outcome.submitted:
+        journal_path = _resolve_operator_journal_path()
+        if journal_path:
+            try:
+                _refresh_panel_journal_table(journal_path=journal_path)
+            except Exception:
+                pass
+        print(
+            f"WS trigger: symbol={entry.symbol} coin={tick.coin} px={tick.price} submitted=true"
+        )
+    return ArmedMarketsSnapshot(scan_ts=snapshot.scan_ts, ttl_hours=snapshot.ttl_hours, markets=kept)
+
+
+def run_ws_watch_loop(
+    *,
+    snapshot: ArmedMarketsSnapshot,
+    last_scan_date: date | None,
+    schedule_time: str,
+) -> tuple[ArmedMarketsSnapshot, date | None]:
+    """Event-driven watch: HL trades + bar-boundary revalidate + daily universe scan."""
+    trade_queue: Queue[HyperliquidTradeTick] = Queue()
+    watcher = HyperliquidTradesWatcher(
+        on_trade=lambda tick: trade_queue.put(tick),
+    )
+    watcher.set_armed_coins({m.coin for m in snapshot.markets})
+    watcher.start()
+
+    interval = _hyperliquid_interval()
+    last_bar_open = floor_bar_open_utc(datetime.now(timezone.utc), interval)
+    propr_config = load_propr_config_from_env()
+    data_source_settings = load_data_source_settings_from_env()
+    scan_settings = load_multi_market_scan_settings_from_env()
+    client = ProprClient(propr_config)
+    order_service = ProprOrderService(client)
+    symbol_service = HyperliquidSymbolService()
+    hyperliquid_base_config = load_hyperliquid_config_from_env()
+
+    try:
+        while not _shutdown_requested:
+            now_utc = datetime.now(timezone.utc)
+            next_scan_dt = _next_daily_scan_dt(now_utc, schedule_time, last_scan_date)
+            _write_heartbeat(
+                runner_state="daemon_ws_watching",
+                armed_count=len(snapshot.markets),
+                last_scan_at=snapshot.scan_ts,
+                next_scheduled_scan_at=next_scan_dt.isoformat(),
+            )
+
+            if should_run_daily_scan(now_utc, schedule_time, last_scan_date):
+                snapshot = run_full_scan_cycle(now_utc=now_utc)
+                last_scan_date = now_utc.date()
+                watcher.set_armed_coins({m.coin for m in snapshot.markets})
+                last_bar_open = floor_bar_open_utc(now_utc, interval)
+                continue
+
+            current_bar_open = floor_bar_open_utc(now_utc, interval)
+            if current_bar_open > last_bar_open and snapshot.markets:
+                print(
+                    f"Bar boundary: interval={interval} open={current_bar_open.isoformat()} "
+                    f"armed={len(snapshot.markets)}"
+                )
+                snapshot = catch_up_then_revalidate_armed_markets(snapshot, now_utc=now_utc)
+                watcher.set_armed_coins({m.coin for m in snapshot.markets})
+                last_bar_open = current_bar_open
+                continue
+
+            if not snapshot.markets:
+                remaining = max(0.0, (next_scan_dt - now_utc).total_seconds())
+                sleep(min(5.0, remaining if remaining > 0 else 5.0))
+                _refresh_panel_live_status(min_interval_s=55.0, force=False)
+                continue
+
+            if not watcher.is_connected:
+                # Fallback: candle OHLC catch-up while WS is down (does not use mid alone).
+                snapshot = poll_armed_markets(snapshot, now_utc=now_utc)
+                watcher.set_armed_coins({m.coin for m in snapshot.markets})
+                sleep(1.0)
+                continue
+
+            challenge = get_active_challenge_context(
+                client,
+                attempt_id=scan_settings.challenge_attempt_id,
+                challenge_id=scan_settings.challenge_id,
+            )
+            if challenge is None:
+                sleep(1.0)
+                continue
+            account_balance = 10000.0
+            if challenge.account_balance is not None:
+                account_balance = float(challenge.account_balance.margin_balance)
+
+            coin_to_entry = {m.coin: m for m in snapshot.markets}
+            try:
+                tick = trade_queue.get(timeout=1.0)
+            except Empty:
+                _refresh_panel_live_status(min_interval_s=55.0, force=False)
+                continue
+
+            snapshot = _process_trade_tick(
+                tick=tick,
+                snapshot=snapshot,
+                coin_to_entry=coin_to_entry,
+                client=client,
+                order_service=order_service,
+                account_id=challenge.account_id,
+                account_balance=account_balance,
+                scan_settings=scan_settings,
+                propr_config=propr_config,
+                symbol_service=symbol_service,
+                hyperliquid_base_config=hyperliquid_base_config,
+            )
+            watcher.set_armed_coins({m.coin for m in snapshot.markets})
+    finally:
+        watcher.stop()
+
+    return snapshot, last_scan_date
+
+
 def main() -> None:
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
 
     poll_interval = _effective_poll_interval_seconds()
     schedule_time = _schedule_time_hhmm()
+    trigger_mode = trend_stop_trigger_mode()
 
     now_utc = datetime.now(timezone.utc)
     snapshot = _load_armed_snapshot()
@@ -651,7 +1035,29 @@ def main() -> None:
         snapshot = run_full_scan_cycle(now_utc=now_utc)
         last_scan_date = now_utc.date()
 
-    print(f"Trigger polling daemon started. poll_interval={poll_interval}s schedule_time={schedule_time} armed={len(snapshot.markets)}")
+    print(
+        "Trigger polling daemon started. "
+        f"mode={trigger_mode} poll_interval={poll_interval}s schedule_time={schedule_time} "
+        f"armed={len(snapshot.markets)}"
+    )
+
+    if trigger_mode == "ws":
+        snapshot, last_scan_date = run_ws_watch_loop(
+            snapshot=snapshot,
+            last_scan_date=last_scan_date,
+            schedule_time=schedule_time,
+        )
+        _write_heartbeat(
+            runner_state="stopped",
+            armed_count=len(snapshot.markets),
+            last_scan_at=snapshot.scan_ts,
+            next_scheduled_scan_at=None,
+        )
+        print("Trigger polling daemon stopped.")
+        return
+
+    interval = _hyperliquid_interval()
+    last_bar_open = floor_bar_open_utc(datetime.now(timezone.utc), interval)
 
     while not _shutdown_requested:
         now_utc = datetime.now(timezone.utc)
@@ -673,6 +1079,17 @@ def main() -> None:
             )
             snapshot = run_full_scan_cycle(now_utc=now_utc)
             last_scan_date = now_utc.date()
+            last_bar_open = floor_bar_open_utc(now_utc, interval)
+
+        current_bar_open = floor_bar_open_utc(now_utc, interval)
+        if current_bar_open > last_bar_open and snapshot.markets:
+            print(
+                f"Bar boundary: interval={interval} open={current_bar_open.isoformat()} "
+                f"armed={len(snapshot.markets)}"
+            )
+            snapshot = catch_up_then_revalidate_armed_markets(snapshot, now_utc=now_utc)
+            last_bar_open = current_bar_open
+            continue
 
         if snapshot.markets:
             print(f"Polling tick: armed={len(snapshot.markets)}")
@@ -680,7 +1097,6 @@ def main() -> None:
             sleep(poll_interval)
             continue
 
-        # No armed markets: go idle until next scheduled scan time.
         seconds_to_scan = max(0.0, (next_scan_dt - now_utc).total_seconds())
         print(f"Polling idle: armed=0; sleeping_until_scan_s={int(seconds_to_scan)}")
         _write_heartbeat(
@@ -689,7 +1105,6 @@ def main() -> None:
             last_scan_at=snapshot.scan_ts,
             next_scheduled_scan_at=next_scheduled_scan_at,
         )
-        # Sleep in chunks so SIGTERM is handled quickly; refresh live_status periodically while idle.
         remaining = seconds_to_scan
         while remaining > 0 and not _shutdown_requested:
             chunk = min(60.0, remaining)

@@ -6,10 +6,10 @@ Dieses Add-on ist der einzige Runtime-Wrapper fuer den Trading Agent auf Home As
 Home Assistant uebernimmt UI und Scheduling.
 
 - **Default:** Das Add-on fuehrt genau **einen** Lauf aus und beendet sich danach wieder (one-shot).
-- **Trigger-Polling (optional, `mode=scharf`):** Wenn `trigger_polling_enabled=true` in der Operator-Konfiguration aktiv ist, startet das Add-on einen **Long-Running Daemon**:
-  - taeglich um `schedule_time` (Default `07:00` UTC) ein Vollscan
-  - danach alle 60s nur die „armed“ Maerkte pollen, deren `pending_order` ein Stop-Intent (`BUY_STOP`/`SELL_STOP`) ist
-  - bei Trigger-Touch wird lokal ein Market-Bracket-Entry submitted (siehe unten)
+- **Trigger-Polling (optional, `mode=scharf`):** Wenn `trigger_polling_enabled=true` in der Operator-Konfiguration aktiv ist, startet das Add-on einen **Long-Running Daemon** (`scripts/trigger_polling_daemon.py`):
+  - taeglich um `schedule_time` (Default `07:00` UTC) ein Vollscan (Universum / neue Armed-Liste)
+  - Virtual-Stop-Watch (regelbasiert, kein LLM): `TREND_STOP_TRIGGER_MODE=last_candle` (Default) pollt armed Maerkte per OHLC; `ws` nutzt Hyperliquid-**Trade-Prints** plus Kerzengrenzen-Catch-up/Refresh (bei WS-Ausfall Fallback auf OHLC-Poll)
+  - bei Trigger-Touch: Market-Bracket ueber `app/armed_stop_submit.execute_armed_stop_market_bracket`; Gap-Guard `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`, `OFF` deaktiviert)
 
 ## Architektur
 
@@ -112,12 +112,15 @@ Quelle: https://www.home-assistant.io/docs/automation/trigger/
 
 ### Trigger-Polling (Long-Running, scharf-only)
 
-Wenn `trigger_polling_enabled=true` und `mode=scharf`, bleibt das Add-on **dauerhaft** aktiv.
+Wenn `trigger_polling_enabled=true` und `mode=scharf`, bleibt das Add-on **dauerhaft** aktiv (`run.sh` → `scripts/trigger_polling_daemon.py`). Propr bekommt **keine** resting Stop-Entries; Intents bleiben lokal in `agent_state_<symbol>.json` und werden beim State-Sync erhalten, bis die Strategie sie loescht.
 
-- **Scan:** taeglich um `schedule_time` (Helper im Panel), entspricht `OPERATOR_SCHEDULE_TIME`.
-- **Polling:** alle 60 Sekunden (`RUNNER_INTERVAL_SECONDS`, Default 60) nur die „armed“ Stop-Intents.
-- **Armed-Definition:** Ein Markt wird „armed“, wenn nach dem Dry-Run ein `pending_order` existiert und dessen `order_type` in `{BUY_STOP, SELL_STOP}` ist — egal ob Trend oder Gegentrend.
-- **Ausfuehrung bei Touch:** `app/trading_app._phase_pending_trigger` submitted beim Touch des Trigger-Preises einen **Market-Bracket** (`market` + `stop_market` + `take_profit_limit`). Das umgeht Propr Error **13056** (Stop-Entry nicht erlaubt).
+- **Scan:** taeglich um `schedule_time` (Helper im Panel), entspricht `OPERATOR_SCHEDULE_TIME` (Universum / Armed-Liste neu).
+- **Armed-Definition:** Nach dem Dry-Run existiert ein `pending_order` mit `order_type ∈ {BUY_STOP, SELL_STOP}` (Trend oder Gegentrend).
+- **Watch-Modus** (`TREND_STOP_TRIGGER_MODE`, Prozess-Env; Default `last_candle` — derzeit **keine** Add-on-UI-Option):
+  - `last_candle`: ~60s OHLC-Poll (`run_app_cycle` → `_phase_pending_trigger`) plus Kerzengrenzen-Catch-up auf dem eingefrorenen Entry, danach Strategy-Refresh/Cancel.
+  - `ws`: Hyperliquid `trades` WebSocket (Last Print ≥/≤ Entry) plus dieselbe Kerzengrenzen-Logik; bei WS-Ausfall Fallback auf OHLC-Poll.
+  - `disabled`: kein Auto-Submit.
+- **Ausfuehrung bei Touch:** immer `app/armed_stop_submit.execute_armed_stop_market_bracket` → Market-Bracket (`market` + `stop_market` + `take_profit_limit`), umgeht Propr **13056**. Optionaler Gap-Guard: `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`; `OFF`/`DISABLED`/`NONE`/`NO` schaltet ab) — zu weiter Overshoot → Skip + Disarm.
 - **Stop:** Home Assistant stoppt das Add-on (SIGTERM). Der Daemon beendet sich sauber und schreibt weiterhin `runtime_status_<env>.json` Heartbeats.
 
 ## HA Helper Sync (Scripts + Automation)

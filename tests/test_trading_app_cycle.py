@@ -100,11 +100,11 @@ def test_submits_new_order_when_no_synced_pending_order_exists_and_post_cycle_st
 
 
 def test_reconciles_pending_order_id_when_equivalent_broker_pending_exists(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_execution import FakeProprOrderService, _make_external_pending_entry_order
+    from tests.test_execution import FakeProprOrderService, _make_external_pending_limit_entry_order
 
     order = make_order()
     service = FakeProprOrderService(
-        orders_payload={"data": [_make_external_pending_entry_order(symbol="EURUSD")]},
+        orders_payload={"data": [_make_external_pending_limit_entry_order(symbol="EURUSD")]},
     )
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))

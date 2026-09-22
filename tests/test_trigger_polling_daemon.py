@@ -111,8 +111,8 @@ def test_poll_armed_markets_removes_after_submit(monkeypatch: pytest.MonkeyPatch
     assert out.markets == []
 
 
-def test_poll_armed_markets_keeps_armed_when_state_temporarily_drops_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Monkeypatch environment loader / clients to avoid real network calls.
+def test_poll_armed_markets_disarms_when_strategy_clears_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strategy cancel must stick — do not resurrect a cleared virtual stop via merge."""
     import scripts.trigger_polling_daemon as m
 
     monkeypatch.setattr(m, "load_propr_config_from_env", lambda: SimpleNamespace(environment="beta"))
@@ -146,7 +146,6 @@ def test_poll_armed_markets_keeps_armed_when_state_temporarily_drops_pending(mon
         lambda **_k: (SimpleNamespace(candles=[], account_balance=10000.0), SimpleNamespace(), 0.0),
     )
 
-    # previous_state has stop-pending; run_app_cycle returns a state that drops pending_order (submitted=false).
     prev_state = AgentState(
         pending_order=Order(
             order_type=OrderType.BUY_STOP,
@@ -186,9 +185,8 @@ def test_poll_armed_markets_keeps_armed_when_state_temporarily_drops_pending(mon
     )
 
     out = poll_armed_markets(snapshot, now_utc=datetime(2026, 5, 5, 8, 0, tzinfo=timezone.utc))
-    assert [m.symbol for m in out.markets] == ["NEAR"]
-    assert saved["NEAR"].pending_order is not None
-    assert saved["NEAR"].pending_order.order_type == OrderType.BUY_STOP
+    assert out.markets == []
+    assert saved["NEAR"].pending_order is None
 
 
 def test_append_order_protocol_entry_writes_order_row(monkeypatch: pytest.MonkeyPatch) -> None:

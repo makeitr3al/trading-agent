@@ -24,6 +24,7 @@ from tests.fixtures.trading_app_fixtures import (
     make_candles,
     make_challenge_context,
     make_order,
+    make_stop_order,
     make_strategy_result,
     make_trade,
 )
@@ -59,9 +60,9 @@ def test_blocks_new_entry_when_three_open_order_trade_slots_already_exist(monkey
     assert result.skipped_reason == "max open orders/trades reached (3/3)"
 
 
-def test_stop_entry_is_blocked_pre_submit_with_clear_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stop entries are not submitable on Propr (entry order = market/limit only)."""
-    order = make_order()
+def test_stop_entry_is_not_submitted_via_pending_order_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Virtual stops skip the resting pending-order path; trigger mode disabled → no submit."""
+    order = make_stop_order()
 
     monkeypatch.setenv("TREND_STOP_TRIGGER_MODE", "disabled")
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))
@@ -69,10 +70,11 @@ def test_stop_entry_is_blocked_pre_submit_with_clear_reason(monkeypatch: pytest.
     monkeypatch.setattr("app.trading_app.sync_agent_state_from_propr", lambda client, account_id, previous_state: AgentState())
     monkeypatch.setattr("app.trading_app.run_agent_cycle", lambda candles, config, account_balance, state: (make_strategy_result(order), AgentState(pending_order=order)))
     monkeypatch.setattr("app.trading_app.evaluate_asset_execution_guard", lambda client, account_id, symbol, desired_leverage: AssetGuardResult(allow_execution=True, asset="BTC", desired_leverage=desired_leverage, max_leverage=5))
-    monkeypatch.setattr(
-        "app.trading_app.submit_agent_order_if_allowed",
-        lambda *args, **kwargs: SubmitAgentOrderResult(None, "submit blocked: Propr API has no stop entries (limit only)", None),
-    )
+
+    def _must_not_submit(*_args, **_kwargs):
+        raise AssertionError("stop entries must not go through submit_agent_order_if_allowed")
+
+    monkeypatch.setattr("app.trading_app.submit_agent_order_if_allowed", _must_not_submit)
 
     result = run_app_cycle(
         client=FakeClient(environment="beta"),
@@ -86,11 +88,12 @@ def test_stop_entry_is_blocked_pre_submit_with_clear_reason(monkeypatch: pytest.
 
     assert result.submitted_order is False
     assert result.post_cycle_state is not None
-    assert result.skipped_reason == "submit blocked: Propr API has no stop entries (limit only)"
     assert result.post_cycle_state.pending_order_id is None
+    assert result.post_cycle_state.pending_order is not None
+    assert result.post_cycle_state.pending_order.order_type == OrderType.BUY_STOP
 
 
-def test_prod_does_not_block_standalone_stop_entry_before_asset_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prod_does_not_block_pending_entry_before_asset_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     order = make_order()
 
     monkeypatch.setattr("app.trading_app.fetch_and_check_core_service_health", lambda client: HealthGuardResult(allow_trading=True, core_status="OK"))

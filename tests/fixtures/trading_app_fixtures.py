@@ -60,6 +60,19 @@ def make_challenge_context(
 
 
 def make_order() -> Order:
+    """Default resting entry used by ``run_app_cycle`` pending-submit tests (LIMIT)."""
+    return Order(
+        order_type=OrderType.BUY_LIMIT,
+        entry=110.0,
+        stop_loss=100.0,
+        take_profit=130.0,
+        position_size=10.0,
+        signal_source="countertrend_long",
+    )
+
+
+def make_stop_order() -> Order:
+    """Virtual stop entry used by trigger-path tests."""
     return Order(
         order_type=OrderType.BUY_STOP,
         entry=110.0,

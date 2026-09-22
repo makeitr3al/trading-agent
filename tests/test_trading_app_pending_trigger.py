@@ -16,6 +16,7 @@ from tests.fixtures.trading_app_fixtures import (
     FakeOrderService,
     make_challenge_context,
     make_order,
+    make_stop_order,
     make_strategy_result,
 )
 
@@ -33,7 +34,7 @@ def _touching_candle(entry: float) -> list[Candle]:
 
 
 def test_trend_stop_trigger_submits_market_bracket_when_touched(monkeypatch: pytest.MonkeyPatch) -> None:
-    order = make_order()
+    order = make_stop_order()
     assert order.order_type == OrderType.BUY_STOP
 
     captured: dict[str, object] = {}
@@ -71,7 +72,7 @@ def test_trend_stop_trigger_submits_market_bracket_when_touched(monkeypatch: pyt
 
 
 def test_trend_stop_trigger_does_nothing_when_not_touched(monkeypatch: pytest.MonkeyPatch) -> None:
-    order = make_order()
+    order = make_stop_order()
 
     class TriggerOrderService(FakeOrderService):
         def submit_market_entry_bracket_with_exits(self, *_args, **_kwargs):
@@ -107,7 +108,7 @@ def test_trend_stop_trigger_does_nothing_when_not_touched(monkeypatch: pytest.Mo
 
 
 def test_trend_stop_trigger_skipped_when_open_broker_position(monkeypatch: pytest.MonkeyPatch) -> None:
-    order = make_order()
+    order = make_stop_order()
 
     class TriggerOrderService(FakeOrderService):
         def submit_market_entry_bracket_with_exits(self, *_args, **_kwargs):
@@ -147,7 +148,7 @@ def test_trend_stop_trigger_skipped_when_open_broker_position(monkeypatch: pytes
 
 def test_trend_stop_trigger_respects_mode_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TREND_STOP_TRIGGER_MODE", "disabled")
-    order = make_order()
+    order = make_stop_order()
 
     class TriggerOrderService(FakeOrderService):
         def submit_market_entry_bracket_with_exits(self, *_args, **_kwargs):

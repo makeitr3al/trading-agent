@@ -10,13 +10,17 @@ from app.app_cycle_helpers import (
     _count_open_order_trade_slots,
     _validate_pending_order_execution_size,
 )
+from app.armed_stop_submit import (
+    execute_armed_stop_market_bracket,
+    stable_intent_seed_for_entry_order,
+    trend_stop_trigger_mode,
+)
 from app.journal import append_journal_entries, build_journal_entries
 from app.risk_guard import RiskGuardResult, evaluate_execution_guards
 from broker.asset_guard import AssetGuardResult, evaluate_asset_execution_guard
 from broker.challenge_service import get_active_challenge_context
 from broker.execution import (
     manage_active_trade_exit_orders,
-    open_position_probe_for_symbol,
     safe_replace_pending_order,
     submit_active_trade_close_if_allowed,
     submit_agent_order_if_allowed,
@@ -35,7 +39,7 @@ from models.runner_result import StrategyRunResult
 from models.symbol_spec import SymbolSpec
 from strategy.engine import run_agent_cycle
 from strategy.state import AgentState
-from strategy.trigger_eval import is_stop_trigger_touched, mark_order_triggered
+from strategy.trigger_eval import is_stop_trigger_touched
 from strategy.strategy_runner import _signal_candles_only
 from utils.propr_response import extract_external_order_id
 
@@ -56,12 +60,16 @@ def _stable_intent_seed_for_entry_order(
     executed_at: str | None,
     order: Order,
 ) -> str | None:
-    if executed_at is None or not str(executed_at).strip():
-        return None
-    return (
-        f"{account_id}|{symbol}|{str(executed_at).strip()}|{order.order_type}|{order.entry}|"
-        f"{order.stop_loss}|{order.take_profit}|{order.position_size}|{order.signal_source}"
+    return stable_intent_seed_for_entry_order(
+        account_id=account_id,
+        symbol=symbol,
+        executed_at=executed_at,
+        order=order,
     )
+
+
+def _trend_stop_trigger_mode() -> str:
+    return trend_stop_trigger_mode()
 
 
 class AppCycleResult(BaseModel):
@@ -323,12 +331,24 @@ def _phase_strategy_execution(ctx: _CycleContext) -> AppCycleResult | None:
 
     effective_balance = ctx.resolved_balance or ctx.account_balance
 
-    ctx.strategy_result, ctx.post_cycle_state = run_agent_cycle(
-        candles=ctx.candles,
-        config=ctx.config,
-        account_balance=effective_balance,
-        state=ctx.synced_state,
-    )
+    try:
+        ctx.strategy_result, ctx.post_cycle_state = run_agent_cycle(
+            candles=ctx.candles,
+            config=ctx.config,
+            account_balance=effective_balance,
+            state=ctx.synced_state,
+            synthesize_local_fills=(ctx.data_source != "live"),
+        )
+    except TypeError as exc:
+        # Tests often monkeypatch run_agent_cycle with a 4-arg lambda.
+        if "synthesize_local_fills" not in str(exc):
+            raise
+        ctx.strategy_result, ctx.post_cycle_state = run_agent_cycle(
+            candles=ctx.candles,
+            config=ctx.config,
+            account_balance=effective_balance,
+            state=ctx.synced_state,
+        )
 
     if ctx.symbol_spec is not None and ctx.post_cycle_state.pending_order is not None:
         resized_order = _apply_symbol_specific_position_size(
@@ -461,12 +481,12 @@ def _phase_exit_orders(ctx: _CycleContext) -> AppCycleResult | None:
     return ctx.build_result()
 
 
-def _trend_stop_trigger_mode() -> str:
-    return (os.getenv("TREND_STOP_TRIGGER_MODE") or "last_candle").strip().lower()
-
-
 def _phase_pending_trigger(ctx: _CycleContext) -> AppCycleResult | None:
-    """If a locally-held stop entry gets touched, enter via a market bracket batch."""
+    """If a locally-held stop entry gets touched, enter via a market bracket batch.
+
+    Owned by ``TREND_STOP_TRIGGER_MODE=last_candle`` only. Mode ``ws`` is handled by the
+    trigger-polling daemon's Hyperliquid trades watcher; ``disabled`` skips entirely.
+    """
     if not ctx.pending_order_requested:
         return None
     if ctx.post_cycle_state is None or ctx.post_cycle_state.pending_order is None:
@@ -477,11 +497,17 @@ def _phase_pending_trigger(ctx: _CycleContext) -> AppCycleResult | None:
     order = ctx.post_cycle_state.pending_order
     if order.order_type not in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
         return None
-    if _trend_stop_trigger_mode() == "disabled":
+
+    mode = _trend_stop_trigger_mode()
+    if mode in {"disabled", "ws"}:
         return None
 
-    # If the broker already has a pending entry (or we already have its id), do not trigger-submit.
-    if ctx.synced_state.pending_order is not None:
+    # If the broker already has a resting pending entry (limit), do not trigger-submit.
+    broker_pending = ctx.synced_state.pending_order
+    if broker_pending is not None and broker_pending.order_type not in {
+        OrderType.BUY_STOP,
+        OrderType.SELL_STOP,
+    }:
         return None
     if ctx.synced_state.pending_order_id is not None and str(ctx.synced_state.pending_order_id).strip():
         return None
@@ -492,72 +518,60 @@ def _phase_pending_trigger(ctx: _CycleContext) -> AppCycleResult | None:
     if not is_stop_trigger_touched(order, last_candle):
         return None
 
-    # Mirror the safety gates used by the normal pending-order submit phase.
-    open_order_trade_slots = _count_open_order_trade_slots(ctx.synced_state)
-    new_entry_requested = ctx.synced_state.pending_order is None
-    if new_entry_requested and open_order_trade_slots >= MAX_OPEN_ORDER_TRADE_SLOTS:
-        ctx.skipped_reason = (
-            f"max open orders/trades reached ({open_order_trade_slots}/{MAX_OPEN_ORDER_TRADE_SLOTS})"
-        )
-        return ctx.build_result()
-
     account_id = ctx.challenge_context.account_id
-    if ctx.synced_state.has_open_broker_position_for_symbol:
-        ctx.skipped_reason = "open position present at broker for symbol"
-        return ctx.build_result()
-    if open_position_probe_for_symbol(ctx.order_service, account_id, ctx.symbol) > 0:
-        ctx.skipped_reason = "open position present at broker for symbol"
-        return ctx.build_result()
+    effective_balance = ctx.resolved_balance or ctx.account_balance
+    trigger_price = last_candle.high if order.order_type == OrderType.BUY_STOP else last_candle.low
 
-    ctx.asset_guard_result = evaluate_asset_execution_guard(
-        client=ctx.client,
-        account_id=account_id,
-        symbol=ctx.symbol,
-        desired_leverage=ctx.desired_leverage,
-    )
+    if ctx.asset_guard_result is None:
+        ctx.asset_guard_result = evaluate_asset_execution_guard(
+            client=ctx.client,
+            account_id=account_id,
+            symbol=ctx.symbol,
+            desired_leverage=ctx.desired_leverage,
+        )
     if not ctx.asset_guard_result.allow_execution:
         ctx.skipped_reason = ctx.asset_guard_result.reason
         return ctx.build_result()
 
-    effective_balance = ctx.resolved_balance or ctx.account_balance
-    effective_leverage = ctx.asset_guard_result.effective_leverage
-    pending_order_size_reason = _validate_pending_order_execution_size(
-        order=order,
-        account_balance=effective_balance,
-        desired_leverage=effective_leverage,
-        symbol_spec=ctx.symbol_spec,
-    )
-    if pending_order_size_reason is not None:
-        ctx.skipped_reason = pending_order_size_reason
-        return ctx.build_result()
-
-    stable_seed = _stable_intent_seed_for_entry_order(
+    submit_result = execute_armed_stop_market_bracket(
+        client=ctx.client,
+        order_service=ctx.order_service,
         account_id=account_id,
         symbol=ctx.symbol,
-        executed_at=ctx.executed_at,
         order=order,
+        synced_state=ctx.synced_state,
+        signal_lifecycle_id=ctx.post_cycle_state.signal_lifecycle_id,
+        account_balance=effective_balance,
+        desired_leverage=ctx.desired_leverage,
+        symbol_spec=ctx.symbol_spec,
+        buy_spread=float(ctx.config.buy_spread),
+        asset_guard_result=ctx.asset_guard_result,
+        trigger_price=trigger_price,
     )
 
-    submit_order = mark_order_triggered(order)
-    ctx.execution_response = ctx.order_service.submit_market_entry_bracket_with_exits(
-        account_id,
-        submit_order,
-        ctx.symbol,
-        symbol_spec=ctx.symbol_spec,
-        stable_intent_seed=stable_seed,
-        buy_spread=float(ctx.config.buy_spread),
-    )
+    if submit_result.skipped_reason is not None and not submit_result.submitted:
+        ctx.skipped_reason = submit_result.skipped_reason
+        if submit_result.decision_detail and ctx.strategy_result is not None:
+            detail = (ctx.strategy_result.decision_detail or "").strip()
+            next_detail = submit_result.decision_detail
+            if detail and next_detail not in detail:
+                next_detail = f"{detail}; {next_detail}"
+            ctx.strategy_result = ctx.strategy_result.model_copy(update={"decision_detail": next_detail})
+        return ctx.build_result()
+
+    if not submit_result.submitted:
+        return None
+
+    ctx.execution_response = submit_result.response
     ctx.submitted_order = True
     ctx.post_cycle_state = ctx.post_cycle_state.model_copy(
-        update={"pending_order_id": extract_external_order_id(ctx.execution_response)}
+        update={"pending_order_id": submit_result.pending_order_id}
     )
-
-    # Prevent the normal pending-order phase from re-processing the stop-intent this cycle.
     ctx.pending_order_requested = False
 
     if ctx.strategy_result is not None:
         detail = (ctx.strategy_result.decision_detail or "").strip()
-        next_detail = "trend_stop_triggered"
+        next_detail = submit_result.decision_detail or "trend_stop_triggered"
         if detail and next_detail not in detail:
             next_detail = f"{detail}; {next_detail}"
         ctx.strategy_result = ctx.strategy_result.model_copy(update={"decision_detail": next_detail})
@@ -569,9 +583,23 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
     if not ctx.pending_order_requested:
         return None
 
+    pending = ctx.post_cycle_state.pending_order if ctx.post_cycle_state is not None else None
+    if pending is not None and pending.order_type in {OrderType.BUY_STOP, OrderType.SELL_STOP}:
+        # Virtual stop entries are never resting on Propr; only the trigger path submits.
+        return None
+
     account_id = ctx.challenge_context.account_id
     open_order_trade_slots = _count_open_order_trade_slots(ctx.synced_state)
-    new_entry_requested = ctx.synced_state.pending_order is None
+    # Local virtual stops preserved on synced_state must not count as a broker resting entry.
+    broker_resting = (
+        ctx.synced_state.pending_order is not None
+        and ctx.synced_state.pending_order.order_type
+        not in {OrderType.BUY_STOP, OrderType.SELL_STOP}
+    ) or (
+        ctx.synced_state.pending_order_id is not None
+        and bool(str(ctx.synced_state.pending_order_id).strip())
+    )
+    new_entry_requested = not broker_resting
 
     if new_entry_requested and open_order_trade_slots >= MAX_OPEN_ORDER_TRADE_SLOTS:
         ctx.skipped_reason = (
@@ -608,7 +636,7 @@ def _phase_pending_order(ctx: _CycleContext) -> AppCycleResult | None:
         order=ctx.post_cycle_state.pending_order,
     )
 
-    if ctx.synced_state.pending_order is not None:
+    if broker_resting:
         ctx.execution_response = safe_replace_pending_order(
             order_service=ctx.order_service,
             account_id=account_id,
