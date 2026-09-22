@@ -5,11 +5,13 @@
 Dieses Add-on ist der einzige Runtime-Wrapper fuer den Trading Agent auf Home Assistant OS.
 Home Assistant uebernimmt UI und Scheduling.
 
-- **Default:** Das Add-on fuehrt genau **einen** Lauf aus und beendet sich danach wieder (one-shot).
+- **Default (ohne Polling):** Das Add-on fuehrt genau **einen** Lauf aus und beendet sich danach wieder.
 - **Trigger-Polling (optional, `mode=scharf`):** Wenn `trigger_polling_enabled=true` in der Operator-Konfiguration aktiv ist, startet das Add-on einen **Long-Running Daemon** (`scripts/trigger_polling_daemon.py`):
   - taeglich um `schedule_time` (Default `07:00` UTC) ein Vollscan (Universum / neue Armed-Liste)
   - Virtual-Stop-Watch (regelbasiert, kein LLM): `TREND_STOP_TRIGGER_MODE=last_candle` (Default) pollt armed Maerkte per OHLC; `ws` nutzt Hyperliquid-**Trade-Prints** plus Kerzengrenzen-Catch-up/Refresh (bei WS-Ausfall Fallback auf OHLC-Poll)
   - bei Trigger-Touch: Market-Bracket ueber `app/armed_stop_submit.execute_armed_stop_market_bracket`; Gap-Guard `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`, `OFF` deaktiviert)
+
+**Supervisor:** `startup: application` (ab **0.7.15**), damit Watchdog und Bring-up nach Restart funktionieren. In der Add-on-UI **Watchdog** aktivieren. Nach HA-Core-Restart stellt die Automation `trading_agent_trigger_polling_ensure_running` (siehe `home_assistant_automations_haos_addon.yaml.example`) den Daemon per `hassio.addon_start` wieder her.
 
 ## Architektur
 
@@ -36,7 +38,7 @@ Das Add-on liest und schreibt unter:
 Nach einem **neuen Add-on-Image** oder wenn Helper (z. B. Maerkte) ploetzlich wieder **YAML-`initial:`**-Werte zeigen:
 
 1. Pruefen, ob `/share/trading-agent-data/operator_config.json` noch existiert und sinnvolle Werte hat (Maerkte, `challenge_attempt_id`, Modus).
-2. **Home-Assistant-Paket/Scripts** aus dem Repo mit deiner `/config`-Installation abgleichen (insbesondere `home_assistant_package_haos_addon.yaml.example` und `home_assistant_scripts_haos_addon.yaml.example`): neue `shell_command`-Eintraege oder Script-Sequenzen werden sonst nicht uebernommen.
+2. **Home-Assistant-Paket/Scripts/Automationen** aus dem Repo mit deiner `/config`-Installation abgleichen (insbesondere `home_assistant_package_haos_addon.yaml.example`, `home_assistant_scripts_haos_addon.yaml.example`, `home_assistant_automations_haos_addon.yaml.example`): neue Automationen (`Trigger-Polling Ensure Running`, erweiterter Schedule-Guard) und `shell_command`-Eintraege werden sonst nicht uebernommen.
 3. Einmal **„Trading Agent Konfiguration laden“** (`script.trading_agent_load_current_config_haos`) ausfuehren oder HA neu starten, damit die Helper aus der Datei bzw. dem Sensor wieder befuellt werden.
 4. `challenge_attempt_id` gehoert in `operator_config.json` (und im Helper **Trading Agent Challenge Attempt ID**). Ueberfluessige Anfuehrungszeichen aus Copy-Paste werden beim Laden normalisiert; trotzdem moeglichst den **Attempt**-Wert setzen, nicht nur die Challenge-URN, wenn mehrere aktive Attempts existieren.
 5. Home Assistant **2024.8+** empfohlen: das Load-Script nutzt bei weiterhin `unknown`/`unavailable` vom `sensor.trading_agent_operator_config` einen **Fallback** (`shell_command.trading_agent_cat_operator_config_haos`), damit die Helper nicht auf den Default-Maerkten haengen bleiben.
@@ -122,6 +124,7 @@ Wenn `trigger_polling_enabled=true` und `mode=scharf`, bleibt das Add-on **dauer
   - `disabled`: kein Auto-Submit.
 - **Ausfuehrung bei Touch:** immer `app/armed_stop_submit.execute_armed_stop_market_bracket` → Market-Bracket (`market` + `stop_market` + `take_profit_limit`), umgeht Propr **13056**. Optionaler Gap-Guard: `TREND_STOP_MAX_GAP_R_RATIO` (Default `0.5`; `OFF`/`DISABLED`/`NONE`/`NO` schaltet ab) — zu weiter Overshoot → Skip + Disarm.
 - **Stop:** Home Assistant stoppt das Add-on (SIGTERM). Der Daemon beendet sich sauber und schreibt weiterhin `runtime_status_<env>.json` Heartbeats.
+- **Bring-up nach Restart:** Add-on `startup: application` + Watchdog; Automation **Trading Agent Trigger-Polling Ensure Running** (HA-Start, Delay 45s, dann `hassio.addon_start` wenn Polling aktiv und Modus scharf). Panel-Cache-Buster startet bei aktivem Polling **kein** Core-Restart mehr (sonst wuerde der Daemon nie starten).
 
 ## HA Helper Sync (Scripts + Automation)
 

@@ -38,6 +38,19 @@ if [[ ! -x "$VIRTUAL_ENV/bin/python" ]]; then
 fi
 
 mkdir -p "$DATA_PATH"
+# After HA/Core restart, /share can lag briefly; wait before resolving operator config.
+if [[ ! -f "$OPERATOR_CONFIG_PATH" ]]; then
+    for _wait_i in 1 2 3 4 5 6; do
+        if [[ -f "$OPERATOR_CONFIG_PATH" ]]; then
+            break
+        fi
+        bashio::log.warning "Waiting for operator_config.json (${_wait_i}/6)..."
+        sleep 5
+    done
+fi
+if [[ ! -f "$OPERATOR_CONFIG_PATH" ]]; then
+    bashio::log.warning "operator_config.json missing after wait; defaults may disable trigger polling"
+fi
 if [[ -f "$APP_PATH/ha_addons/trading_agent/ha_save_operator_config.py" ]]; then
     cp "$APP_PATH/ha_addons/trading_agent/ha_save_operator_config.py" "$DATA_PATH/ha_save_operator_config.py"
 fi
@@ -258,8 +271,9 @@ fi
 
 # Auto-update panel cache-buster in HA configuration.
 # panel_custom does not support hot-reload in HA — a core restart is required
-# whenever the module_url changes. This block detects a version mismatch,
-# patches configuration.yaml automatically, and triggers the restart.
+# whenever the module_url changes. This block detects a version mismatch and
+# patches configuration.yaml. When trigger polling is enabled we must NOT restart
+# Core and exit here — that would leave the long-running daemon never started.
 HA_CONFIG="/config/configuration.yaml"
 if [[ -f "$HA_CONFIG" ]] && grep -q "admin-panel\.js" "$HA_CONFIG" 2>/dev/null; then
     # Extract existing ?v= value (empty string if no ?v= present yet)
@@ -274,16 +288,21 @@ if [[ -f "$HA_CONFIG" ]] && grep -q "admin-panel\.js" "$HA_CONFIG" 2>/dev/null; 
             sed -i "s|admin-panel\.js\([\"']\)|admin-panel.js?v=${ADDON_VERSION}\1|g" "$HA_CONFIG"
             bashio::log.info "Panel cache-buster added (→ ${ADDON_VERSION})"
         fi
-        bashio::log.info "Restarting HA core to apply new panel version (panel_custom requires restart)..."
-        curl -s -X POST \
-            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-            -H "Content-Type: application/json" \
-            http://supervisor/core/restart || \
-        curl -s -X POST \
-            -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-            -H "Content-Type: application/json" \
-            http://supervisor/homeassistant/restart || true
-        exit 0
+        if [[ "${OPERATOR_TRIGGER_POLLING_ENABLED:-NO}" == "YES" ]]; then
+            bashio::log.warning \
+                "Skipping HA Core restart after panel cache-buster (trigger polling enabled). Restart Core manually when convenient so the admin panel picks up ?v=${ADDON_VERSION}."
+        else
+            bashio::log.info "Restarting HA core to apply new panel version (panel_custom requires restart)..."
+            curl -s -X POST \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                -H "Content-Type: application/json" \
+                http://supervisor/core/restart || \
+            curl -s -X POST \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                -H "Content-Type: application/json" \
+                http://supervisor/homeassistant/restart || true
+            exit 0
+        fi
     fi
 fi
 

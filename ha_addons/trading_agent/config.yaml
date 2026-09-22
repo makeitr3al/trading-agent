@@ -1,13 +1,13 @@
 name: Trading Agent
-version: "0.7.14"
+version: "0.7.15"
 slug: trading_agent
-description: One-shot Trading Agent with integrated Journal
+description: Trading Agent with optional long-running trigger-polling daemon
 url: https://github.com/makeitr3al/trading-agent
 image: ghcr.io/makeitr3al/{arch}-trading-agent-addon
 arch:
   - aarch64
   - amd64
-startup: once
+startup: application
 boot: auto
 init: false
 hassio_api: true
